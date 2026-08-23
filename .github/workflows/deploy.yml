@@ -50,9 +50,18 @@ jobs:
         run: |
           # wrangler.toml の [assets] で web/ を静的サイトとして配る。
           # Cloudflare の画面でgit連携する必要はなく、ここから直接公開する。
-          npm install -g wrangler@3
-          CLOUDFLARE_API_TOKEN="$CF_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT" \
-            wrangler deploy
+          # トークンに紛れ込んだ前後の空白・改行を落とす（コピペ時に混入しやすい）。
+          TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]')"
+          ACCOUNT="$(printf '%s' "$CF_ACCOUNT" | tr -d '[:space:]')"
+          npm install -g wrangler@4
+          CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT" \
+            npx wrangler deploy 2>&1 | tee /tmp/wr.log
+          # 発行されたURLをジョブのサマリに出す
+          url=$(grep -oE 'https://[a-z0-9.-]+workers.dev' /tmp/wr.log | head -1 || true)
+          if [ -n "$url" ]; then
+            echo "## 公開URL" >> "$GITHUB_STEP_SUMMARY"
+            echo "$url" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Pages 未設定のときの案内
         if: ${{ env.CF_TOKEN == '' }}
