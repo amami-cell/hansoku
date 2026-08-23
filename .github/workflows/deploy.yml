@@ -48,19 +48,26 @@ jobs:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          # wrangler.toml の [assets] で web/ を静的サイトとして配る。
-          # Cloudflare の画面でgit連携する必要はなく、ここから直接公開する。
-          # トークンに紛れ込んだ前後の空白・改行を落とす（コピペ時に混入しやすい）。
-          TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]')"
-          ACCOUNT="$(printf '%s' "$CF_ACCOUNT" | tr -d '[:space:]')"
+          set -o pipefail   # パイプの途中が失敗したら step も失敗させる
+          # トークンに紛れ込みやすい前後の空白・改行・引用符を落とす。
+          TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]\"'"'")"
+          ACCOUNT="$(printf '%s' "$CF_ACCOUNT" | tr -d '[:space:]\"'"'")"
           npm install -g wrangler@4
-          CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT" \
-            npx wrangler deploy 2>&1 | tee /tmp/wr.log
-          # 発行されたURLをジョブのサマリに出す
-          url=$(grep -oE 'https://[a-z0-9.-]+workers.dev' /tmp/wr.log | head -1 || true)
+          export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT"
+
+          # まず認証だけ検証する。ここで落ちればトークンの問題だと切り分けられる。
+          echo "── トークンを検証 ──"
+          if ! npx wrangler whoami 2>&1 | tee /tmp/who.log; then
+            echo "::error::Cloudflare トークンの認証に失敗しました。トークンを作り直して CLOUDFLARE_API_TOKEN に貼り直してください（引用符や余分な文字が入らないように）。"
+            exit 1
+          fi
+
+          echo "── 公開 ──"
+          npx wrangler deploy 2>&1 | tee /tmp/wr.log
+          url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/wr.log | head -1 || true)
           if [ -n "$url" ]; then
             echo "## 公開URL" >> "$GITHUB_STEP_SUMMARY"
-            echo "$url" >> "$GITHUB_STEP_SUMMARY"
+            echo "**$url**" >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Pages 未設定のときの案内
