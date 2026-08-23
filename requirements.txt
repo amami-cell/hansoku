@@ -16,5 +16,8 @@ google-auth>=2.33
 # --- Object Storage: Cloudflare R2（S3互換） ---
 boto3>=1.34
 
+# --- FW のブラウザ操作（既存パイプラインと同じバージョンに揃える）---
+playwright==1.49.1
+
 # --- 開発 ---
 pytest>=8.0

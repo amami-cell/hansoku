@@ -1,0 +1,81 @@
+name: FWから取り込む
+
+# FW（Foodist Journal）に直接ログインして、日別売上・時間帯別売上・ABC分析を取る。
+# 既存パイプライン（infomart_automation）には触らず、こちらは独立して動く。
+#
+# 画面は Angular の SPA で、セレクタが外れると何が起きたか分からなくなるため、
+# スクリーンショットと画面構造を成果物として必ず残す。
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '動作'
+        type: choice
+        options:
+          - explore
+        default: explore
+      path:
+        description: '探索するメニュー名（カンマ区切り）'
+        required: false
+        default: '販売管理'
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  fw:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Secrets の確認
+        env:
+          FW_USER: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FW_PASS: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+        run: |
+          miss=""
+          [ -z "$FW_USER" ] && miss="$miss FOODIST_JOURNAL_USER_ID"
+          [ -z "$FW_PASS" ] && miss="$miss FOODIST_JOURNAL_PASSWORD"
+          if [ -n "$miss" ]; then
+            echo "::error::未設定のSecrets:$miss"
+            exit 1
+          fi
+
+      - name: 画面構造を調べる
+        env:
+          FOODIST_JOURNAL_USER_ID: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FOODIST_JOURNAL_PASSWORD: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+        run: |
+          args=""
+          for p in $(echo "${{ inputs.path }}" | tr ',' ' '); do
+            args="$args --path $p"
+          done
+          # 既存パイプラインと同じく headless=False + xvfb で動かす
+          {
+            echo '## FW 画面構造'
+            echo ''
+            echo '```'
+            xvfb-run -a python -m hansoku.cli fw-explore $args --artifacts fw-artifacts
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: 記録をアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fw-artifacts
+          path: fw-artifacts/
+          retention-days: 7

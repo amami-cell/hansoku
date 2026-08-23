@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import date, datetime
+from pathlib import Path
 
 from .analytics import RATIO_METRICS, ratio, totals
 from .db import AggregateQuery, get_appdb, get_warehouse
@@ -203,6 +204,12 @@ def cmd_sheet_tabs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fw_explore(args: argparse.Namespace) -> int:
+    from .ingest.fw_explore import explore
+
+    return explore(args.path or [], Path(args.artifacts))
+
+
 def cmd_grant_admin(args: argparse.Namespace) -> int:
     with get_appdb() as db:
         count = db.grant_admin(args.email)
@@ -275,6 +282,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tabs.add_argument("--sample-rows", type=int, default=5, help="表示する行数")
     tabs.set_defaults(func=cmd_sheet_tabs, sample=None)
+
+    explore = sub.add_parser(
+        "fw-explore", help="FWの画面構造を調べる（セレクタを書く前の下調べ用）"
+    )
+    explore.add_argument(
+        "--path",
+        action="append",
+        help="順にクリックするメニュー名（複数指定可）",
+    )
+    explore.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
+    explore.set_defaults(func=cmd_fw_explore)
 
     grant = sub.add_parser("grant-admin", help="admin 権限を付与する")
     grant.add_argument("email")
