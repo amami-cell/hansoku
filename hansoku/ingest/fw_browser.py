@@ -165,41 +165,65 @@ class FWSession:
         time.sleep(1)
 
     # ── 遷移 ──────────────────────────────────────────────────────────────
-    def click_text(self, text: str, *, wait: float = 2.0) -> bool:
+    def click_text(self, text: str, *, wait: float = 2.5) -> bool:
         """
         画面上の文字でクリックする。
 
-        Angular のオーバーレイに阻まれることがあるため、
-        通常クリック → force クリック → JS の順に試す。
+        :has-text() は部分一致なので、入れ子のメニューでは親にもマッチする。
+        たとえば「販売管理」の li は子の「店舗業務」を含むため、
+        li:has-text("店舗業務") が親を掴んでしまい、メニューを開き直すだけになる。
+        そのため完全一致（:text-is）を先に試し、駄目なときだけ部分一致へ落とす。
+
+        Angular のオーバーレイに阻まれることもあるので、
+        通常クリック → force クリック → JS の順に粘る。
         """
-        for attempt in ("normal", "force"):
-            try:
-                loc = self.page.locator(f'a:has-text("{text}"), button:has-text("{text}"), '
-                                        f'li:has-text("{text}"), div[role="button"]:has-text("{text}")')
-                if loc.count() > 0:
-                    loc.first.click(force=(attempt == "force"), timeout=5000)
-                    time.sleep(wait)
-                    return True
-            except Exception:
-                continue
+        exact = (
+            f'a:text-is("{text}"), button:text-is("{text}"), '
+            f'div[role="button"]:text-is("{text}")'
+        )
+        loose = (
+            f'a:has-text("{text}"), button:has-text("{text}"), '
+            f'div[role="button"]:has-text("{text}")'
+        )
+        for selector in (exact, loose):
+            for force in (False, True):
+                try:
+                    loc = self.page.locator(selector)
+                    if loc.count() > 0:
+                        loc.first.click(force=force, timeout=5000)
+                        self._settle(wait)
+                        return True
+                except Exception:
+                    continue
 
         clicked = self.page.evaluate(
             """(text) => {
             const els = Array.from(document.querySelectorAll(
                 'a, button, li, div[role="button"], div[class*="tile"], div[class*="card"]'
-            ));
-            // 文字数が近いものを優先する（親要素を掴んで別の場所を押さないため）
-            const hits = els.filter(el => el.offsetParent && (el.innerText || '').includes(text));
-            hits.sort((a, b) => (a.innerText || '').length - (b.innerText || '').length);
-            if (!hits.length) return false;
-            hits[0].dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+            )).filter(el => el.offsetParent);
+            // 完全一致を最優先。無ければ、含む要素のうち最も文字数が少ないもの
+            // （＝目的の要素に一番近いもの）を選ぶ。親を掴まないため。
+            const exact = els.find(el => (el.innerText || '').trim() === text);
+            const target = exact || els
+                .filter(el => (el.innerText || '').includes(text))
+                .sort((a, b) => (a.innerText || '').length - (b.innerText || '').length)[0];
+            if (!target) return false;
+            target.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
             return true;
         }""",
             text,
         )
         if clicked:
-            time.sleep(wait)
+            self._settle(wait)
         return bool(clicked)
+
+    def _settle(self, wait: float) -> None:
+        """クリック後、描画と通信が落ち着くのを待つ。"""
+        time.sleep(wait)
+        try:
+            self.page.wait_for_load_state("networkidle", timeout=TIMEOUT_MS)
+        except Exception:
+            pass
 
     def click_text_or_fail(self, text: str, *, wait: float = 2.0) -> None:
         if not self.click_text(text, wait=wait):
