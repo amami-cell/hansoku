@@ -14,6 +14,7 @@ on:
         type: choice
         options:
           - explore
+          - list-stores
         default: explore
       path:
         description: '探索するメニュー名（カンマ区切り）'
@@ -68,7 +69,11 @@ jobs:
             echo '## FW 画面構造'
             echo ''
             echo '```'
-            xvfb-run -a python -m hansoku.cli fw-explore $args --artifacts fw-artifacts
+            if [ "${{ inputs.mode }}" = "list-stores" ]; then
+              xvfb-run -a python -m hansoku.cli fw-stores --artifacts fw-artifacts
+            else
+              xvfb-run -a python -m hansoku.cli fw-explore $args --artifacts fw-artifacts
+            fi
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

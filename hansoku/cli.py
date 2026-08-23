@@ -210,6 +210,12 @@ def cmd_fw_explore(args: argparse.Namespace) -> int:
     return explore(args.path or [], Path(args.artifacts))
 
 
+def cmd_fw_stores(args: argparse.Namespace) -> int:
+    from .ingest.fw_explore import list_stores
+
+    return list_stores(Path(args.artifacts))
+
+
 def cmd_export_web(args: argparse.Namespace) -> int:
     from .web.export import build, write
 
@@ -308,6 +314,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     explore.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
     explore.set_defaults(func=cmd_fw_explore)
+
+    fwstores = sub.add_parser(
+        "fw-stores", help="FWの店舗選択（エリア:イニシエート）の全店を吸い出す"
+    )
+    fwstores.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
+    fwstores.set_defaults(func=cmd_fw_stores)
 
     export = sub.add_parser("export-web", help="画面が読む JSON を書き出す")
     export.add_argument("--date-from", required=True, type=_date, dest="date_from")
