@@ -84,3 +84,20 @@ jobs:
           [ -n "${{ inputs.month }}" ] && args="$args --month ${{ inputs.month }}"
           [ "${{ inputs.lenient }}" = "true" ] && args="$args --lenient"
           python -m hansoku.cli ingest-fw $args
+
+      - name: インフォマート棚卸から取り込む
+        env:
+          HANSOKU_ENV: cloud
+          BIGQUERY_PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
+          BIGQUERY_DATASET: ${{ secrets.BIGQUERY_DATASET }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          FW_SPREADSHEET_ID: ${{ secrets.FW_SPREADSHEET_ID }}
+        run: |
+          args=""
+          [ -n "${{ inputs.month }}" ] && args="$args --month ${{ inputs.month }}"
+          [ "${{ inputs.lenient }}" = "true" ] && args="$args --lenient"
+          python -m hansoku.cli ingest-infomart $args

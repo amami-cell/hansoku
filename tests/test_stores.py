@@ -1,7 +1,25 @@
 """店舗マスタと、店名→store_code の解決。"""
 import pytest
 
-from hansoku.stores import StoreMaster, UnknownStoreError
+from hansoku.stores import Store, StoreMaster, UnknownStoreError
+
+
+def _store(code: str, name: str, **overrides) -> Store:
+    """テスト用の店舗。列が増えても壊れないようキーワードで組み立てる。"""
+    fields = dict(
+        store_code=code,
+        store_name=name,
+        source_name=overrides.pop("source_name", name),
+        infomart_code="",
+        infomart_name="",
+        brand="X",
+        brand_name="X",
+        file_prefix="",
+        is_shared_facility=False,
+        active=True,
+    )
+    fields.update(overrides)
+    return Store(**fields)
 
 
 def test_全店が読み込める(master):
@@ -66,23 +84,16 @@ def test_すさび湯は7店ある(master):
 
 
 def test_store_codeの重複は読み込み時に弾く():
-    from hansoku.stores import Store
-
-    duplicated = [
-        Store("1015", "A", "A", "", "X", "X", "", False, True),
-        Store("1015", "B", "B", "", "Y", "Y", "", False, True),
-    ]
+    duplicated = [_store("1015", "A"), _store("1015", "B")]
     with pytest.raises(ValueError, match="重複"):
         StoreMaster(duplicated)
 
 
 def test_正規化後に衝突する店名は読み込み時に弾く():
     """記号や長音を落とすため、店名の付け方次第では別の店が同じキーに潰れうる。"""
-    from hansoku.stores import Store
-
     colliding = [
-        Store("1", "すさび湯 歌舞伎町", "すさび湯　歌舞伎町", "", "S", "S", "", False, True),
-        Store("2", "すさび湯歌舞伎町", "すさび湯歌舞伎町", "", "S", "S", "", False, True),
+        _store("1", "すさび湯 歌舞伎町", source_name="すさび湯　歌舞伎町"),
+        _store("2", "すさび湯歌舞伎町"),
     ]
     with pytest.raises(ValueError, match="衝突"):
         StoreMaster(colliding)

@@ -33,6 +33,11 @@ METRIC_DRINK_THEORY_COST: Final = "drink_theory_cost"
 METRIC_FOOD_BUDGET_COST: Final = "food_budget_cost"
 METRIC_DRINK_BUDGET_COST: Final = "drink_budget_cost"
 
+# インフォマートの棚卸（月次集計タブ）
+METRIC_FOOD_INVENTORY: Final = "food_inventory"
+METRIC_DRINK_INVENTORY: Final = "drink_inventory"
+METRIC_SUPPLY_INVENTORY: Final = "supply_inventory"
+
 # 取り込み口を先に用意してあるもの（時間帯別売上・ABC分析が入り次第使う）
 METRIC_COVERS: Final = "covers"
 METRIC_AVG_CHECK: Final = "avg_check"
@@ -48,6 +53,9 @@ METRICS: Final = (
     METRIC_DRINK_THEORY_COST,
     METRIC_FOOD_BUDGET_COST,
     METRIC_DRINK_BUDGET_COST,
+    METRIC_FOOD_INVENTORY,
+    METRIC_DRINK_INVENTORY,
+    METRIC_SUPPLY_INVENTORY,
     METRIC_COVERS,
     METRIC_AVG_CHECK,
     METRIC_PRODUCT_SALES,
@@ -66,6 +74,9 @@ ADDITIVE_METRICS: Final = frozenset(
         METRIC_DRINK_THEORY_COST,
         METRIC_FOOD_BUDGET_COST,
         METRIC_DRINK_BUDGET_COST,
+        METRIC_FOOD_INVENTORY,
+        METRIC_DRINK_INVENTORY,
+        METRIC_SUPPLY_INVENTORY,
         METRIC_COVERS,
         METRIC_PRODUCT_SALES,
     }

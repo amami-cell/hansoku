@@ -18,6 +18,7 @@ from datetime import date, datetime
 from .analytics import RATIO_METRICS, ratio, totals
 from .db import AggregateQuery, get_appdb, get_warehouse
 from .ingest.fw_sheet import TAB_TO_METRIC, ingest
+from .ingest.infomart_sheet import ingest as infomart_ingest
 from .ingest.sheets_client import FixtureSheetReader, GoogleSheetReader
 from .model import GRAIN_MONTH, GRAINS
 from .settings import load_settings
@@ -129,6 +130,39 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ingest_infomart(args: argparse.Namespace) -> int:
+    settings = load_settings()
+    master = StoreMaster.load(args.stores)
+
+    if args.fixture:
+        reader = FixtureSheetReader.from_file(args.fixture)
+        print(f"[source] フィクスチャ: {args.fixture}")
+    else:
+        if not settings.sources.service_account_json:
+            print("GOOGLE_SERVICE_ACCOUNT_JSON が未設定です。", file=sys.stderr)
+            return 2
+        reader = GoogleSheetReader(
+            settings.sources.fw_spreadsheet_id, settings.sources.service_account_json
+        )
+        print(f"[source] 共有シート「月次集計」タブ（読み取りのみ）")
+
+    months = set(args.month) if args.month else None
+    try:
+        with get_warehouse(settings) as warehouse:
+            report = infomart_ingest(
+                reader, master, warehouse, year_months=months, strict=not args.lenient
+            )
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        print(
+            "\n店舗マスタに無い店名は config/stores.yaml の infomart_name を確認してください。",
+            file=sys.stderr,
+        )
+        return 1
+    print(report.summary())
+    return 0 if report.ok else 1
+
+
 def cmd_sheet_tabs(args: argparse.Namespace) -> int:
     """
     取り込み元シートのタブ一覧を出す。
@@ -223,6 +257,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="束ね方（複数指定可。既定は store_code）。date を指定すると月別の推移が見られる",
     )
     agg.set_defaults(func=cmd_aggregate, group_by=None)
+
+    im = sub.add_parser(
+        "ingest-infomart", help="インフォマート棚卸（月次集計タブ）から実績を取り込む"
+    )
+    im.add_argument("--fixture", help="共有シートの代わりに読むJSON（ローカル検証用）")
+    im.add_argument("--month", action="append", help="対象年月 YYYY-MM（複数指定可）")
+    im.add_argument("--lenient", action="store_true", help="取りこぼしがあっても中断しない")
+    im.set_defaults(func=cmd_ingest_infomart)
 
     tabs = sub.add_parser("sheet-tabs", help="取り込み元シートのタブ一覧を出す（診断用）")
     tabs.add_argument("--spreadsheet", help="スプレッドシートID（既定はFW共有シート）")

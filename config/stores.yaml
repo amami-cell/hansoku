@@ -25,6 +25,7 @@ stores:
     store_name: "大衆寿司酒場すさび湯"
     source_name: "0001006_大衆寿司酒場すさび湯"
     infomart_code: "956"
+    infomart_name: "すさび湯（ＨＡＳＳＩＮ）"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
     is_shared_facility: false
@@ -33,6 +34,7 @@ stores:
     store_name: "すさび湯 歌舞伎町"
     source_name: "0001015_すさび湯 歌舞伎町"
     infomart_code: "1015"
+    infomart_name: "すさび湯　歌舞伎町（ＨＡＳＳＩＮ）"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
     is_shared_facility: false
@@ -41,6 +43,7 @@ stores:
     store_name: "ひよこ飯店"
     source_name: "0001069_ひよこ飯店"
     infomart_code: "926"
+    infomart_name: "ひよこ飯店（ＨＡＳＳＩＮ）"
     brand: "HIYOKOHANTEN"
     brand_name: "ひよこ飯店"
     is_shared_facility: false
@@ -49,6 +52,7 @@ stores:
     store_name: "ARATA"
     source_name: "0001097_ARATA"
     infomart_code: "973"
+    infomart_name: "ＡＲＡＴＡ（ＨＡＳＳＩＮ）"
     brand: "ARATA"
     brand_name: "ARATA"
     is_shared_facility: false
@@ -57,6 +61,7 @@ stores:
     store_name: "ちゃーちゃん"
     source_name: "0001111_ちゃーちゃん"
     infomart_code: "923"
+    infomart_name: "ちゃーちゃん（ＨＡＳＳＩＮ）"
     brand: "CHACHAN"
     brand_name: "ちゃーちゃん"
     is_shared_facility: false
@@ -65,6 +70,7 @@ stores:
     store_name: "大衆酒場 曲ル角ニハ泡喰ライ"
     source_name: "0001115_大衆酒場 曲ル角ニハ泡喰ライ"
     infomart_code: "925"
+    infomart_name: "曲ル角ニハ泡喰ライ（ＨＡＳＳＩＮ）"
     brand: "AWAKURAI"
     brand_name: "曲ル角ニハ泡喰ライ"
     is_shared_facility: false
@@ -73,6 +79,7 @@ stores:
     store_name: "CRAFTMAN UMAMI"
     source_name: "0001131_CRAFTMAN UMAMI"
     infomart_code: "960"
+    infomart_name: "ＵＭＡＭＩ（ＨＡＳＳＩＮ）"
     brand: "UMAMI"
     brand_name: "UMAMI"
     is_shared_facility: false
@@ -81,6 +88,7 @@ stores:
     store_name: "料理と酒 たいだい"
     source_name: "0001137_料理と酒 たいだい"
     infomart_code: "924"
+    infomart_name: "料理と酒　たいだい（旧　にと）（ＨＡＳＳＩＮ）"
     brand: "TAIDAI"
     brand_name: "料理と酒 たいだい"
     is_shared_facility: false
@@ -89,6 +97,7 @@ stores:
     store_name: "NagaGutsu"
     source_name: "0001151_NagaGutsu"
     infomart_code: "1151"
+    infomart_name: "Ｉｔａｌｉａｎ　Ｂａｒ　ＮａｇａＧｕｔｓｕ（ＨＡＳＳＩＮ）"
     brand: "NAGAGUTSU"
     brand_name: "Italian Bar NagaGutsu"
     is_shared_facility: false
@@ -97,6 +106,7 @@ stores:
     store_name: "熊の鳥焼"
     source_name: "0001154_熊の鳥焼"
     infomart_code: "922"
+    infomart_name: "熊の鳥焼（ＨＡＳＳＩＮ）"
     brand: "KUMANOTORIYAKI"
     brand_name: "熊の鳥焼"
     is_shared_facility: false
@@ -105,6 +115,7 @@ stores:
     store_name: "ルクアLargo"
     source_name: "0001160_ルクアLargo"
     infomart_code: "1160"
+    infomart_name: "パフェ＆ジェラート　ＬＡＲＧＯ　ルクア店（ＨＡＳＳＩＮ）"
     brand: "LARGO"
     brand_name: "LARGO"
     is_shared_facility: true
@@ -113,6 +124,7 @@ stores:
     store_name: "味のたぬきや"
     source_name: "0001162_味のたぬきや"
     infomart_code: "974"
+    infomart_name: "味のたぬきや（ＨＡＳＳＩＮ）"
     brand: "TANUKIYA"
     brand_name: "味のたぬきや"
     is_shared_facility: false
@@ -121,6 +133,7 @@ stores:
     store_name: "フレンチ酒場GOLD"
     source_name: "0001163_フレンチ酒場GOLD"
     infomart_code: "1163"
+    infomart_name: "フレンチ酒場ＧＯＬＤ（ＨＡＳＳＩＮ）"
     brand: "GOLD"
     brand_name: "フレンチ酒場GOLD"
     is_shared_facility: false
@@ -129,6 +142,7 @@ stores:
     store_name: "GOLD京都ポルタ店"
     source_name: "0001168_GOLD京都ポルタ店"
     infomart_code: "1168"
+    infomart_name: "フレンチ酒場ＧＯＬＤ　京都ポルタ店（ＨＡＳＳＩＮ）"
     brand: "GOLD"
     brand_name: "フレンチ酒場GOLD"
     is_shared_facility: true
@@ -137,6 +151,7 @@ stores:
     store_name: "すさび湯三宮店"
     source_name: "0001169_すさび湯三宮店"
     infomart_code: "1169"
+    infomart_name: "すさび湯　三宮店（ＨＡＳＳＩＮ）"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
     is_shared_facility: false
@@ -145,6 +160,7 @@ stores:
     store_name: "すさび湯京都烏丸"
     source_name: "0001712_すさび湯京都烏丸"
     infomart_code: "1712"
+    infomart_name: "すさび湯　京都烏丸（ＨＡＳＳＩＮ）"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
     is_shared_facility: false
@@ -153,6 +169,7 @@ stores:
     store_name: "門真Largo"
     source_name: "0001713_門真Largo"
     infomart_code: "1713"
+    infomart_name: "喫茶Ｌａｒｇｏ　門真（ＨＡＳＳＩＮ）"
     brand: "LARGO"
     brand_name: "LARGO"
     is_shared_facility: false
@@ -161,6 +178,7 @@ stores:
     store_name: "すさび湯 天満橋店"
     source_name: "0001728_すさび湯 天満橋店"
     infomart_code: "1728"
+    infomart_name: "すさび湯パナンテ京阪天満橋店（ＨＡＳＳＩＮ）"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
     is_shared_facility: true
@@ -169,6 +187,7 @@ stores:
     store_name: "フレンチ酒場GOLDお初"
     source_name: "0001729_フレンチ酒場GOLDお初"
     infomart_code: "1729"
+    infomart_name: "フレンチ酒場ＧＯＬＤ　お初天神店（ＨＡＳＳＩＮ）"
     brand: "GOLD"
     brand_name: "フレンチ酒場GOLD"
     is_shared_facility: false
@@ -177,6 +196,7 @@ stores:
     store_name: "ぎふや 天満橋店"
     source_name: "0001739_ぎふや 天満橋店"
     infomart_code: "1739"
+    infomart_name: "ぎふやパナンテ天満橋（ＨＡＳＳＩＮ）"
     brand: "GIFUYA"
     brand_name: "ぎふや"
     is_shared_facility: true
@@ -185,6 +205,7 @@ stores:
     store_name: "すさび湯 京都三条店"
     source_name: "0001742_すさび湯 京都三条店"
     infomart_code: "1742"
+    infomart_name: "すさび湯　三条店（ＨＡＳＳＩＮ）"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
     is_shared_facility: false
@@ -193,6 +214,7 @@ stores:
     store_name: "すさび湯 新宿東口店"
     source_name: "0001743_すさび湯 新宿東口店"
     infomart_code: "1743"
+    infomart_name: "すさび湯　新宿東口店（ＨＡＳＳＩＮ）"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
     is_shared_facility: false
@@ -201,6 +223,7 @@ stores:
     store_name: "ぎふや 福岡天神店"
     source_name: "0001766_ぎふや 福岡天神店"
     infomart_code: ""
+    infomart_name: ""
     brand: "GIFUYA"
     brand_name: "ぎふや"
     is_shared_facility: false
@@ -209,6 +232,7 @@ stores:
     store_name: "んだんだ"
     source_name: "0002004_んだんだ"
     infomart_code: "936"
+    infomart_name: "んだんだ新宿三丁目店（ＨＡＳＳＩＮ）"
     brand: "NDANDA"
     brand_name: "んだんだ"
     is_shared_facility: false

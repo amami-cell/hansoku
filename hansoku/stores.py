@@ -24,8 +24,10 @@ class Store:
     store_code: str
     store_name: str
     source_name: str
-    # インフォマートは FW と別のコード体系を使う。原価・仕入を取り込むときの突き合わせ用。
+    # インフォマートは FW と別のコード体系・別の店名表記を使う。
+    # 棚卸タブは店名しか持たないため、名前でも引けるよう両方を保持する。
     infomart_code: str
+    infomart_name: str
     brand: str
     brand_name: str
     file_prefix: str
@@ -49,7 +51,9 @@ class StoreMaster:
                 raise ValueError(f"store_code が重複しています: {store.store_code}")
             self._by_code[store.store_code] = store
             # 表示名・元名の両方から引けるようにする（取り込み元によって表記が違うため）
-            for name in (store.source_name, store.store_name):
+            for name in (store.source_name, store.store_name, store.infomart_name):
+                if not name:
+                    continue
                 key = store_key(name)
                 existing = self._by_key.get(key)
                 if existing is not None and existing.store_code != store.store_code:
@@ -76,6 +80,7 @@ class StoreMaster:
                 store_name=row["store_name"],
                 source_name=row.get("source_name", row["store_name"]),
                 infomart_code=str(row.get("infomart_code", "") or ""),
+                infomart_name=str(row.get("infomart_name", "") or ""),
                 brand=row.get("brand", ""),
                 brand_name=row.get("brand_name", ""),
                 file_prefix=row.get("file_prefix", ""),
