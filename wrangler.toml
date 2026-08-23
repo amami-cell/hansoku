@@ -1,0 +1,16 @@
+# Cloudflare Workers（静的アセット）で画面を配信する設定。
+#
+# Cloudflare の新しいダッシュボードは Pages ではなく Workers のフローに寄っていて、
+# ビルド設定に「出力ディレクトリ」の欄が出ない。このファイルがあれば、
+# `npx wrangler deploy` が web/ の中身をそのまま静的サイトとして配る。
+#
+# 画面は dashboard.json を読むだけの静的サイトなので、Worker のコードは要らない。
+# assets だけを指定する。
+
+name = "hansoku"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./web"
+# SPA。未知のパスは index.html を返す（今は単一ページだが将来のルーティングに備える）
+not_found_handling = "single-page-application"
