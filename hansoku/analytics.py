@@ -100,6 +100,31 @@ def ratio(
     return results
 
 
+def by_region(
+    warehouse: Warehouse,
+    master: StoreMaster,
+    *,
+    date_from: date,
+    date_to: date,
+    metric: str,
+    grain: str = GRAIN_MONTH,
+) -> dict[str, float]:
+    """エリア単位（大阪/東京/…）の合計。総合ページのエリア別サマリに使う。"""
+    sums = totals(
+        warehouse,
+        date_from=date_from,
+        date_to=date_to,
+        metrics=[metric],
+        store_codes=master.active_codes,
+        grain=grain,
+    )
+    out: dict[str, float] = {}
+    for (code, _), value in sums.items():
+        region = master.by_code(code).region or "未分類"
+        out[region] = out.get(region, 0.0) + value
+    return out
+
+
 def by_brand(
     warehouse: Warehouse,
     master: StoreMaster,

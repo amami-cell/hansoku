@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS m_stores (
     store_name          TEXT        NOT NULL,
     source_name         TEXT        NOT NULL,
     infomart_code       TEXT        NOT NULL DEFAULT '',
+    region              TEXT        NOT NULL DEFAULT '',
     brand               TEXT        NOT NULL,
     brand_name          TEXT        NOT NULL DEFAULT '',
     file_prefix         TEXT        NOT NULL DEFAULT '',
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS m_stores (
 -- CREATE TABLE IF NOT EXISTS は既存テーブルには何もしないため、
 -- 後から増えた列はこの形で明示的に足す（何度流しても安全）。
 ALTER TABLE m_stores ADD COLUMN IF NOT EXISTS infomart_code TEXT NOT NULL DEFAULT '';
+ALTER TABLE m_stores ADD COLUMN IF NOT EXISTS region        TEXT NOT NULL DEFAULT '';
 
 COMMENT ON TABLE  m_stores IS '店舗マスタ。store_code は FW（Foodist Journal）の店舗コード';
 COMMENT ON COLUMN m_stores.source_name IS
@@ -35,6 +37,7 @@ COMMENT ON COLUMN m_stores.source_name IS
 COMMENT ON COLUMN m_stores.infomart_code IS
     'インフォマート側の店舗コード。FW とは別体系で24店中10店が食い違うため、'
     '原価・仕入の取り込みではこちらで突き合わせる';
+COMMENT ON COLUMN m_stores.region IS 'エリア（大阪/東京/京都/兵庫/福岡）。近隣店比較・エリア別集計の単位';
 COMMENT ON COLUMN m_stores.brand IS 'ブランドコード。スケジュール画面の色分けの単位';
 
 -- ── 権限マスタ（多対多）──────────────────────────────────────────────────

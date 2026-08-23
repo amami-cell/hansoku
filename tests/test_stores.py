@@ -12,6 +12,7 @@ def _store(code: str, name: str, **overrides) -> Store:
         source_name=overrides.pop("source_name", name),
         infomart_code="",
         infomart_name="",
+        region=overrides.pop("region", "大阪"),
         brand="X",
         brand_name="X",
         file_prefix="",
@@ -97,3 +98,21 @@ def test_正規化後に衝突する店名は読み込み時に弾く():
     ]
     with pytest.raises(ValueError, match="衝突"):
         StoreMaster(colliding)
+
+
+
+def test_全店にエリアが割り当てられている(master):
+    assert all(s.region for s in master)
+
+
+def test_エリアは5つ(master):
+    assert set(master.regions) == {"大阪", "東京", "京都", "兵庫", "福岡"}
+
+
+def test_大阪が最多の16店(master):
+    assert len(master.in_region("大阪")) == 16
+
+
+def test_エリアで店舗を引ける(master):
+    tokyo = {s.store_name for s in master.in_region("東京")}
+    assert "んだんだ" in tokyo

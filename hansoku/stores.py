@@ -28,6 +28,8 @@ class Store:
     # 棚卸タブは店名しか持たないため、名前でも引けるよう両方を保持する。
     infomart_code: str
     infomart_name: str
+    # エリア（大阪/東京/京都/兵庫/福岡）。近隣店比較・エリア別集計の単位。
+    region: str
     brand: str
     brand_name: str
     file_prefix: str
@@ -81,6 +83,7 @@ class StoreMaster:
                 source_name=row.get("source_name", row["store_name"]),
                 infomart_code=str(row.get("infomart_code", "") or ""),
                 infomart_name=str(row.get("infomart_name", "") or ""),
+                region=str(row.get("region", "") or ""),
                 brand=row.get("brand", ""),
                 brand_name=row.get("brand_name", ""),
                 file_prefix=row.get("file_prefix", ""),
@@ -112,6 +115,18 @@ class StoreMaster:
     @property
     def active_codes(self) -> list[str]:
         return [s.store_code for s in self.active]
+
+    @property
+    def regions(self) -> list[str]:
+        """出現順を保った、稼働店のエリア一覧。"""
+        seen: list[str] = []
+        for store in self.active:
+            if store.region and store.region not in seen:
+                seen.append(store.region)
+        return seen
+
+    def in_region(self, region: str) -> list["Store"]:
+        return [s for s in self.active if s.region == region]
 
     def by_code(self, code: str | int) -> Store:
         normalized = normalize_store_code(code)

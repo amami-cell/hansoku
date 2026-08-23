@@ -75,12 +75,14 @@ class AppDb:
             cur.executemany(
                 """
                 INSERT INTO m_stores (store_code, store_name, source_name, infomart_code,
-                                      brand, brand_name, file_prefix, is_shared_facility, active)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                      region, brand, brand_name, file_prefix,
+                                      is_shared_facility, active)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (store_code) DO UPDATE SET
                     store_name         = EXCLUDED.store_name,
                     source_name        = EXCLUDED.source_name,
                     infomart_code      = EXCLUDED.infomart_code,
+                    region             = EXCLUDED.region,
                     brand              = EXCLUDED.brand,
                     brand_name         = EXCLUDED.brand_name,
                     file_prefix        = EXCLUDED.file_prefix,
@@ -94,6 +96,7 @@ class AppDb:
                         s.store_name,
                         s.source_name,
                         s.infomart_code,
+                        s.region,
                         s.brand,
                         s.brand_name,
                         s.file_prefix,

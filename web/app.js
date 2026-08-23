@@ -1,5 +1,10 @@
 /* 販促マネジメント・ダッシュボード（閲覧SPA）
-   dashboard.json を読むだけ。表示のたびに DB は叩かない。 */
+   dashboard.json を読むだけ。表示のたびに DB は叩かない。
+
+   画面の骨格:
+     全社ビュー … エリア（大阪/東京/京都/兵庫/福岡）別のサマリカード
+     エリアビュー … そのエリアの店を1つのグラフに重ねて近隣比較＋ランキング
+     総合（最下部）… 全店の月別表（集約） */
 "use strict";
 
 const METRIC_LABELS = {
@@ -8,23 +13,34 @@ const METRIC_LABELS = {
   cost_rate: "理論原価率",
 };
 const yen = n => "¥" + Math.round(n).toLocaleString("ja-JP");
+const man = n => (n / 10000).toFixed(0) + "万";
 const pct = n => (n * 100).toFixed(1) + "%";
-const monthLabel = m => { const [, mo] = m.split("-"); return `${+mo}月`; };
-// X軸用。年が変わる境目と先頭では "YY年M月" を出し、それ以外は "M月"
+
+// X軸用。年が変わる境目と先頭では "YY年M月"、それ以外は "M月"
 function axisLabel(months, i) {
   const [y, mo] = months[i].split("-");
   const prevYear = i > 0 ? months[i - 1].split("-")[0] : null;
   return (i === 0 || y !== prevYear) ? `${y.slice(2)}年${+mo}月` : `${+mo}月`;
 }
 
-let DATA = null, storeSel, metricSel;
-// 当月（YYYY-MM）。これに一致する月だけを「暫定（中間値）」として点線・淡色にする。
+// エリアごとのベース色（彩度は抑えめ。状態色と混同しない）
+const REGION_COLORS = {
+  "大阪": "#2E4A7D", "東京": "#1F7A5C", "京都": "#8A5A2B",
+  "兵庫": "#6E4B8A", "福岡": "#9A3B54", "未分類": "#6B7280",
+};
+const regionColor = r => REGION_COLORS[r] || "#6B7280";
+
+let DATA = null;
+let VIEW = "all";      // "all"（全社）または エリア名
+let METRIC = "sales";
+
 const CURRENT_MONTH = (() => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 })();
 const isProvisional = m => m === CURRENT_MONTH;
 
+// ── 起動 ─────────────────────────────────────────────────────────────────
 async function boot() {
   document.getElementById("today").textContent = formatToday();
   wireTheme();
@@ -37,7 +53,8 @@ async function boot() {
       `<div class="empty">データを読み込めませんでした（${e.message}）。<br>夜間バッチの書き出しをお待ちください。</div>`;
     return;
   }
-  setupControls();
+  buildTabs();
+  buildMetricSelect();
   render();
   fillNotice();
 }
@@ -57,239 +74,321 @@ function wireTheme() {
   });
 }
 
-function setupControls() {
-  storeSel = document.getElementById("storesel");
-  metricSel = document.getElementById("metricsel");
+// ── データ小物 ───────────────────────────────────────────────────────────
+const storeName = code => (DATA.stores.find(s => s.code === code) || {}).name || code;
+const storesOf = region =>
+  (DATA.regions.find(r => r.name === region) || { stores: [] }).stores
+    .filter(c => DATA.monthly[c]);           // 実績のある店だけ
 
-  storeSel.innerHTML = `<option value="*">全店（合計）</option>` +
-    DATA.stores.map(s => `<option value="${s.code}">${s.name}</option>`).join("");
+// 店 × 月 の値（原価率だけは別テーブル）
+function valueAt(code, month) {
+  if (METRIC === "cost_rate") return (DATA.cost_rate[code] || {})[month];
+  return ((DATA.monthly[code] || {})[month] || {})[METRIC];
+}
+// 複数店を合算した月次系列。原価率は合算しない（比率のため）
+function seriesSum(codes, months) {
+  return months.map(m => {
+    let sum = 0, any = false;
+    for (const c of codes) {
+      const v = ((DATA.monthly[c] || {})[m] || {})[METRIC];
+      if (typeof v === "number") { sum += v; any = true; }
+    }
+    return any ? sum : null;
+  });
+}
+const periodTotal = codes => {
+  let sum = 0;
+  for (const c of codes) for (const m of DATA.months) {
+    const v = ((DATA.monthly[c] || {})[m] || {})[METRIC];
+    if (typeof v === "number" && m !== CURRENT_MONTH) sum += v;
+  }
+  return sum;
+};
 
-  const metrics = [...DATA.metrics, "cost_rate"];
-  metricSel.innerHTML = metrics
+// ── タブ（全社＋エリア）────────────────────────────────────────────────
+function buildTabs() {
+  const nav = document.getElementById("tabs");
+  const tabs = [["all", "全社"]].concat(DATA.regions.map(r => [r.name, r.name]));
+  nav.innerHTML = tabs.map(([id, label]) => {
+    const n = id === "all" ? DATA.stores.length
+      : (DATA.regions.find(r => r.name === id) || { stores: [] }).stores.length;
+    return `<button class="tab" data-id="${id}">${label}<span class="cnt">${n}</span></button>`;
+  }).join("");
+  nav.querySelectorAll(".tab").forEach(b =>
+    b.addEventListener("click", () => { VIEW = b.dataset.id; syncTabs(); render(); }));
+  syncTabs();
+}
+function syncTabs() {
+  document.querySelectorAll("#tabs .tab").forEach(b =>
+    b.classList.toggle("on", b.dataset.id === VIEW));
+}
+
+function buildMetricSelect() {
+  const sel = document.getElementById("metricsel");
+  sel.innerHTML = DATA.metrics.concat(["cost_rate"])
     .map(m => `<option value="${m}">${METRIC_LABELS[m] || m}</option>`).join("");
-
-  storeSel.addEventListener("change", render);
-  metricSel.addEventListener("change", render);
-  document.getElementById("gen").textContent =
-    "更新 " + (DATA.generated_at || "").replace("T", " ").slice(0, 16);
+  sel.value = METRIC;
+  sel.addEventListener("change", () => { METRIC = sel.value; render(); });
 }
 
-/* ある店・ある指標の、月ごとの値を返す */
-function series(code, metric) {
-  const months = DATA.months;
-  if (metric === "cost_rate") {
-    if (code === "*") {
-      // 全店の原価率は、原価合計 ÷ 売上合計で組み直す
-      return months.map(m => {
-        let cost = 0, sales = 0;
-        for (const s of DATA.stores) {
-          const row = (DATA.monthly[s.code] || {})[m];
-          if (!row) continue;
-          cost += (row.food_theory_cost || 0) + (row.drink_theory_cost || 0);
-          sales += row.sales || 0;
-        }
-        return sales ? cost / sales : null;
-      });
-    }
-    return months.map(m => (DATA.cost_rate[code] || {})[m] ?? null);
-  }
-  if (code === "*") {
-    return months.map(m => {
-      let sum = 0, seen = false;
-      for (const s of DATA.stores) {
-        const v = ((DATA.monthly[s.code] || {})[m] || {})[metric];
-        if (v != null) { sum += v; seen = true; }
-      }
-      return seen ? sum : null;
-    });
-  }
-  return months.map(m => ((DATA.monthly[code] || {})[m] || {})[metric] ?? null);
-}
-
+// ── 描画 ─────────────────────────────────────────────────────────────────
 function render() {
-  const code = storeSel.value, metric = metricSel.value;
-  const isRate = metric === "cost_rate";
-  const vals = series(code, metric);
-  const months = DATA.months;
-  const fmt = isRate ? pct : yen;
-
   const app = document.getElementById("app");
-  app.innerHTML = "";
+  app.innerHTML = VIEW === "all" ? renderAll() : renderRegion(VIEW);
+  app.querySelectorAll("[data-goto]").forEach(el =>
+    el.addEventListener("click", () => {
+      VIEW = el.dataset.goto; syncTabs(); render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }));
+  wireEmphasis(app);
+}
 
-  // ── KPI ──
-  const valid = vals.map((v, i) => [months[i], v]).filter(x => x[1] != null);
-  const latest = valid.length ? valid[valid.length - 1] : null;
-  const prev = valid.length > 1 ? valid[valid.length - 2] : null;
-  let kpiHtml = "";
-  if (latest) {
-    const [lm, lv] = latest;
-    let delta = "";
-    if (prev && prev[1]) {
-      const diff = isRate ? (lv - prev[1]) * 100 : (lv / prev[1] - 1) * 100;
-      const better = isRate ? diff < 0 : diff > 0;   // 原価率は下がるほど良い
-      const cls = Math.abs(diff) < 0.05 ? "flat" : better ? "up" : "down";
-      const arrow = cls === "flat" ? "→" : better ? "▲" : "▼";
-      const shown = isRate ? (diff >= 0 ? "+" : "") + diff.toFixed(1) + "pt"
-                           : (diff >= 0 ? "+" : "") + diff.toFixed(1) + "%";
-      delta = `<div class="delta ${cls}"><span>${arrow}</span>前月比 ${shown}</div>`;
-    }
-    kpiHtml = `<div class="kpis">
-      <div class="kpi"><div class="lbl">${monthLabel(lm)}の${METRIC_LABELS[metric]}</div>
-        <div class="big">${fmt(lv)}</div>${delta}</div>
-      <div class="kpi"><div class="lbl">期間合計</div>
-        <div class="big">${isRate ? "—" : fmt(valid.reduce((a, x) => a + x[1], 0))}</div>
-        <div class="delta flat">${valid.length}ヶ月分</div></div>
-    </div>`;
+// 全社: エリア別サマリカード ＋ 最下部に総合表
+function renderAll() {
+  const months = DATA.months;
+  const isRatio = METRIC === "cost_rate";
+  const cards = DATA.regions.map(r => {
+    const codes = storesOf(r.name);
+    const total = isRatio ? null : periodTotal(codes);
+    return regionCard(r.name, codes, months, total);
+  }).join("");
+  return `
+    <section class="block">
+      <div class="bhead"><h2>エリア別</h2>
+        <span class="bnote">${isRatio ? "原価率（低いほど良い）" : METRIC_LABELS[METRIC] + "・期間合計（当月の暫定は除く）"}</span></div>
+      <div class="rgrid">${cards}</div>
+    </section>
+    ${renderOverviewTable()}
+  `;
+}
+
+function regionCard(region, codes, months, total) {
+  const color = regionColor(region);
+  const series = METRIC === "cost_rate" ? null : seriesSum(codes, months);
+  const spark = series ? sparkline(series, color) : "";
+  const totalLine = total == null ? ""
+    : `<div class="rbig">${man(total)}<span class="unit">円</span></div>`;
+  return `
+    <button class="rcard" data-goto="${region}" style="--rc:${color}">
+      <div class="rtop"><span class="dot"></span>${region}<span class="rn">${codes.length}店</span></div>
+      ${totalLine}
+      ${spark}
+      <div class="rmore">エリアを見る →</div>
+    </button>`;
+}
+
+// エリア: そのエリアの店を1グラフに重ねて比較＋ランキング
+function renderRegion(region) {
+  const codes = storesOf(region);
+  const months = DATA.months;
+  const color = regionColor(region);
+  if (!codes.length) {
+    return `<section class="block"><div class="empty">${region}エリアに実績のある店舗がありません。</div></section>`;
   }
-
-  // ── 折れ線 ──
-  app.innerHTML = `
-    <section>
-      <div class="shead"><h2>${storeName(code)}</h2>
-        <span class="snote">${METRIC_LABELS[metric]}の推移</span></div>
-      ${kpiHtml}
-      <div style="height:14px"></div>
-      <div class="panel">
-        <div class="legend"><span><i style="background:var(--accent)"></i>${METRIC_LABELS[metric]}</span>
-          <span><i style="background:var(--ink-3);opacity:.5"></i>暫定（当月）</span></div>
-        <div class="chartwrap">${lineChart(months, vals, fmt, isRate)}</div>
-        <figcaption>当月は月途中の「中間」値のため点線・淡色で示します。前年同月と比べる際は暫定値であることに注意してください。</figcaption>
+  const isRatio = METRIC === "cost_rate";
+  const ranked = codes.map(c => ({
+    code: c,
+    total: isRatio ? latestRatio(c) : periodTotal([c]),
+  })).sort((a, b) => (b.total || 0) - (a.total || 0));
+  const max = Math.max(...ranked.map(r => r.total || 0), 1);
+  const rows = ranked.map((r, i) => {
+    const shown = r.total == null ? "―" : isRatio ? pct(r.total) : yen(r.total);
+    const w = ((r.total || 0) / max * 100).toFixed(1);
+    return `<tr>
+      <td class="rk">${i + 1}</td>
+      <td>${storeName(r.code)}</td>
+      <td class="num">${shown}</td>
+      <td><i class="mag" style="width:${w}%;background:${color}"></i></td>
+    </tr>`;
+  }).join("");
+  return `
+    <section class="block">
+      <div class="bhead">
+        <h2><span class="dot" style="background:${color}"></span>${region}エリア</h2>
+        <span class="bnote">${codes.length}店の${METRIC_LABELS[METRIC]}推移</span>
+      </div>
+      <div class="panel"><div class="chartwrap">${multiLine(codes, months, region)}</div>
+        <div class="lg">${legend(codes, region)}</div>
       </div>
     </section>
-    ${code === "*" ? storeTable(metric, isRate, fmt) : ""}
+    <section class="block">
+      <div class="bhead"><h2>店舗ランキング</h2>
+        <span class="bnote">${isRatio ? "最新月の原価率" : "期間合計（当月の暫定は除く）"}</span></div>
+      <div class="panel"><table class="rank"><tbody>${rows}</tbody></table></div>
+    </section>
   `;
-  attachHover();
 }
 
-function storeName(code) {
-  if (code === "*") return "全店合計";
-  const s = DATA.stores.find(x => x.code === code);
-  return s ? s.name : code;
-}
-
-/* SVG 折れ線。最後の月は暫定として点線・淡色にする */
-function lineChart(months, vals, fmt, isRate) {
-  const W = Math.max(560, months.length * 92), H = 250;
-  const padL = 62, padR = 24, padT = 24, padB = 42;
-  const nums = vals.filter(v => v != null);
-  if (!nums.length) return `<div class="empty">この指標のデータがありません</div>`;
-  const max = Math.max(...nums), min = isRate ? Math.min(...nums, 0) : 0;
-  const span = max - min || 1;
-  const x = i => padL + (months.length === 1 ? (W - padL - padR) / 2 : i * (W - padL - padR) / (months.length - 1));
-  const y = v => padT + (1 - (v - min) / span) * (H - padT - padB);
-
-  const gl = [0, .25, .5, .75, 1].map(t => {
-    const yy = padT + t * (H - padT - padB);
-    const v = max - t * span;
-    return `<line x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" stroke="var(--line)"/>
-      <text x="${padL - 8}" y="${(yy + 3).toFixed(1)}" font-size="10" fill="var(--ink-3)" text-anchor="end" style="font-variant-numeric:tabular-nums">${isRate ? (v * 100).toFixed(0) + "%" : compact(v)}</text>`;
-  }).join("");
-
-  // 確定は実線、暫定月（当月）へ向かう区間だけ点線にする
-  const pts = vals.map((v, i) => v == null ? null : [x(i), y(v)]);
-  const solid = pts.filter(Boolean);
-  const dash = [];
-  const provIdx = months.findIndex(isProvisional);
-  if (provIdx > 0 && pts[provIdx] && pts[provIdx - 1]) {
-    dash.push(pts[provIdx - 1], pts[provIdx]);
+function latestRatio(code) {
+  const t = DATA.cost_rate[code] || {};
+  for (let i = DATA.months.length - 1; i >= 0; i--) {
+    const m = DATA.months[i];
+    if (m !== CURRENT_MONTH && typeof t[m] === "number") return t[m];
   }
-  const line = arr => arr.filter(Boolean).map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" ");
-  const area = (() => {
-    const p = pts.filter(Boolean);
-    if (p.length < 2) return "";
-    return `<path d="${line(p)} L${p[p.length - 1][0].toFixed(1)},${(H - padB)} L${p[0][0].toFixed(1)},${(H - padB)} Z" fill="var(--accent)" opacity=".11"/>`;
-  })();
+  return null;
+}
 
-  const dots = vals.map((v, i) => {
-    if (v == null) return "";
-    const prov = isProvisional(months[i]);
-    return `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="4" fill="var(--surface)" stroke="${prov ? "var(--ink-3)" : "var(--accent)"}" stroke-width="2" ${prov ? 'stroke-dasharray="2 2"' : ""} class="dot" data-i="${i}"/>`;
+// 総合表（全店 × 直近4ヶ月・エリアごとに区切る）
+function renderOverviewTable() {
+  const months = DATA.months.slice(-4);
+  const head = months.map(m =>
+    `<th class="num">${axisLabel(DATA.months, DATA.months.indexOf(m))}</th>`).join("");
+  const body = DATA.regions.map(r => {
+    const codes = storesOf(r.name);
+    const stores = codes.map(c => {
+      const cells = months.map(m => {
+        const v = valueAt(c, m);
+        const prov = isProvisional(m) ? " prov" : "";
+        const shown = v == null ? "―" : METRIC === "cost_rate" ? pct(v) : yen(v);
+        return `<td class="num${prov}">${shown}</td>`;
+      }).join("");
+      return `<tr><td class="rgn" style="--rc:${regionColor(r.name)}">${storeName(c)}</td>${cells}</tr>`;
+    }).join("");
+    return `<tr class="grp"><td colspan="${months.length + 1}">${r.name}（${codes.length}店）</td></tr>${stores}`;
+  }).join("");
+  return `
+    <section class="block">
+      <div class="bhead"><h2>総合</h2><span class="bnote">全店 × 直近4ヶ月・${METRIC_LABELS[METRIC]}（当月は暫定）</span></div>
+      <div class="panel"><div class="chartwrap">
+        <table class="ovr"><thead><tr><th>店舗</th>${head}</tr></thead><tbody>${body}</tbody></table>
+      </div></div>
+    </section>`;
+}
+
+// ── SVG 描画 ─────────────────────────────────────────────────────────────
+function sparkline(series, color) {
+  const vals = series.filter(v => v != null);
+  if (vals.length < 2) return "";
+  const max = Math.max(...vals), min = Math.min(...vals, 0);
+  const W = 220, H = 40, n = series.length;
+  const x = i => (i / (n - 1)) * (W - 4) + 2;
+  const y = v => H - 4 - (v - min) / (max - min || 1) * (H - 8);
+  let d = "", started = false;
+  series.forEach((v, i) => {
+    if (v == null) { started = false; return; }
+    d += (started ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1) + " ";
+    started = true;
+  });
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+    <path d="${d}" fill="none" stroke="${color}" stroke-width="1.8" stroke-linejoin="round"/></svg>`;
+}
+
+function multiLine(codes, months, region) {
+  const W = 720, H = 300, PL = 56, PR = 16, PT = 18, PB = 34;
+  const all = [];
+  const seriesByCode = codes.map(c => months.map(m => {
+    const v = METRIC === "cost_rate" ? (DATA.cost_rate[c] || {})[m] : valueAt(c, m);
+    if (typeof v === "number") all.push(v);
+    return typeof v === "number" ? v : null;
+  }));
+  if (!all.length) return `<div class="empty">データがありません</div>`;
+  const max = Math.max(...all), min = METRIC === "cost_rate" ? Math.min(...all) : 0;
+  const n = months.length;
+  const x = i => PL + (i / Math.max(n - 1, 1)) * (W - PL - PR);
+  const y = v => PT + (1 - (v - min) / (max - min || 1)) * (H - PT - PB);
+  const base = regionColor(region);
+
+  let grid = "";
+  for (let g = 0; g <= 4; g++) {
+    const gy = PT + (g / 4) * (H - PT - PB);
+    const gv = max - (g / 4) * (max - min);
+    grid += `<line x1="${PL}" y1="${gy}" x2="${W - PR}" y2="${gy}" stroke="var(--line)"/>`;
+    const lbl = METRIC === "cost_rate" ? (gv * 100).toFixed(0) + "%" : man(gv);
+    grid += `<text x="${PL - 8}" y="${gy + 3}" text-anchor="end" class="axt">${lbl}</text>`;
+  }
+  let xlab = "";
+  const step = Math.ceil(n / 8);
+  months.forEach((m, i) => {
+    if (i % step === 0 || i === n - 1)
+      xlab += `<text x="${x(i)}" y="${H - 12}" text-anchor="middle" class="axt">${axisLabel(months, i)}</text>`;
+  });
+  // 店数が多いと線が密集して読めない。既定は細く薄く、hover/凡例で1店だけ強調する。
+  const many = codes.length > 5;
+  const lines = seriesByCode.map((ser, si) => {
+    const col = shade(base, si, codes.length);
+    let d = "", started = false;
+    ser.forEach((v, i) => {
+      if (v == null) { started = false; return; }
+      d += (started ? "L" : "M") + x(i).toFixed(1) + "," + y(v).toFixed(1) + " ";
+      started = true;
+    });
+    const w = many ? 1.4 : 2;
+    const op = many ? 0.5 : 1;
+    return `<path class="ml" data-si="${si}" d="${d}" fill="none" stroke="${col}"
+      stroke-width="${w}" stroke-opacity="${op}" stroke-linejoin="round" stroke-linecap="round"/>`;
   }).join("");
 
-  const xlab = months.map((m, i) => `<text x="${x(i).toFixed(1)}" y="${H - padB + 20}" font-size="11" fill="var(--ink-3)" text-anchor="middle">${axisLabel(months, i)}</text>`).join("");
-  const hot = months.map((m, i) => vals[i] == null ? "" :
-    `<rect class="hit" data-i="${i}" x="${(x(i) - 26).toFixed(1)}" y="${padT}" width="52" height="${H - padT - padB}" fill="transparent"/>`).join("");
-
-  // データを hover 用に埋める
-  window.__chart = { months, vals, fmt };
-  return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" style="min-width:${W > 620 ? 560 : W}px"
-    aria-label="${storeName(storeSel.value)}の${METRIC_LABELS[metricSel.value]}推移">
-    ${gl}${area}
-    <path d="${line(solid)}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-    <path d="${line(dash)}" fill="none" stroke="var(--ink-3)" stroke-width="2" stroke-dasharray="4 3" stroke-linecap="round" opacity=".8"/>
-    ${dots}${xlab}${hot}
-  </svg>`;
+  return `<svg class="mlsvg" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" style="min-width:560px" role="img"
+      aria-label="${region}エリア ${codes.length}店の${METRIC_LABELS[METRIC]}推移">
+    ${grid}${xlab}${lines}</svg>`;
 }
 
-function compact(n) {
-  if (n >= 1e8) return (n / 1e8).toFixed(1) + "億";
-  if (n >= 1e4) return Math.round(n / 1e4) + "万";
-  return Math.round(n).toString();
+function legend(codes, region) {
+  const base = regionColor(region);
+  return codes.map((c, i) =>
+    `<span class="lgi" data-si="${i}"><i style="background:${shade(base, i, codes.length)}"></i>${storeName(c)}</span>`).join("");
 }
 
-/* 全店表示のときだけ、店舗別の表を出す */
-function storeTable(metric, isRate, fmt) {
-  const month = DATA.months[DATA.months.length - 1];
-  const rows = DATA.stores.map(s => {
-    let v;
-    if (isRate) v = (DATA.cost_rate[s.code] || {})[month] ?? null;
-    else v = ((DATA.monthly[s.code] || {})[month] || {})[metric] ?? null;
-    return { s, v };
-  }).filter(r => r.v != null);
-  if (isRate) rows.sort((a, b) => b.v - a.v); else rows.sort((a, b) => b.v - a.v);
-  const max = Math.max(...rows.map(r => Math.abs(r.v)), 1);
-  const body = rows.map(r => `<tr>
-    <td><i class="bchip" style="background:${brandColor(r.s.brand)}"></i>${r.s.name}</td>
-    <td class="num ${isRate && r.v > 0.30 ? "rate hot" : ""}">${fmt(r.v)}</td>
-    <td style="width:32%"><i class="magnitude" style="width:${Math.max(2, Math.abs(r.v) / max * 100).toFixed(0)}%"></i></td>
-  </tr>`).join("");
-  return `<section>
-    <div class="shead"><h2>店舗別</h2><span class="snote">${monthLabel(month)}・${METRIC_LABELS[metric]}${isRate ? "（30%超は赤）" : ""}</span></div>
-    <div class="panel"><table>
-      <thead><tr><th>店舗</th><th class="num">${METRIC_LABELS[metric]}</th><th>　</th></tr></thead>
-      <tbody>${body}</tbody></table></div>
-  </section>`;
-}
-
-const BRAND_COLORS = {
-  SUSABIYU:"#3E5C8C", GOLD:"#7C6A55", LARGO:"#5B8A72", GIFUYA:"#A66A4E",
-  ARATA:"#6B7A8F", UMAMI:"#8C7A3E", NDANDA:"#7C5568", NAGAGUTSU:"#4E7C8C",
-  KUMANOTORIYAKI:"#8C5A3E", CHACHAN:"#B0761A", TAIDAI:"#5568A0",
-  AWAKURAI:"#7A4E8C", HIYOKOHANTEN:"#8C8340", TANUKIYA:"#6E6E6E",
-};
-const brandColor = b => BRAND_COLORS[b] || "#6E6E6E";
-
-function attachHover() {
-  const tip = document.getElementById("tip");
-  const svg = document.querySelector("svg");
-  if (!svg || !window.__chart) return;
-  const { months, vals, fmt } = window.__chart;
-  svg.querySelectorAll(".hit").forEach(hit => {
-    const i = +hit.dataset.i;
-    const show = e => {
-      const prov = isProvisional(months[i]);
-      tip.innerHTML = `<div class="tname">${months[i]}${prov ? "（暫定）" : ""}</div>
-        <div class="trow"><span>${METRIC_LABELS[metricSel.value]}</span><span>${fmt(vals[i])}</span></div>`;
-      tip.classList.add("on");
-      const p = (e.touches ? e.touches[0] : e);
-      tip.style.left = Math.min(p.clientX + 14, innerWidth - 200) + "px";
-      tip.style.top = (p.clientY - 10) + "px";
-    };
-    hit.addEventListener("mousemove", show);
-    hit.addEventListener("mouseleave", () => tip.classList.remove("on"));
-    hit.addEventListener("touchstart", show, { passive: true });
+// エリアグラフ: 凡例や線に触れた店だけ強調する
+function wireEmphasis(root) {
+  const svg = root.querySelector(".mlsvg");
+  if (!svg) return;
+  const paths = [...svg.querySelectorAll(".ml")];
+  const items = [...root.querySelectorAll(".lgi")];
+  const many = paths.length > 5;
+  const focus = si => {
+    paths.forEach(p => {
+      const on = si == null || p.dataset.si === String(si);
+      p.setAttribute("stroke-opacity", on ? "1" : "0.12");
+      p.setAttribute("stroke-width", (p.dataset.si === String(si)) ? "3" : (many ? "1.4" : "2"));
+    });
+    items.forEach(li => li.classList.toggle("mut", si != null && li.dataset.si !== String(si)));
+  };
+  const reset = () => {
+    paths.forEach(p => {
+      p.setAttribute("stroke-opacity", many ? "0.5" : "1");
+      p.setAttribute("stroke-width", many ? "1.4" : "2");
+    });
+    items.forEach(li => li.classList.remove("mut"));
+  };
+  paths.forEach(p => { p.addEventListener("mouseenter", () => focus(p.dataset.si)); p.addEventListener("mouseleave", reset); });
+  items.forEach(li => {
+    li.addEventListener("mouseenter", () => focus(li.dataset.si));
+    li.addEventListener("mouseleave", reset);
   });
 }
 
-function fillNotice() {
-  const n = document.getElementById("notice");
-  const p = DATA.period;
-  n.innerHTML = `<p><b>このデータについて</b>　FW（Foodist Journal）の月次実績を集約したものです。
-    対象期間 ${p.from} 〜 ${p.to}、全 ${DATA.stores.length} 店。表示のたびにデータベースは参照せず、
-    夜間バッチが書き出した結果を読んでいます。</p>
-    <p><b>暫定値</b>　当月は月途中の「中間」値です。確定は月末締め後に置き換わります。</p>
-    <p><b>これから</b>　施策の登録・目標対比・制作物ギャラリーはこの先で追加します。
-    日別売上が入れば、改装や施策の前後を日単位で追えるようになります。</p>`;
+// ベース色を店ごとに濃淡へ散らす（HSL明度を変える）
+function shade(hex, i, total) {
+  const { h, s, l } = hexToHsl(hex);
+  if (total <= 1) return hex;
+  const span = 34;
+  const nl = Math.max(28, Math.min(72, l - span / 2 + (span * i) / (total - 1)));
+  return `hsl(${h} ${s}% ${nl}%)`;
+}
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255,
+        g = parseInt(hex.slice(3, 5), 16) / 255,
+        b = parseInt(hex.slice(5, 7), 16) / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0; const l = (mx + mn) / 2;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  if (d !== 0) {
+    if (mx === r) h = ((g - b) / d) % 6;
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60; if (h < 0) h += 360;
+  }
+  return { h: Math.round(h), s: Math.round(s * 100), l: Math.round(l * 100) };
 }
 
-boot();
+// ── 注記 ─────────────────────────────────────────────────────────────────
+function fillNotice() {
+  const gen = DATA.generated_at ? DATA.generated_at.replace("T", " ").replace("+00:00", " UTC") : "";
+  document.getElementById("notice").innerHTML =
+    `<p><b>データ</b>　FW実績・全${DATA.stores.length}店（大阪16／東京3／京都3／兵庫1／福岡1）。当月は締め前の暫定値のため点線・淡色で示します。</p>
+     <p><b>これから</b>　施策の登録・目標対比・ランチ／ディナー比（時間帯別）は順次追加します。時間帯比はFWの時間帯別売上を取り込んでから出せます。</p>
+     <p class="fine">最終更新 ${gen}</p>`;
+}
+
+document.addEventListener("DOMContentLoaded", boot);

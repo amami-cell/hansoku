@@ -49,6 +49,14 @@ class Test店舗マスタ同期:
         row = appdb.query("SELECT infomart_code FROM m_stores WHERE store_code = '1154'")[0]
         assert row["infomart_code"] == "922"
 
+    def test_エリアも保存される(self, appdb, master):
+        appdb.sync_stores(master.all)
+        rows = appdb.query(
+            "SELECT region, count(*) c FROM m_stores GROUP BY region ORDER BY c DESC"
+        )
+        top = rows[0]
+        assert top["region"] == "大阪" and top["c"] == 16
+
 
 class Test権限:
     @pytest.fixture

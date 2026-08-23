@@ -103,3 +103,63 @@ tbody tr:last-child td{border-bottom:0;}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
 @media (max-width:620px){.wrap{padding:18px 13px 56px;}.top{align-items:flex-start;}.gen{margin-left:0;width:100%;}}
+
+/* ── エリアタブ ─────────────────────────────────────────── */
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:18px;}
+.tab{font:inherit;font-size:13px;color:var(--ink-2);background:var(--surface);
+  border:1px solid var(--line-strong);border-radius:999px;padding:6px 14px;cursor:pointer;
+  display:flex;align-items:center;gap:7px;}
+.tab:hover{border-color:var(--accent);color:var(--accent);}
+.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+.tab.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:500;}
+:root[data-theme="dark"] .tab.on,:root:not([data-theme="light"]) .tab.on{color:#0E1116;}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]) .tab.on{color:#fff;}}
+.tab .cnt{font-size:11px;opacity:.7;font-variant-numeric:tabular-nums;}
+
+/* ── ブロック見出し ─────────────────────────────────────── */
+.block{margin-bottom:36px;}
+.bhead{display:flex;align-items:baseline;gap:12px;margin-bottom:14px;flex-wrap:wrap;}
+.bnote{font-size:12.5px;color:var(--ink-3);}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:currentColor;
+  vertical-align:0;margin-right:2px;}
+
+/* ── エリアカード ───────────────────────────────────────── */
+.rgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:13px;}
+.rcard{text-align:left;font:inherit;cursor:pointer;background:var(--surface);
+  border:1px solid var(--line);border-left:3px solid var(--rc);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:15px 16px 13px;display:flex;flex-direction:column;gap:9px;}
+.rcard:hover{border-color:var(--rc);}
+.rcard:focus-visible{outline:2px solid var(--rc);outline-offset:2px;}
+.rcard .rtop{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;}
+.rcard .rtop .dot{color:var(--rc);}
+.rcard .rn{margin-left:auto;font-size:12px;color:var(--ink-3);font-weight:400;font-variant-numeric:tabular-nums;}
+.rbig{font-size:25px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1.1;}
+.rbig .unit{font-size:13px;font-weight:500;color:var(--ink-2);margin-left:2px;}
+.spark{width:100%;height:38px;display:block;}
+.rmore{font-size:12px;color:var(--rc);font-weight:500;}
+
+/* ── エリア内グラフの凡例 ───────────────────────────────── */
+.lg{display:flex;gap:12px 18px;flex-wrap:wrap;font-size:12px;color:var(--ink-2);
+  margin-top:12px;padding-top:11px;border-top:1px solid var(--line);}
+.lgi{display:flex;align-items:center;gap:6px;}
+.lgi i{width:16px;height:3px;border-radius:2px;}
+.axt{font-size:10px;fill:var(--ink-3);font-family:var(--body);}
+
+/* ── ランキング表 ───────────────────────────────────────── */
+.rank td{padding:9px 10px;}
+.rank .rk{width:30px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+.rank .mag{display:block;height:6px;border-radius:3px;min-width:2px;opacity:.85;}
+.rank td:nth-child(4){width:34%;}
+
+/* ── 総合表 ─────────────────────────────────────────────── */
+.ovr{min-width:520px;}
+.ovr .grp td{background:var(--surface-2);font-weight:700;font-size:12px;color:var(--ink-2);
+  letter-spacing:.04em;padding:7px 10px;}
+.ovr .rgn{border-left:3px solid var(--rc);padding-left:12px;}
+.ovr td.prov{color:var(--ink-3);font-style:italic;}
+.ovr td.prov::after{content:" 暫";font-size:9px;color:var(--warning-ink);font-style:normal;}
+
+.fine{font-size:11px;color:var(--ink-3);}
+.lgi{cursor:default;transition:opacity .12s;}
+.lgi.mut{opacity:.3;}
+.mlsvg .ml{transition:stroke-opacity .12s,stroke-width .12s;cursor:pointer;}

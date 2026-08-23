@@ -80,17 +80,25 @@ def build(
             if value.value:
                 cost_rates.setdefault(value.store_code, {})[month] = round(value.value, 4)
 
+    # エリア（大阪/東京/…）と、それぞれに属する稼働店コード
+    regions = [
+        {"name": r, "stores": [s.store_code for s in master.in_region(r)]}
+        for r in master.regions
+    ]
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
         "months": sorted(months),
         "metrics": METRICS,
+        "regions": regions,
         "stores": [
             {
                 "code": s.store_code,
                 "name": s.store_name,
                 "brand": s.brand,
                 "brand_name": s.brand_name,
+                "region": s.region,
                 "shared_facility": s.is_shared_facility,
             }
             for s in master.active
