@@ -30,15 +30,16 @@ const REGION_COLORS = {
 const regionColor = r => REGION_COLORS[r] || "#6B7280";
 
 // 施策の種類（色分け）。config/schedule.yaml の kind と対応。
+// 計画表の語彙に合わせている（GM改定／ランチ変更／おすすめ／忘年会／その他開発／休業）。
 const KIND = {
-  fair:    { label: "フェア",     color: "#C8791E" },
-  menu:    { label: "新メニュー", color: "#2E8B57" },
-  promo:   { label: "販促",       color: "#2E4A7D" },
-  renewal: { label: "改装明け",   color: "#1F5FBF" },
-  closure: { label: "休業",       color: "#8A8F99" },
-  switch:  { label: "設備",       color: "#7A4FA0" },
+  gm:        { label: "GM改定",    color: "#7A4FA0" },
+  lunch:     { label: "ランチ変更", color: "#1F7A8C" },
+  osusume:   { label: "おすすめ",   color: "#C8791E" },
+  bounenkai: { label: "忘年会",     color: "#2E4A7D" },
+  dev:       { label: "その他開発", color: "#2E8B57" },
+  closure:   { label: "休業",       color: "#8A8F99" },
 };
-const kindOf = k => KIND[k] || KIND.promo;
+const kindOf = k => KIND[k] || KIND.dev;
 
 // 日付まわり（"YYYY-MM" と "YYYY-MM-DD" を扱う。文字列比較で前後が分かる）
 const parseDate = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d || 1); };

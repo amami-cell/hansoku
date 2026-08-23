@@ -26,8 +26,8 @@ from ..model import (
 from ..settings import ROOT
 from ..stores import StoreMaster
 
-# 施策スケジュールの種類（色分けに使う）。未知の種類は promo に寄せる。
-VALID_KINDS = {"fair", "menu", "promo", "renewal", "closure", "switch"}
+# 施策スケジュールの種類（色分けに使う）。未知の種類は dev（その他開発）に寄せる。
+VALID_KINDS = {"gm", "lunch", "osusume", "bounenkai", "dev", "closure"}
 DEFAULT_SCHEDULE_PATH = ROOT / "config" / "schedule.yaml"
 
 
@@ -53,13 +53,23 @@ def load_schedule(
         if scope_all:
             codes = sorted(active)
         else:
-            codes = [str(x) for x in stores_field if str(x) in active]
+            # store_code そのもの、または店名（find_by_name で解決）どちらでも書ける
+            codes = []
+            for raw in stores_field:
+                token = str(raw)
+                if token in active:
+                    codes.append(token)
+                    continue
+                hit = master.find_by_name(token)
+                if hit and hit.store_code in active:
+                    codes.append(hit.store_code)
+            codes = list(dict.fromkeys(codes))  # 重複を除く（順序は保つ）
         if not codes:
             continue
 
-        kind = camp.get("kind", "promo")
+        kind = camp.get("kind", "dev")
         if kind not in VALID_KINDS:
-            kind = "promo"
+            kind = "dev"
         start = str(camp["start"])
         end = str(camp.get("end", start))
         out.append(

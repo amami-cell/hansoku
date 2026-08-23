@@ -20,7 +20,7 @@ def test_全店指定は稼働店に展開される(master, tmp_path):
           - id: all
             stores: all
             title: 全店施策
-            kind: promo
+            kind: bounenkai
             start: "2026-09-01"
             end: "2026-09-10"
     """)
@@ -36,7 +36,7 @@ def test_実在しない店コードは捨てる(master, tmp_path):
           - id: ghost
             stores: ["0000000"]
             title: 幽霊店
-            kind: fair
+            kind: osusume
             start: "2026-09-01"
             end: "2026-09-02"
     """)
@@ -44,7 +44,7 @@ def test_実在しない店コードは捨てる(master, tmp_path):
     assert load_schedule(master, path) == []
 
 
-def test_未知の種類はpromoに寄せる(master, tmp_path):
+def test_未知の種類はその他開発に寄せる(master, tmp_path):
     code = master.active_codes[0]
     path = _write(tmp_path, f"""
         campaigns:
@@ -56,7 +56,24 @@ def test_未知の種類はpromoに寄せる(master, tmp_path):
             end: "2026-09-02"
     """)
     camps = load_schedule(master, path)
-    assert camps[0]["kind"] == "promo"
+    assert camps[0]["kind"] == "dev"
+
+
+def test_店名でも指定できる(master, tmp_path):
+    # store_code ではなく店名で書いても find_by_name で解決される
+    name = master.active[0].store_name
+    code = master.active[0].store_code
+    path = _write(tmp_path, f"""
+        campaigns:
+          - id: byname
+            stores: ["{name}"]
+            title: 店名指定
+            kind: osusume
+            start: "2026-09-01"
+            end: "2026-09-30"
+    """)
+    camps = load_schedule(master, path)
+    assert camps[0]["stores"] == [code]
 
 
 def test_終了日省略は単日になる(master, tmp_path):
@@ -66,7 +83,7 @@ def test_終了日省略は単日になる(master, tmp_path):
           - id: point
             stores: ["{code}"]
             title: 単日
-            kind: renewal
+            kind: gm
             start: "2026-09-01"
     """)
     camps = load_schedule(master, path)

@@ -5,53 +5,128 @@
 #
 # 1件の書き方:
 #   - id:     好きな一意の文字列（重複しなければ何でも）
-#     stores: 対象店の store_code の配列。全店なら "all"（または省略）
+#     stores: 対象店。store_code の配列でも、店名の配列でもよい（例 ["1006"] / ["すさび湯 三宮"]）。
+#             全店なら "all"（または省略）。実在しない店は黙って捨てる。
 #     title:  帯に出す名前
-#     kind:   種類。色分けに使う。次のどれか:
-#               fair     … フェア・催事           (橙)
-#               menu     … 新メニュー・切替       (緑)
-#               promo    … 販促・キャンペーン     (藍)
-#               renewal  … 改装明け・リニューアル (藍・強)
-#               closure  … 休業・改装中           (灰)
-#               switch   … 設備変更（ダクト/喫煙可/改装など） (紫)
+#     kind:   種類（色分け）。計画表の語彙に対応:
+#               gm        … GM改定        (紫)
+#               lunch     … ランチ変更     (青)
+#               osusume   … 夏/秋おすすめ  (橙)
+#               bounenkai … 忘年会         (藍)
+#               dev       … その他開発（ケーキ/パフェ/コラボ/クリスマス等）(緑)
+#               closure   … 休業・改装中   (灰)
 #     start:  開始日 "YYYY-MM-DD"
-#     end:    終了日 "YYYY-MM-DD"（単日イベントは start と同じ日にする）
+#     end:    終了日 "YYYY-MM-DD"（単日イベントは start と同じ日 or 省略でマーカー表示）
 #     note:   補足（任意）
 #
-# store_code の一覧は config/stores.yaml を参照。
 # ------------------------------------------------------------
-# ↓ いまは動作確認用のサンプルです（title を「（例）」で始めています）。
-#   実際の施策を入れるときは、この4件を消して本物を追記してください。
+# ▼ これは「2026 年間販売計画表（実行計画 11月末迄＋2026忘年会）」からの
+#   下書き転記です（画面共有からの読み取り）。日付は概算で置いた箇所があります:
+#     「◯月中旬」→15日 / 「◯月上旬・初旬」→5日 / 「◯月下旬」→25日 / 「◯月」「◯月中」→1日
+#   実際の日付・内容は、この下を直接直すか、私に指示をください。
+#   （恒久的には、この Google スプレッドシートを直接取り込む形にできます）
 
 campaigns:
-  - id: ex-beer-fair
-    stores: ["1006"]
-    title: （例）夏のビールフェア
-    kind: fair
-    start: "2026-08-05"
-    end: "2026-08-25"
-    note: 動作確認用のサンプル。実施策に置き換えてください。
+  # ── すさび湯 梅田（1006）────────────────────────────
+  - { id: r1006-osusume, stores: ["1006"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
+  - { id: r1006-bounenkai, stores: ["1006"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1006-gm, stores: ["1006"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
 
-  - id: ex-new-menu
-    stores: ["2004"]
-    title: （例）新グランドメニュー切替
-    kind: menu
-    start: "2026-08-18"
-    end: "2026-09-05"
-    note: 動作確認用のサンプル。
+  # ── すさび湯 三宮（1169）────────────────────────────
+  - { id: r1169-osusume, stores: ["1169"], title: 秋おすすめ（神戸牛フェア）, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
+  - { id: r1169-bounenkai, stores: ["1169"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1169-gm, stores: ["1169"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
 
-  - id: ex-autumn-promo
-    stores: "all"
-    title: （例）秋の宴会予約キャンペーン
-    kind: promo
-    start: "2026-09-01"
-    end: "2026-09-20"
-    note: 全店対象のサンプル。scope 全店の見え方の確認用。
+  # ── すさび湯 烏丸（1712）────────────────────────────
+  - { id: r1712-osusume, stores: ["1712"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-11-30" }
+  - { id: r1712-bounenkai, stores: ["1712"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1712-gm, stores: ["1712"], title: GM改定, kind: gm, start: "2026-11-01", note: 開始月のみ（概算）}
 
-  - id: ex-kyoto-renewal
-    stores: ["1168"]
-    title: （例）リニューアルOPEN
-    kind: renewal
-    start: "2026-08-11"
-    end: "2026-08-11"
-    note: 単日イベント（マーカー表示）のサンプル。
+  # ── すさび湯 天満橋（1728）──────────────────────────
+  - { id: r1728-osusume, stores: ["1728"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
+  - { id: r1728-lunch, stores: ["1728"], title: ランチ変更②, kind: lunch, start: "2026-09-01", end: "2026-09-30", note: ①7/15-8/31は既存ベース }
+  - { id: r1728-gm, stores: ["1728"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
+
+  # ── すさび湯 歌舞伎町（1015）────────────────────────
+  - { id: r1015-osusume, stores: ["1015"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
+  - { id: r1015-bounenkai, stores: ["1015"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1015-gm, stores: ["1015"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
+
+  # ── んだんだ（2004）────────────────────────────────
+  - { id: r2004-bounenkai, stores: ["2004"], title: 忘年会（別途考案・新規）, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+
+  # ── GOLD 東通り（1163）─────────────────────────────
+  - { id: r1163-osusume, stores: ["1163"], title: 秋おすすめ（新規開発）, kind: osusume, start: "2026-09-01", end: "2026-11-30" }
+  - { id: r1163-bounenkai, stores: ["1163"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1163-gm, stores: ["1163"], title: GM改定, kind: gm, start: "2026-11-15", note: 11月中（概算）}
+
+  # ── GOLD お初（1729）───────────────────────────────
+  - { id: r1729-osusume, stores: ["1729"], title: 秋おすすめ（新規開発）, kind: osusume, start: "2026-09-01", end: "2026-11-30", note: 忘年会コースは無し }
+  - { id: r1729-gm, stores: ["1729"], title: GM改定, kind: gm, start: "2026-11-15", note: 11月中（概算）}
+
+  # ── GOLD ボルタ（1168）─────────────────────────────
+  - { id: r1168-osusume, stores: ["1168"], title: 秋おすすめ（小皿系4〜6品）, kind: osusume, start: "2026-09-01", end: "2026-11-30" }
+  - { id: r1168-gm, stores: ["1168"], title: GM改定, kind: gm, start: "2026-11-15", note: 11月中（概算）}
+
+  # ── ARATA（1097）──────────────────────────────────
+  - { id: r1097-osusume, stores: ["1097"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-11-30" }
+  - { id: r1097-bounenkai, stores: ["1097"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1097-xmas, stores: ["1097"], title: クリスマスコース（10月下旬打ち出し）, kind: dev, start: "2026-12-01", end: "2026-12-25" }
+  - { id: r1097-gm, stores: ["1097"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
+
+  # ── ひよこ飯店（1069）──────────────────────────────
+  - { id: r1069-osusume, stores: ["1069"], title: 秋おすすめ（点心フェア）, kind: osusume, start: "2026-10-01", end: "2026-11-30" }
+  - { id: r1069-bounenkai, stores: ["1069"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+
+  # ── ちゃーちゃん（1111）────────────────────────────
+  - { id: r1111-osusume, stores: ["1111"], title: 秋おすすめ（おでん）, kind: osusume, start: "2026-10-01", end: "2026-11-30" }
+
+  # ── 泡くらい（1115）────────────────────────────────
+  - { id: r1115-bounenkai, stores: ["1115"], title: 忘年会（鍋開発）, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+
+  # ── CRAFTMAN UMAMI（1131）──────────────────────────
+  - { id: r1131-osusume, stores: ["1131"], title: 秋おすすめ（新規開発）, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
+  - { id: r1131-bounenkai, stores: ["1131"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1131-lunch1, stores: ["1131"], title: 月ランチ①, kind: lunch, start: "2026-09-01", end: "2026-09-30" }
+  - { id: r1131-lunch2, stores: ["1131"], title: 月ランチ②, kind: lunch, start: "2026-10-01", end: "2026-10-31" }
+
+  # ── 料理と酒 たいだい（1137）───────────────────────
+  - { id: r1137-osusume, stores: ["1137"], title: 秋おすすめ（新規開発）, kind: osusume, start: "2026-09-01", end: "2026-11-30" }
+  - { id: r1137-gm, stores: ["1137"], title: GM改定, kind: gm, start: "2026-09-05", note: 9月初旬（概算）}
+
+  # ── NagaGutsu（1151）──────────────────────────────
+  - { id: r1151-bounenkai, stores: ["1151"], title: 忘年会（既存コース名称変更）, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1151-gm, stores: ["1151"], title: GM改定, kind: gm, start: "2026-08-15", note: 8月中旬（概算）}
+
+  # ── 熊の鳥焼（1154）────────────────────────────────
+  - { id: r1154-osusume, stores: ["1154"], title: 秋おすすめ（釜飯・牛肉）, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
+  - { id: r1154-bounenkai, stores: ["1154"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+
+  # ── ルクアLargo（1160）─────────────────────────────
+  - { id: r1160-osusume, stores: ["1160"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-09-30" }
+  - { id: r1160-cake, stores: ["1160"], title: ケーキ（洋ナシタルト変更）, kind: dev, start: "2026-09-01", end: "2026-09-30" }
+  - { id: r1160-parfait, stores: ["1160"], title: パフェ（ハロウィン）, kind: dev, start: "2026-09-15", end: "2026-10-31" }
+
+  # ── 門真Largo（1713）───────────────────────────────
+  - { id: r1713-osusume, stores: ["1713"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-11-20" }
+  - { id: r1713-fair, stores: ["1713"], title: 秋フェア（エクレア他）, kind: dev, start: "2026-09-01", end: "2026-11-20", note: ドーナツは検討 }
+  - { id: r1713-gm, stores: ["1713"], title: GM改定, kind: gm, start: "2026-09-25", note: 9月下旬（概算）}
+
+  # ── 味のたぬきや（1162）────────────────────────────
+  - { id: r1162-osusume, stores: ["1162"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
+  - { id: r1162-bounenkai, stores: ["1162"], title: 忘年会（コース一部変更）, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+
+  # ── ぎふや パナンテ天満橋（1739）───────────────────
+  - { id: r1739-osusume, stores: ["1739"], title: 秋おすすめ（小皿系4〜6品）, kind: osusume, start: "2026-09-20", end: "2026-11-30" }
+  - { id: r1739-lunch, stores: ["1739"], title: ランチ変更, kind: lunch, start: "2026-08-01" }
+  - { id: r1739-gm, stores: ["1739"], title: GM改定, kind: gm, start: "2026-11-01", note: 開始月のみ（概算）}
+
+  # ── すさび湯 河原町三条店（1742）───────────────────
+  - { id: r1742-osusume, stores: ["1742"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
+  - { id: r1742-bounenkai, stores: ["1742"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1742-gm, stores: ["1742"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
+
+  # ── すさび湯 新宿東口店（1743）─────────────────────
+  - { id: r1743-osusume, stores: ["1743"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
+  - { id: r1743-bounenkai, stores: ["1743"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1743-gm, stores: ["1743"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
