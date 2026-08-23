@@ -1,8 +1,8 @@
 name: 確認用プレビューを公開
 
-# デザイン確認用の公開URL。認証なしで誰でも開ける。
-# 本番（hansoku / Access保護）とは別の Worker（hansoku-preview）として配るので、
-# 全店の実データが公開される心配はない。中身は見本の3店舗のみ。
+# デザイン確認用の公開URL（認証なし）。本番と同じ画面を配る。
+# 本番（hansoku / Access保護）とは別の Worker なので、認証設定はこちらに及ばない。
+# データは本番Neonから生成して同梱する（確認用。全店の実データが載る）。
 
 on:
   workflow_dispatch:
@@ -13,19 +13,36 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: データを書き出す
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          python -m hansoku.cli export-web \
+            --date-from 2025-01-01 --date-to 2026-12-31 --out web/data
+
       - name: Cloudflare へ公開（プレビュー・認証なし）
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -o pipefail
-          TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]\"'"'")"
-          ACCOUNT="$(printf '%s' "$CF_ACCOUNT" | tr -d '[:space:]\"'"'")"
+          TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]\"'"'"'"'"')"
+          ACCOUNT="$(printf '%s' "$CF_ACCOUNT" | tr -d '[:space:]\"'"'"'"'"')"
           npm install -g wrangler@4
           export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT"
           npx wrangler deploy --config wrangler-preview.toml 2>&1 | tee /tmp/wr.log
           url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/wr.log | head -1 || true)
-          if [ -n "$url" ]; then
-            echo "## 確認用URL（認証なし）" >> "$GITHUB_STEP_SUMMARY"
-            echo "**$url**" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          [ -n "$url" ] && { echo "## 確認用URL（認証なし）" >> "$GITHUB_STEP_SUMMARY"; echo "**$url**" >> "$GITHUB_STEP_SUMMARY"; }

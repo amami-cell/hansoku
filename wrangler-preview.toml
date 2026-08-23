@@ -1,9 +1,10 @@
 # デザイン確認用のプレビュー（認証なし・公開）。
-# 本番の hansoku（Access保護・全店実データ）とは別の Worker として配る。
-# 中身は3店舗＋んだんだの推移だけの見本で、全店データは載せない。
+# 本番と同じ画面（web/）を配るが、Access を付けないので誰でも開ける。
+# データはデプロイ時に本番Neonから生成して web/data に置く。
+# 全店の実データが載る点に注意（確認用。不要になったら wrangler delete で消す）。
 name = "hansoku-preview"
 compatibility_date = "2025-01-01"
 
 [assets]
-directory = "./web-preview"
+directory = "./web"
 not_found_handling = "single-page-application"
