@@ -17,7 +17,7 @@ from datetime import date, datetime
 
 from .analytics import RATIO_METRICS, ratio, totals
 from .db import AggregateQuery, get_appdb, get_warehouse
-from .ingest.fw_sheet import ingest
+from .ingest.fw_sheet import TAB_TO_METRIC, ingest
 from .ingest.sheets_client import FixtureSheetReader, GoogleSheetReader
 from .model import GRAIN_MONTH, GRAINS
 from .settings import load_settings
@@ -129,6 +129,37 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sheet_tabs(args: argparse.Namespace) -> int:
+    """
+    取り込み元シートのタブ一覧を出す。
+
+    どの指標が既に書き出されているかを確かめるための診断用。
+    「インフォマートの集計タブはもう存在するのか」のような問いに、
+    シートを開かずに答えられる。
+    """
+    settings = load_settings()
+    if not settings.sources.service_account_json:
+        print("GOOGLE_SERVICE_ACCOUNT_JSON が未設定です。", file=sys.stderr)
+        return 2
+
+    reader = GoogleSheetReader(
+        args.spreadsheet or settings.sources.fw_spreadsheet_id,
+        settings.sources.service_account_json,
+    )
+    known = set(TAB_TO_METRIC)
+    tabs = reader.tab_names()
+    print(f"タブ数: {len(tabs)}\n")
+    for tab in tabs:
+        mark = "取込済" if tab in known else "未使用"
+        rows = len(reader.values(tab))
+        print(f"  [{mark}] {tab}  （{rows} 行）")
+
+    unused = [t for t in tabs if t not in known]
+    if unused:
+        print(f"\n取り込んでいないタブ: {', '.join(unused)}")
+    return 0
+
+
 def cmd_grant_admin(args: argparse.Namespace) -> int:
     with get_appdb() as db:
         count = db.grant_admin(args.email)
@@ -183,6 +214,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="束ね方（複数指定可。既定は store_code）。date を指定すると月別の推移が見られる",
     )
     agg.set_defaults(func=cmd_aggregate, group_by=None)
+
+    tabs = sub.add_parser("sheet-tabs", help="取り込み元シートのタブ一覧を出す（診断用）")
+    tabs.add_argument("--spreadsheet", help="スプレッドシートID（既定はFW共有シート）")
+    tabs.set_defaults(func=cmd_sheet_tabs)
 
     grant = sub.add_parser("grant-admin", help="admin 権限を付与する")
     grant.add_argument("email")

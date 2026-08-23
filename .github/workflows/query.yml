@@ -39,6 +39,10 @@ on:
           - date
           - metric
         default: store_code
+      inspect_sheet:
+        description: '集計の代わりに、取り込み元シートのタブ一覧を出す'
+        type: boolean
+        default: false
 
 env:
   TZ: Asia/Tokyo
@@ -59,7 +63,27 @@ jobs:
       - name: 依存パッケージをインストール
         run: pip install -r requirements.txt
 
+      - name: 取り込み元シートのタブ一覧
+        if: ${{ inputs.inspect_sheet }}
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          FW_SPREADSHEET_ID: ${{ secrets.FW_SPREADSHEET_ID }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          {
+            echo '## 取り込み元シートのタブ一覧'
+            echo ''
+            echo '```'
+            python -m hansoku.cli sheet-tabs
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: 集計
+        if: ${{ !inputs.inspect_sheet }}
         env:
           HANSOKU_ENV: cloud
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
