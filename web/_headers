@@ -1,0 +1,6 @@
+# Cloudflare Pages のヘッダ設定
+# データJSONは毎晩更新されるのでキャッシュさせない。画面のガワは短時間キャッシュ。
+/data/*
+  Cache-Control: no-store
+/*.html
+  Cache-Control: public, max-age=300

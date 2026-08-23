@@ -19,3 +19,6 @@ venv/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+
+# 画面のデータは夜間バッチが生成する。検証用サンプルはコミットしない
+web/data/dashboard.json

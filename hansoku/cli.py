@@ -210,6 +210,21 @@ def cmd_fw_explore(args: argparse.Namespace) -> int:
     return explore(args.path or [], Path(args.artifacts))
 
 
+def cmd_export_web(args: argparse.Namespace) -> int:
+    from .web.export import build, write
+
+    settings = load_settings()
+    master = StoreMaster.load(args.stores)
+    with get_warehouse(settings) as warehouse:
+        payload = build(
+            warehouse, master, date_from=args.date_from, date_to=args.date_to
+        )
+    path = write(payload, Path(args.out))
+    print(f"書き出し完了: {path}")
+    print(f"  店舗 {len(payload['stores'])} / 月 {len(payload['months'])}")
+    return 0
+
+
 def cmd_grant_admin(args: argparse.Namespace) -> int:
     with get_appdb() as db:
         count = db.grant_admin(args.email)
@@ -293,6 +308,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     explore.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
     explore.set_defaults(func=cmd_fw_explore)
+
+    export = sub.add_parser("export-web", help="画面が読む JSON を書き出す")
+    export.add_argument("--date-from", required=True, type=_date, dest="date_from")
+    export.add_argument("--date-to", required=True, type=_date, dest="date_to")
+    export.add_argument("--out", default="web/data", help="書き出し先ディレクトリ")
+    export.set_defaults(func=cmd_export_web)
 
     grant = sub.add_parser("grant-admin", help="admin 権限を付与する")
     grant.add_argument("email")
