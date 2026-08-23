@@ -53,8 +53,9 @@ const addMonth = (ym, delta) => {
 const monthRange = (a, b) => { const out = []; let cur = a; while (cur <= b) { out.push(cur); cur = addMonth(cur, 1); } return out; };
 
 let DATA = null;
-let VIEW = { kind: "schedule" };   // schedule(TOP) | store,code | list(店カード) | overview
+let VIEW = { kind: "schedule" };   // schedule(TOP) | calendar | store,code | list | overview
 let METRIC = "sales";
+let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"）
 
 const CURRENT_MONTH = (() => {
   const d = new Date();
@@ -75,6 +76,7 @@ async function boot() {
       `<div class="empty">データを読み込めませんでした（${e.message}）。<br>夜間バッチの書き出しをお待ちください。</div>`;
     return;
   }
+  CAL_MONTH = CURRENT_MONTH;
   buildMetricSelect();
   buildStoreJump();
   render();
@@ -164,15 +166,24 @@ function render() {
   if (VIEW.kind === "store") app.innerHTML = renderStore(VIEW.code);
   else if (VIEW.kind === "overview") app.innerHTML = renderOverview();
   else if (VIEW.kind === "list") app.innerHTML = renderList();
+  else if (VIEW.kind === "calendar") app.innerHTML = renderCalendar();
   else app.innerHTML = renderSchedule();
 
   app.querySelectorAll("[data-store]").forEach(el =>
     el.addEventListener("click", () => go({ kind: "store", code: el.dataset.store })));
   app.querySelectorAll("[data-view]").forEach(el =>
     el.addEventListener("click", () => go({ kind: el.dataset.view })));
+  app.querySelectorAll("[data-cal]").forEach(el =>
+    el.addEventListener("click", () => { CAL_MONTH = addMonth(CAL_MONTH, el.dataset.cal === "next" ? 1 : -1); render(); }));
   wireEmphasis(app);
 }
 function go(v) { VIEW = v; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+
+// タイムライン⇄カレンダーの切替
+function viewToggle(active) {
+  const t = (k, label) => `<button class="vtab${active === k ? " on" : ""}" data-view="${k}">${label}</button>`;
+  return `<div class="viewtabs">${t("schedule", "タイムライン")}${t("calendar", "カレンダー")}</div>`;
+}
 
 // ── 全店スケジュール（TOP・主役）────────────────────────────────────────
 // 重なる施策を段（レーン）に振り分ける。start順に、空いた段へ置いていく。
@@ -254,6 +265,7 @@ function renderSchedule() {
     : "";
 
   return `
+    ${viewToggle("schedule")}
     <section class="block">
       <div class="bhead"><h2>全店スケジュール</h2>
         <span class="bnote">${months[0]}〜${months[months.length - 1]}　店を選ぶと詳細へ</span></div>
@@ -265,6 +277,71 @@ function renderSchedule() {
           <div class="strack">${gridlines}${monthLabels}${todayLine}${todayLab}</div>
         </div>
         ${rowsHtml}
+      </div></div>
+    </section>
+    <div class="ovrlink">
+      <button class="linkbtn" data-view="list">店舗カードで見る →</button>
+      <span class="sep">／</span>
+      <button class="linkbtn" data-view="overview">エリア・全店の表 →</button>
+    </div>`;
+}
+
+function legendHtml() {
+  return Object.values(KIND).map(v => `<span class="klg"><i style="background:${v.color}"></i>${v.label}</span>`).join("");
+}
+
+// ── カレンダー（月表示・打ち出し日中心）─────────────────────────────────
+function renderCalendar() {
+  const camps = DATA.campaigns || [];
+  const [Y, M] = CAL_MONTH.split("-").map(Number);
+  const first = new Date(Y, M - 1, 1);
+  const startDow = first.getDay();
+  const daysInMonth = new Date(Y, M, 0).getDate();
+  const weeks = Math.ceil((startDow + daysInMonth) / 7);
+  const gridStart = new Date(Y, M - 1, 1 - startDow);
+  const key = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+  // 打ち出し日（開始日）と単日イベントを、その日に置く
+  const byDay = {};
+  for (const c of camps) for (const code of c.stores) (byDay[c.start] ||= []).push({ code, c });
+
+  const todayKey = key(new Date());
+  const dows = ["日", "月", "火", "水", "木", "金", "土"];
+  const head = dows.map((w, i) => `<div class="caldow${i === 0 ? " sun" : i === 6 ? " sat" : ""}">${w}</div>`).join("");
+
+  let cells = "";
+  for (let i = 0; i < weeks * 7; i++) {
+    const d = new Date(gridStart); d.setDate(gridStart.getDate() + i);
+    const inMonth = d.getMonth() === M - 1;
+    const dow = d.getDay();
+    const k = key(d);
+    const evs = byDay[k] || [];
+    const shown = evs.slice(0, 3);
+    const chips = shown.map(({ code, c }) => {
+      const kc = kindOf(c.kind);
+      const pt = c.start === c.end;
+      const range = pt ? c.start : `${c.start}〜${c.end}`;
+      return `<button class="cev${pt ? " pt" : ""}" data-store="${code}" style="--kc:${kc.color}"
+         title="${storeName(code)}｜${c.title}（${range}）">${storeName(code)} ${c.title}</button>`;
+    }).join("");
+    const more = evs.length > shown.length ? `<div class="cmore">＋${evs.length - shown.length}件</div>` : "";
+    cells += `<div class="calcell${inMonth ? "" : " other"}${dow === 0 ? " sun" : dow === 6 ? " sat" : ""}${k === todayKey ? " today" : ""}">
+      <div class="cdno">${d.getDate()}</div>${chips}${more}</div>`;
+  }
+
+  return `
+    ${viewToggle("calendar")}
+    <section class="block">
+      <div class="calnav">
+        <button class="linkbtn" data-cal="prev">◀ 前の月</button>
+        <div class="caltitle">${Y}年${M}月</div>
+        <button class="linkbtn" data-cal="next">次の月 ▶</button>
+      </div>
+      <div class="bnote" style="margin-bottom:10px">打ち出し日・単日イベント（おすすめ開始／忘年会開始／ランチ変更／GM改定 等）を表示。期間の帯はタイムラインで。</div>
+      <div class="klgrow">${legendHtml()}</div>
+      <div class="cal"><div class="cal-inner">
+        <div class="calgrid calhead">${head}</div>
+        <div class="calgrid calbody">${cells}</div>
       </div></div>
     </section>
     <div class="ovrlink">

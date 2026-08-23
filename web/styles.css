@@ -203,6 +203,46 @@ tbody tr:last-child td{border-bottom:0;}
 .ovrlink .linkbtn:hover{color:var(--accent);}
 .sep{color:var(--ink-3);margin:0 6px;}
 
+/* ── 表示切替（タイムライン⇄カレンダー）─────────────────── */
+.viewtabs{display:inline-flex;gap:2px;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:999px;padding:3px;margin-bottom:18px;}
+.vtab{font:inherit;font-size:13px;color:var(--ink-2);background:none;border:0;border-radius:999px;
+  padding:6px 16px;cursor:pointer;}
+.vtab:hover{color:var(--accent);}
+.vtab.on{background:var(--accent);color:#fff;font-weight:500;}
+:root[data-theme="dark"] .vtab.on,:root:not([data-theme="light"]) .vtab.on{color:#0E1116;}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]) .vtab.on{color:#fff;}}
+
+/* ── カレンダー（月表示）─────────────────────────────────── */
+.calnav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;}
+.caltitle{font-family:var(--display);font-size:20px;font-weight:700;letter-spacing:.02em;}
+.cal{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);overflow-x:auto;}
+.cal-inner{min-width:680px;}
+.calgrid{display:grid;grid-template-columns:repeat(7,1fr);}
+.calhead .caldow{padding:8px 6px;text-align:center;font-size:12px;font-weight:500;color:var(--ink-3);
+  border-bottom:1px solid var(--line-strong);}
+.caldow.sun{color:var(--critical-ink);} .caldow.sat{color:var(--accent);}
+.calcell{min-height:98px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+  padding:5px 5px 7px;display:flex;flex-direction:column;gap:3px;overflow:hidden;}
+.calcell:nth-child(7n){border-right:0;}
+.calbody .calcell:nth-last-child(-n+7){border-bottom:0;}
+.calcell.other{background:var(--surface-2);}
+.calcell.other .cdno{color:var(--ink-3);opacity:.55;}
+.calcell.sun .cdno{color:var(--critical-ink);} .calcell.sat .cdno{color:var(--accent);}
+.calcell.today{background:var(--accent-soft);}
+.cdno{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink-2);margin-bottom:1px;}
+.calcell.today .cdno{background:var(--accent);color:#fff;border-radius:50%;width:20px;height:20px;
+  display:inline-flex;align-items:center;justify-content:center;}
+.cev{display:block;width:100%;text-align:left;font:inherit;font-size:10.5px;line-height:1.4;color:#fff;
+  background:var(--kc);border:0;border-radius:4px;padding:2px 5px;cursor:pointer;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cev:hover{filter:brightness(1.08);}
+.cev.pt{background:transparent;color:var(--kc);border:1px solid var(--kc);font-weight:600;}
+.cev.pt::before{content:"◆ ";}
+.cmore{font-size:10px;color:var(--ink-3);padding-left:2px;}
+@media (max-width:640px){.calcell{min-height:72px;}.cev{font-size:9.5px;}}
+
 /* ── 全店スケジュール（TOP）─────────────────────────────── */
 .klgrow{display:flex;gap:8px 15px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--ink-2);}
 .klg{display:flex;align-items:center;gap:6px;}
