@@ -48,9 +48,19 @@ def _abs(path: str) -> Path:
 
 @dataclass(frozen=True)
 class WarehouseSettings:
-    """実績データ（f_actuals）の置き場。cloud=BigQuery / local=DuckDB。"""
+    """
+    実績データ（f_actuals）の置き場。
+
+    backend で実装を選ぶ:
+      postgres … Neon。現在の本番。複数年分の履歴を保持できる
+      duckdb   … ローカル検証用
+      bigquery … 時間帯別・商品別実績（年150万行規模）が入ってきたときの移行先。
+                 GCPプロジェクトにお支払い情報の登録が要る
+                 （サンドボックスは DML 不可・60日でデータ削除のため使えない）
+    """
 
     env: Env
+    backend: str
     project: str
     dataset: str
     service_account_json: str
@@ -112,11 +122,18 @@ def load_settings(env: Env | None = None) -> Settings:
 
     sa_json = _env("GOOGLE_SERVICE_ACCOUNT_JSON")
 
+    # 実績の置き場。既定は cloud なら Neon、ローカルなら DuckDB。
+    backend = _env("WAREHOUSE_BACKEND") or ("postgres" if cloud else "duckdb")
+    if backend not in {"postgres", "duckdb", "bigquery"}:
+        raise SettingsError(f"WAREHOUSE_BACKEND が不正です: {backend!r}")
+    needs_bigquery = cloud and backend == "bigquery"
+
     warehouse = WarehouseSettings(
         env=resolved,
+        backend=backend,
         project=(
             _require("BIGQUERY_PROJECT", _env("BIGQUERY_PROJECT"), "BigQueryのGCPプロジェクトID")
-            if cloud
+            if needs_bigquery
             else _env("BIGQUERY_PROJECT")
         ),
         dataset=_env("BIGQUERY_DATASET", "hansoku"),
@@ -126,7 +143,7 @@ def load_settings(env: Env | None = None) -> Settings:
                 sa_json,
                 "サービスアカウント鍵（JSONの中身、またはJSONファイルのパス）",
             )
-            if cloud
+            if needs_bigquery
             else sa_json
         ),
         local_path=_abs(_env("LOCAL_WAREHOUSE_PATH", ".local/warehouse.duckdb")),

@@ -26,8 +26,15 @@ __all__ = [
 
 
 def get_warehouse(settings: Settings | None = None) -> Warehouse:
+    """WAREHOUSE_BACKEND（既定: cloud なら postgres、ローカルなら duckdb）で実装を選ぶ。"""
     resolved = settings or load_settings()
-    if resolved.env == "cloud":
+    backend = resolved.warehouse.backend
+
+    if backend == "postgres":
+        from .postgres_wh import PostgresWarehouse
+
+        return PostgresWarehouse(resolved.appdb)
+    if backend == "bigquery":
         from .bigquery_wh import BigQueryWarehouse
 
         return BigQueryWarehouse(resolved.warehouse)

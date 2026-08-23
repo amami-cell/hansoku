@@ -1,9 +1,15 @@
 """
 Warehouse（実績データ f_actuals）の共通インターフェースとSQL構築。
 
-本番は BigQuery、ローカル検証は DuckDB。どちらも同じSQLで動くよう、
-方言差（テーブル名の修飾・名前付きパラメータの記法）だけを各実装が吸収する。
-QUALIFY は BigQuery / DuckDB の両方が解釈できるため、重複排除は共通SQLで書ける。
+同じSQLを PostgreSQL（Neon・本番）/ DuckDB（ローカル検証）/ BigQuery（将来）で
+動かすため、方言差はここに閉じ込める。差があるのは3点だけ:
+
+  * 名前付きパラメータの書き方（%(x)s / $x / @x）
+  * 配列を使った IN 述語の書き方
+  * テーブル名の修飾
+
+重複排除に QUALIFY は使わない。BigQuery と DuckDB は解釈できるが
+PostgreSQL は解釈できないため、どこでも通る副問い合わせの形にしている。
 """
 from __future__ import annotations
 
@@ -30,25 +36,27 @@ COLUMNS: tuple[str, ...] = (
     "ingested_at",
 )
 
-# 同じ実績が「中間」と「確定」の両方で入っている場合、確定を採る。
-# 同じ確定区分なら後から取り込んだ行を採る。
-_DEDUP = """
-    QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY store_code, date, grain, hour, metric, product_name, product_category
-        ORDER BY CASE WHEN kind = '確定' THEN 0 ELSE 1 END, ingested_at DESC
-    ) = 1
-"""
-
 _PARAM = re.compile(r":([a-z_][a-z0-9_]*)", re.IGNORECASE)
 
+# 方言ごとの差分: (パラメータの書き方, 配列IN述語のひな型)
+DIALECTS: dict[str, tuple[str, str]] = {
+    "postgres": ("pyformat", "{column} = ANY(%({param})s)"),
+    "duckdb": ("dollar", "{column} IN (SELECT UNNEST(${param}))"),
+    "bigquery": ("at", "{column} IN UNNEST(@{param})"),
+}
 
-def render_params(sql: str, style: str) -> str:
+
+def render_params(sql: str, dialect: str) -> str:
     """``:name`` 形式のパラメータを各方言の記法へ変換する。"""
-    if style == "at":  # BigQuery
-        return _PARAM.sub(r"@\1", sql)
-    if style == "dollar":  # DuckDB
+    try:
+        style, _ = DIALECTS[dialect]
+    except KeyError:
+        raise ValueError(f"未知の方言です: {dialect}") from None
+    if style == "pyformat":
+        return _PARAM.sub(r"%(\1)s", sql)
+    if style == "dollar":
         return _PARAM.sub(r"$\1", sql)
-    raise ValueError(f"未知のパラメータ記法です: {style}")
+    return _PARAM.sub(r"@\1", sql)
 
 
 @dataclass(frozen=True)
@@ -90,14 +98,19 @@ class AggregateQuery:
             )
 
 
-def build_aggregate_sql(table: str, query: AggregateQuery) -> tuple[str, dict[str, Any]]:
+def build_aggregate_sql(
+    table: str, query: AggregateQuery, dialect: str = "duckdb"
+) -> tuple[str, dict[str, Any]]:
     """
     集計SQLと名前付きパラメータを組み立てる。
 
     加法的な指標（売上・客数など）は SUM、比率系（客単価など）は AVG で束ねる。
-    比率を正しく出したい場合は分子・分母の指標から組み直すこと（``derive`` 参照）。
+    比率を正しく出したい場合は分子・分母の指標から組み直すこと（``analytics`` 参照）。
     """
     query.validate()
+    if dialect not in DIALECTS:
+        raise ValueError(f"未知の方言です: {dialect}")
+    _, array_in = DIALECTS[dialect]
 
     where = ["grain = :grain", "date BETWEEN :date_from AND :date_to"]
     params: dict[str, Any] = {
@@ -114,17 +127,24 @@ def build_aggregate_sql(table: str, query: AggregateQuery) -> tuple[str, dict[st
         ("product_names", query.product_names, "product_name"),
     ):
         if values:
-            where.append(f"{column} IN (SELECT UNNEST(:{name}))")
+            where.append(array_in.format(column=column, param=name))
             params[name] = list(values)
 
     group_sql = ", ".join(query.group_by)
     additive = ", ".join(f"'{m}'" for m in sorted(ADDITIVE_METRICS))
     sql = f"""
-WITH deduped AS (
-    SELECT {', '.join(COLUMNS)}
+WITH ranked AS (
+    SELECT
+        {', '.join(COLUMNS)},
+        ROW_NUMBER() OVER (
+            PARTITION BY store_code, date, grain, hour, metric,
+                         product_name, product_category
+            -- 同じ実績が「中間」と「確定」の両方で入っていれば確定を採る。
+            -- 同じ確定区分なら後から取り込んだ行を採る。
+            ORDER BY CASE WHEN kind = '確定' THEN 0 ELSE 1 END, ingested_at DESC
+        ) AS row_rank
     FROM {table}
     WHERE {' AND '.join(where)}
-    {_DEDUP}
 )
 SELECT
     {group_sql},
@@ -133,7 +153,8 @@ SELECT
         ELSE AVG(value)
     END AS value,
     COUNT(*) AS row_count
-FROM deduped
+FROM ranked
+WHERE row_rank = 1
 GROUP BY {group_sql}
 ORDER BY {group_sql}
 """.strip()
@@ -143,7 +164,7 @@ ORDER BY {group_sql}
 class Warehouse(ABC):
     """実績データの読み書き口。"""
 
-    param_style: str = "dollar"
+    dialect: str = "duckdb"
 
     @abstractmethod
     def ensure_schema(self) -> None:
@@ -163,13 +184,13 @@ class Warehouse(ABC):
         戻り値は挿入した行数。
         """
 
-    def aggregate(self, query: AggregateQuery) -> list[dict[str, Any]]:
-        sql, params = build_aggregate_sql(self.table_name("f_actuals"), query)
-        return self.query(sql, params)
-
     @abstractmethod
     def table_name(self, name: str) -> str:
         """方言に応じた完全修飾テーブル名。"""
+
+    def aggregate(self, query: AggregateQuery) -> list[dict[str, Any]]:
+        sql, params = build_aggregate_sql(self.table_name("f_actuals"), query, self.dialect)
+        return self.query(sql, params)
 
     def close(self) -> None:  # pragma: no cover - 実装によっては何もしない
         pass

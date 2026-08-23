@@ -27,12 +27,32 @@ def reader():
     return FixtureSheetReader.from_file(FIXTURE)
 
 
-@pytest.fixture
-def warehouse():
-    """インメモリ DuckDB。BigQuery と同じ Warehouse インターフェース。"""
-    from hansoku.db.duckdb_wh import DuckDBWarehouse
+@pytest.fixture(params=["duckdb", "postgres"])
+def warehouse(request):
+    """
+    Warehouse の実装を切り替えながら同じテストを流す。
 
-    wh = DuckDBWarehouse()
+    本番は PostgreSQL（Neon）だが、認証情報が無い環境でも検証できるよう
+    DuckDB 実装も同じインターフェースで揃えてある。両方に同じテストを当てて、
+    片方だけで通る実装にならないようにする。
+    """
+    if request.param == "duckdb":
+        from hansoku.db.duckdb_wh import DuckDBWarehouse
+
+        wh = DuckDBWarehouse()
+    else:
+        dsn = os.environ.get("HANSOKU_TEST_DATABASE_URL")
+        if not dsn:
+            pytest.skip("HANSOKU_TEST_DATABASE_URL が未設定のためスキップ")
+
+        from hansoku.db.postgres_wh import PostgresWarehouse
+        from hansoku.settings import AppDbSettings
+
+        wh = PostgresWarehouse(AppDbSettings(env="local", dsn=dsn))
+        wh.ensure_schema()
+        wh.query("DELETE FROM f_actuals")
+        wh.conn.commit()
+
     wh.ensure_schema()
     yield wh
     wh.close()

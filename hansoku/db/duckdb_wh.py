@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS f_actuals (
 
 
 class DuckDBWarehouse(Warehouse):
-    param_style = "dollar"
+    dialect = "duckdb"
 
     def __init__(self, path: Path | str | None = None):
         # path 未指定ならインメモリ（テスト用）
@@ -52,7 +52,7 @@ class DuckDBWarehouse(Warehouse):
         self._conn.execute(DDL)
 
     def query(self, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-        rendered = render_params(sql, self.param_style)
+        rendered = render_params(sql, self.dialect)
         cursor = self._conn.execute(rendered, params or {})
         columns = [d[0] for d in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]

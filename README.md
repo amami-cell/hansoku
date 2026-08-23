@@ -24,24 +24,33 @@
 ## 構成
 
 ```
-FW実績（大量・追記・集計）        → BigQuery       集計・分析エンジン
-施策/目標/マスタ/集計結果         → Neon           アプリ的な読み書き
+実績・施策・目標・マスタ・集計結果  → Neon           サーバーレス PostgreSQL
 PDF・制作物                      → Cloudflare R2  ファイル蓄積（下り無料）
 表示                             → GitHub Pages   公開JSON・SPA
 書き込み・認証                    → GAS Web App
 バッチ集計・通知                  → GitHub Actions
 ```
 
-2つのDBは物理的に別で、`store_code` / `campaign_id` / `date` を共通キーに論理結合する。
-
 ```
-バッチが Neon のマスタを読む
-  → BigQuery の f_actuals に集計クエリ
-  → 結果を Neon の f_daily / f_campaign_summary へ書き戻す
-  → 画面は Neon / 静的JSON の計算済みを読むだけ
+バッチが Neon のマスタと f_actuals を読む
+  → 集計して f_daily / f_campaign_summary へ書き戻す
+  → 画面は計算済みのそれを読むだけ
 ```
 
-**画面表示時に BigQuery は叩かない**（クエリ課金と遅延を避けるため）。
+**画面表示時に生の実績を集計しない**（遅延を避けるため事前計算する）。
+
+### 実績の置き場について
+
+当初は実績（`f_actuals`）を BigQuery に置く設計だったが、GCPプロジェクトが
+サンドボックス（お支払い情報未登録）で次の制限にかかるため、当面 Neon に置いている。
+
+- DML が使えない → 冪等な再取り込みができない
+- **テーブルが60日で自動削除される → 前年同期比が原理的に作れない**
+
+いま取り込めているのは月次9指標のみで年間2,600行程度と小さく、Neon の無料枠で
+何年分でも保持できる。時間帯別売上・ABC分析（年150万行規模）が実際に取れるように
+なった時点で BigQuery へ移す。`Warehouse` 抽象があるので切り替えは実装の差し替えで済み、
+`WAREHOUSE_BACKEND=bigquery` で選べるところまで作ってある。
 
 ---
 

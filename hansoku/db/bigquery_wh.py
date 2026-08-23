@@ -31,7 +31,7 @@ def _credentials(raw: str):
 
 
 class BigQueryWarehouse(Warehouse):
-    param_style = "at"
+    dialect = "bigquery"
 
     def __init__(self, settings: WarehouseSettings):
         from google.cloud import bigquery
@@ -87,7 +87,7 @@ class BigQueryWarehouse(Warehouse):
         return "STRING"
 
     def query(self, sql: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-        rendered = render_params(sql, self.param_style)
+        rendered = render_params(sql, self.dialect)
         config = self._bq.QueryJobConfig(
             query_parameters=[self._parameter(k, v) for k, v in (params or {}).items()]
         )

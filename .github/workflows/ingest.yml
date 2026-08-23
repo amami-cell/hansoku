@@ -43,14 +43,14 @@ jobs:
 
       - name: Secrets の確認
         env:
+          # 実績もマスタも Neon に置くため、必須はこの2つ。
+          # GOOGLE_SERVICE_ACCOUNT_JSON は FW共有シートの読み取りに使う。
           SA: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
           NEON: ${{ secrets.NEON_DATABASE_URL }}
         run: |
           miss=""
-          [ -z "$SA" ]      && miss="$miss GOOGLE_SERVICE_ACCOUNT_JSON"
-          [ -z "$PROJECT" ] && miss="$miss BIGQUERY_PROJECT"
-          [ -z "$NEON" ]    && miss="$miss NEON_DATABASE_URL"
+          [ -z "$SA" ]   && miss="$miss GOOGLE_SERVICE_ACCOUNT_JSON"
+          [ -z "$NEON" ] && miss="$miss NEON_DATABASE_URL"
           if [ -n "$miss" ]; then
             echo "::error::未設定のSecrets:$miss （docs/setup.md の手順で登録してください）"
             exit 1
