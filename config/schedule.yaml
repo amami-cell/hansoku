@@ -103,6 +103,9 @@ campaigns:
   - { id: r1154-bounenkai, stores: ["1154"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
 
   # ── ルクアLargo（1160）─────────────────────────────
+  # NOTE: 画像3「日別スケジュール(largo)」の2026年間ライン（ケーキ/パフェ/コラボ）は
+  #       このルクアLargo が対象。ただし2026は変更が出る可能性あり → 確定版が来たら
+  #       ここに追記する（2025は確定実績。前年比較の土台に使う）。
   - { id: r1160-osusume, stores: ["1160"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-09-30" }
   - { id: r1160-cake, stores: ["1160"], title: ケーキ（洋ナシタルト変更）, kind: dev, start: "2026-09-01", end: "2026-09-30" }
   - { id: r1160-parfait, stores: ["1160"], title: パフェ（ハロウィン）, kind: dev, start: "2026-09-15", end: "2026-10-31" }
