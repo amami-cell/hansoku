@@ -210,3 +210,27 @@ class Test指標の混在を防ぐ:
             AggregateQuery(*AUG, GRAIN_MONTH, store_codes=["1015"], group_by=("metric",))
         )
         assert len(rows) == 9
+
+
+class TestCLIの束ね方:
+    def test_日付で束ねると月別の推移が出る(self, loaded):
+        rows = loaded.aggregate(
+            AggregateQuery(
+                date(2026, 1, 1), date(2026, 12, 31), GRAIN_MONTH,
+                metrics=["sales"], store_codes=["1015"], group_by=("date",),
+            )
+        )
+        assert len(rows) >= 3
+        # 日付順に並んでいること（推移として読めるため）
+        assert [r["date"] for r in rows] == sorted(r["date"] for r in rows)
+
+    def test_店舗と日付の両方で束ねられる(self, loaded):
+        rows = loaded.aggregate(
+            AggregateQuery(
+                date(2026, 6, 1), date(2026, 8, 31), GRAIN_MONTH,
+                metrics=["sales"], store_codes=["1015", "1006"],
+                group_by=("store_code", "date"),
+            )
+        )
+        assert {r["store_code"] for r in rows} == {"1006", "1015"}
+        assert len(rows) == 6  # 2店 × 3ヶ月

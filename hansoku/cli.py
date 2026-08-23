@@ -16,7 +16,7 @@ import sys
 from datetime import date, datetime
 
 from .analytics import RATIO_METRICS, ratio, totals
-from .db import get_appdb, get_warehouse
+from .db import AggregateQuery, get_appdb, get_warehouse
 from .ingest.fw_sheet import ingest
 from .ingest.sheets_client import FixtureSheetReader, GoogleSheetReader
 from .model import GRAIN_MONTH, GRAINS
@@ -86,6 +86,8 @@ def cmd_ingest_fw(args: argparse.Namespace) -> int:
 
 def cmd_aggregate(args: argparse.Namespace) -> int:
     settings = load_settings()
+    if not args.group_by:
+        args.group_by = ["store_code"]
     with get_warehouse(settings) as warehouse:
         if args.metric in RATIO_METRICS:
             rows = ratio(
@@ -102,19 +104,28 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
                 print(f"{row.store_code:>6}  {args.metric:<12} {shown:>10}")
             return 0
 
-        sums = totals(
-            warehouse,
-            date_from=args.date_from,
-            date_to=args.date_to,
-            metrics=[args.metric],
-            store_codes=args.store or None,
-            grain=args.grain,
-            hours=args.hour or None,
+        rows = warehouse.aggregate(
+            AggregateQuery(
+                date_from=args.date_from,
+                date_to=args.date_to,
+                grain=args.grain,
+                metrics=[args.metric],
+                store_codes=args.store or None,
+                hours=args.hour or None,
+                group_by=tuple(args.group_by),
+            )
         )
-        for (code, metric), value in sorted(sums.items()):
-            print(f"{code:>6}  {metric:<12} {value:>15,.0f}")
-        if not sums:
+        if not rows:
             print("該当する実績がありません")
+            return 0
+
+        keys = list(args.group_by)
+        header = "  ".join(f"{k:>10}" for k in keys)
+        print(f"{header}  {'value':>15}")
+        for row in rows:
+            cells = "  ".join(f"{str(row[k]):>10}" for k in keys)
+            print(f"{cells}  {row['value']:>15,.0f}")
+        print(f"\n合計 {sum(r['value'] for r in rows):,.0f}  ({len(rows)} 行)")
     return 0
 
 
@@ -164,7 +175,14 @@ def build_parser() -> argparse.ArgumentParser:
     agg.add_argument("--store", action="append", help="店舗コード（複数指定可）")
     agg.add_argument("--grain", default=GRAIN_MONTH, choices=GRAINS)
     agg.add_argument("--hour", action="append", type=int, help="時（0-23、複数指定可）")
-    agg.set_defaults(func=cmd_aggregate)
+    agg.add_argument(
+        "--group-by",
+        action="append",
+        dest="group_by",
+        choices=list(AggregateQuery.ALLOWED_GROUP_BY),
+        help="束ね方（複数指定可。既定は store_code）。date を指定すると月別の推移が見られる",
+    )
+    agg.set_defaults(func=cmd_aggregate, group_by=None)
 
     grant = sub.add_parser("grant-admin", help="admin 権限を付与する")
     grant.add_argument("email")

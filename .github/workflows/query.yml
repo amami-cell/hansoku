@@ -31,6 +31,14 @@ on:
         description: '店舗コード（空欄なら全店）'
         required: false
         default: ''
+      group_by:
+        description: '束ね方'
+        type: choice
+        options:
+          - store_code
+          - date
+          - metric
+        default: store_code
 
 env:
   TZ: Asia/Tokyo
@@ -63,6 +71,7 @@ jobs:
                 --date-from ${{ inputs.date_from }} \
                 --date-to ${{ inputs.date_to }}"
           [ -n "${{ inputs.store }}" ] && args="$args --store ${{ inputs.store }}"
+          args="$args --group-by ${{ inputs.group_by }}"
           # 実行結果はジョブのサマリにも残す（ログを掘らなくても読める）
           {
             echo '## 集計結果'
