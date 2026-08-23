@@ -133,3 +133,34 @@ campaigns:
   - { id: r1743-osusume, stores: ["1743"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
   - { id: r1743-bounenkai, stores: ["1743"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
   - { id: r1743-gm, stores: ["1743"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
+
+  # ================================================================
+  # 夏おすすめ（〜8/31）— 計画表「実行計画 2026.8月末迄」より。
+  # 8/31まで実施中の施策。中身・日付は同表からの転記。
+  # ================================================================
+  - { id: s1006-natsu, stores: ["1006"], title: 夏おすすめ（すさび湯合同）, kind: osusume, start: "2026-06-22", end: "2026-08-31" }
+  - { id: s1169-natsu, stores: ["1169"], title: 夏おすすめ（すさび湯合同）, kind: osusume, start: "2026-06-22", end: "2026-08-31" }
+  - { id: s1712-natsu, stores: ["1712"], title: 夏おすすめ（すさび湯合同）, kind: osusume, start: "2026-06-22", end: "2026-08-31" }
+  - { id: s1728-natsu, stores: ["1728"], title: 夏おすすめ（すさび湯合同）, kind: osusume, start: "2026-06-22", end: "2026-08-31" }
+  - { id: s1728-lunch, stores: ["1728"], title: ランチ変更①, kind: lunch, start: "2026-06-01", note: 漁師汁うどん/寿司ランチ/上海老天丼 }
+  - { id: s1015-natsu, stores: ["1015"], title: 夏おすすめ（すさび湯合同）, kind: osusume, start: "2026-06-22", end: "2026-08-31" }
+  - { id: s2004-gm, stores: ["2004"], title: GM修正, kind: gm, start: "2026-06-01", note: 6月（概算）}
+  - { id: s1163-natsu, stores: ["1163"], title: 夏おすすめ（GOLD合同）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
+  - { id: s1729-natsu, stores: ["1729"], title: 夏おすすめ（GOLD合同）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
+  - { id: s1168-natsu, stores: ["1168"], title: 夏おすすめ料理（新規）, kind: osusume, start: "2026-06-15", end: "2026-08-31" }
+  - { id: s1097-natsu, stores: ["1097"], title: 夏おすすめ, kind: osusume, start: "2026-05-25", end: "2026-08-31" }
+  - { id: s1097-dessert, stores: ["1097"], title: デザート変更, kind: dev, start: "2026-05-25", end: "2026-08-31", note: 試食無し・撮影確認 }
+  - { id: s1069-natsu, stores: ["1069"], title: 夏おすすめ（火鍋料理&コース・新規）, kind: osusume, start: "2026-06-15", end: "2026-08-31" }
+  - { id: s1111-unagi, stores: ["1111"], title: 夏おすすめ（鰻フェア）, kind: osusume, start: "2026-05-07", end: "2026-08-31", note: 撮影済み }
+  - { id: s1115-tabehodai, stores: ["1115"], title: ディナー食べ放題 開始, kind: dev, start: "2026-06-01", end: "2026-08-31", note: 試食無し・売り方考案 }
+  - { id: s1131-natsu, stores: ["1131"], title: 夏のおすすめ&ランチのメイン（新規）, kind: osusume, start: "2026-06-22", end: "2026-08-31" }
+  - { id: s1137-natsu, stores: ["1137"], title: 夏のおすすめ（新規）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
+  - { id: s1154-natsu, stores: ["1154"], title: 夏のおすすめ（新規）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
+  - { id: s1160-parfait, stores: ["1160"], title: パフェ（スノー）, kind: dev, start: "2026-07-01", end: "2026-09-23" }
+  - { id: s1160-cake, stores: ["1160"], title: ケーキ, kind: dev, start: "2026-07-01", end: "2026-08-31" }
+  - { id: s1713-kakigori, stores: ["1713"], title: かき氷フェア, kind: dev, start: "2026-07-13", end: "2026-09-04" }
+  - { id: s1162-natsu, stores: ["1162"], title: 夏おすすめ（1品新規）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
+  - { id: s1739-natsu, stores: ["1739"], title: ランチ&夏おすすめ（ランチ2品・夏新規）, kind: osusume, start: "2026-06-15", end: "2026-08-31" }
+  - { id: s1739-lunch, stores: ["1739"], title: ランチ変更, kind: lunch, start: "2026-06-15" }
+  - { id: s1742-natsu, stores: ["1742"], title: 夏おすすめ（すさび湯合同）, kind: osusume, start: "2026-06-22", end: "2026-08-31" }
+  - { id: s1743-natsu, stores: ["1743"], title: 夏おすすめ（すさび湯合同）, kind: osusume, start: "2026-06-22", end: "2026-08-31" }
