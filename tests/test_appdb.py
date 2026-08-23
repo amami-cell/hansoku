@@ -29,13 +29,13 @@ class Testスキーマ:
 
 class Test店舗マスタ同期:
     def test_全店が入る(self, appdb, master):
-        assert appdb.sync_stores(master.all) == 23
-        assert appdb.query("SELECT count(*) c FROM m_stores")[0]["c"] == 23
+        assert appdb.sync_stores(master.all) == 24
+        assert appdb.query("SELECT count(*) c FROM m_stores")[0]["c"] == 24
 
     def test_再同期しても重複しない(self, appdb, master):
         appdb.sync_stores(master.all)
         appdb.sync_stores(master.all)
-        assert appdb.query("SELECT count(*) c FROM m_stores")[0]["c"] == 23
+        assert appdb.query("SELECT count(*) c FROM m_stores")[0]["c"] == 24
 
     def test_変更が反映される(self, appdb, master):
         appdb.sync_stores(master.all)
@@ -43,6 +43,11 @@ class Test店舗マスタ同期:
         appdb.sync_stores(master.all)
         row = appdb.query("SELECT store_name FROM m_stores WHERE store_code = '1015'")[0]
         assert row["store_name"] == "すさび湯 歌舞伎町"
+
+    def test_インフォマートのコードも保存される(self, appdb, master):
+        appdb.sync_stores(master.all)
+        row = appdb.query("SELECT infomart_code FROM m_stores WHERE store_code = '1154'")[0]
+        assert row["infomart_code"] == "922"
 
 
 class Test権限:
@@ -53,7 +58,7 @@ class Test権限:
 
     def test_adminは全店見られる(self, seeded):
         seeded.grant_admin("amami@8sin.co.jp")
-        assert len(seeded.stores_for("amami@8sin.co.jp")) == 23
+        assert len(seeded.stores_for("amami@8sin.co.jp")) == 24
 
     def test_店長は担当店だけ見られる(self, seeded):
         seeded.grant("tencho@example.com", "1015", "manager")

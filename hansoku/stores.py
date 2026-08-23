@@ -13,7 +13,7 @@ from pathlib import Path
 import yaml
 
 from .normalize import store_code as normalize_store_code
-from .normalize import store_key
+from .normalize import split_source_store_name, store_key
 from .settings import ROOT
 
 DEFAULT_STORES_PATH = ROOT / "config" / "stores.yaml"
@@ -24,6 +24,8 @@ class Store:
     store_code: str
     store_name: str
     source_name: str
+    # インフォマートは FW と別のコード体系を使う。原価・仕入を取り込むときの突き合わせ用。
+    infomart_code: str
     brand: str
     brand_name: str
     file_prefix: str
@@ -73,6 +75,7 @@ class StoreMaster:
                 store_code=normalize_store_code(row["store_code"]),
                 store_name=row["store_name"],
                 source_name=row.get("source_name", row["store_name"]),
+                infomart_code=str(row.get("infomart_code", "") or ""),
                 brand=row.get("brand", ""),
                 brand_name=row.get("brand_name", ""),
                 file_prefix=row.get("file_prefix", ""),
@@ -120,5 +123,27 @@ class StoreMaster:
             raise UnknownStoreError(f"店舗マスタに無い店名です: {name!r}") from exc
 
     def find_by_name(self, name: str) -> Store | None:
-        """引けなければ None。呼び出し側で未解決分をまとめて報告したいとき用。"""
+        """
+        取り込み元の店名から店舗を探す。引けなければ None。
+
+        店名にコードが埋め込まれていれば（FW共有シートの "0001015_..." 形式）
+        それを最優先で使う。店名の表記は変わりうるが、コードは変わらないため。
+        コードが無ければ従来どおり正規化した店名で突き合わせる。
+        """
+        code, bare = split_source_store_name(name)
+        if code is not None:
+            found = self._by_code.get(normalize_store_code(code))
+            if found is not None:
+                return found
+            # コードは付いているがマスタに無い＝新店。店名で拾えるかだけ試す。
+            return self._by_key.get(store_key(bare))
         return self._by_key.get(store_key(name))
+
+    def by_infomart_code(self, code: str | int) -> Store | None:
+        """インフォマート側のコードから引く（原価・仕入の取り込み用）。"""
+        normalized = normalize_store_code(code)
+        return next(
+            (s for s in self._stores if s.infomart_code
+             and normalize_store_code(s.infomart_code) == normalized),
+            None,
+        )

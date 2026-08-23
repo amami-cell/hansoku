@@ -5,8 +5,8 @@ from hansoku.stores import StoreMaster, UnknownStoreError
 
 
 def test_全店が読み込める(master):
-    assert len(master) == 23
-    assert len(master.active) == 23
+    assert len(master) == 24
+    assert len(master.active) == 24
 
 
 def test_store_codeが一意(master):
@@ -15,7 +15,7 @@ def test_store_codeが一意(master):
 
 
 def test_取り込み元の生の店名から引ける(master):
-    assert master.by_name("すさび湯　歌舞伎町（ＨＡＳＳＩＮ）").store_code == "1015"
+    assert master.by_name("0001015_すさび湯 歌舞伎町").store_code == "1015"
 
 
 def test_表記揺れした店名からも引ける(master):
@@ -23,7 +23,29 @@ def test_表記揺れした店名からも引ける(master):
 
 
 def test_コードの表記揺れを吸収する(master):
-    assert master.by_code("0922").store_code == master.by_code(922).store_code == "922"
+    assert master.by_code("01015").store_code == master.by_code(1015).store_code == "1015"
+
+
+def test_店名が変わってもコードで引ける(master):
+    """FWの店名表記が変わっても、埋め込まれたコードで正しい店に着地すること。"""
+    assert master.find_by_name("0001154_熊の鳥焼 リニューアル").store_code == "1154"
+
+
+def test_インフォマートのコードから引ける(master):
+    """FWとインフォマートはコード体系が違う。熊の鳥焼は FW=1154 / インフォマート=922。"""
+    store = master.by_infomart_code("922")
+    assert store is not None and store.store_code == "1154"
+
+
+def test_FWとインフォマートのコードが食い違う店がある(master):
+    """取り違えると別の店の数字が混ざるため、食い違いを明示的に固定しておく。"""
+    mismatched = [
+        s for s in master
+        if s.infomart_code and s.infomart_code != s.store_code
+    ]
+    # 24店中、インフォマート側の登録がある23店のうち10店で番号が食い違う。
+    # （残る1店「ぎふや 福岡天神店」はインフォマート未登録なので比較対象外）
+    assert len(mismatched) == 10
 
 
 def test_未知の店名はエラーにする(master):
@@ -47,8 +69,8 @@ def test_store_codeの重複は読み込み時に弾く():
     from hansoku.stores import Store
 
     duplicated = [
-        Store("1015", "A", "A", "X", "X", "", False, True),
-        Store("1015", "B", "B", "Y", "Y", "", False, True),
+        Store("1015", "A", "A", "", "X", "X", "", False, True),
+        Store("1015", "B", "B", "", "Y", "Y", "", False, True),
     ]
     with pytest.raises(ValueError, match="重複"):
         StoreMaster(duplicated)
@@ -59,8 +81,8 @@ def test_正規化後に衝突する店名は読み込み時に弾く():
     from hansoku.stores import Store
 
     colliding = [
-        Store("1", "すさび湯 歌舞伎町", "すさび湯　歌舞伎町（ＨＡＳＳＩＮ）", "S", "S", "", False, True),
-        Store("2", "すさび湯歌舞伎町", "すさび湯歌舞伎町", "S", "S", "", False, True),
+        Store("1", "すさび湯 歌舞伎町", "すさび湯　歌舞伎町", "", "S", "S", "", False, True),
+        Store("2", "すさび湯歌舞伎町", "すさび湯歌舞伎町", "", "S", "S", "", False, True),
     ]
     with pytest.raises(ValueError, match="衝突"):
         StoreMaster(colliding)

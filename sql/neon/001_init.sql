@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS m_stores (
     store_code          TEXT PRIMARY KEY,
     store_name          TEXT        NOT NULL,
     source_name         TEXT        NOT NULL,
+    infomart_code       TEXT        NOT NULL DEFAULT '',
     brand               TEXT        NOT NULL,
     brand_name          TEXT        NOT NULL DEFAULT '',
     file_prefix         TEXT        NOT NULL DEFAULT '',

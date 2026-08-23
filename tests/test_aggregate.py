@@ -22,9 +22,9 @@ class Test任意の軸で集計できる:
 
     def test_複数店舗で絞れる(self, loaded):
         rows = loaded.aggregate(
-            AggregateQuery(*AUG, GRAIN_MONTH, metrics=["sales"], store_codes=["1015", "956"])
+            AggregateQuery(*AUG, GRAIN_MONTH, metrics=["sales"], store_codes=["1015", "1006"])
         )
-        assert sorted(r["store_code"] for r in rows) == ["1015", "956"]
+        assert sorted(r["store_code"] for r in rows) == ["1006", "1015"]
 
     def test_期間で絞れる(self, loaded):
         aug = loaded.aggregate(AggregateQuery(*AUG, GRAIN_MONTH, metrics=["sales"]))
@@ -196,7 +196,7 @@ class Test指標の混在を防ぐ:
         rows = loaded.aggregate(
             AggregateQuery(*AUG, GRAIN_MONTH, metrics=["sales"], group_by=("store_code",))
         )
-        assert len(rows) == 23
+        assert len(rows) == 24
 
     def test_metricを含めれば複数指標でも集計できる(self, loaded):
         rows = loaded.aggregate(

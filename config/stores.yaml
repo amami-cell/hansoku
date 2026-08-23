@@ -1,201 +1,215 @@
 # ============================================================
 # 店舗マスタ（m_stores のシード）
 #
-# 出典: infomart_automation（amami-cell/-）の config.yaml。
-#       store_code は FW / インフォマート上の店舗コードと同一で、
-#       このシステム全体の結合キーになる。値を書き換えないこと。
+# store_code は「FW（Foodist Journal）の店舗コード」。
+#   FW共有シートの店名は "0001015_すさび湯 歌舞伎町" のように
+#   先頭7桁のゼロ埋めコードを含んでおり、それを正規化したもの。
+#   実績データの結合キーはこれ。
 #
-# store_name   : 表示用の店名（NFKC で半角寄せ・（ＨＡＳＳＩＮ）を除去）
-# source_name  : 取り込み元（FW共有シートB列 / Excelシート名）に現れる生の店名。
-#                店名→store_code の突き合わせに使うため、原文のまま保持する。
-# brand        : ブランドコード。スケジュール画面の色分けの単位（§8-1）。
-# is_shared_facility : 商業施設内の共営店舗フラグ。
-# active       : 閉店・休止で false にすると集約ループから外れる。
+# ⚠ インフォマートは別のコード体系を使っている。
+#   例: 熊の鳥焼 は FW=1154 / インフォマート=922。
+#   24店中11店で番号が食い違うため、混同すると別の店の数字が混ざる。
+#   原価・仕入をインフォマートから取り込むときは infomart_code の方で突き合わせること。
+#
+# store_name   : 表示用の店名
+# source_name  : FW共有シートB列に現れる生の値（コード付き）
+# infomart_code: インフォマート側の店舗コード。未出店・未登録なら空
+# brand        : ブランドコード。スケジュール画面の色分けの単位
+# is_shared_facility : 商業施設内の共営店舗フラグ
+# active       : 閉店・休止で false にすると集約ループから外れる
 #
 # 新店を増やすときは、ここに1ブロック足すだけで取り込み対象に入る。
 # ============================================================
 stores:
-  - store_code: "922"
-    store_name: "熊の鳥焼"
-    source_name: "熊の鳥焼（ＨＡＳＳＩＮ）"
-    brand: "KUMANOTORIYAKI"
-    brand_name: "熊の鳥焼"
-    file_prefix: "KUMA_TORI"
-    is_shared_facility: false
-    active: true
-  - store_code: "923"
-    store_name: "ちゃーちゃん"
-    source_name: "ちゃーちゃん（ＨＡＳＳＩＮ）"
-    brand: "CHACHAN"
-    brand_name: "ちゃーちゃん"
-    file_prefix: "CHACHAN"
-    is_shared_facility: false
-    active: true
-  - store_code: "924"
-    store_name: "料理と酒 たいだい(旧 にと)"
-    source_name: "料理と酒　たいだい（旧　にと）（ＨＡＳＳＩＮ）"
-    brand: "TAIDAI"
-    brand_name: "料理と酒 たいだい"
-    file_prefix: "TAIDAI"
-    is_shared_facility: false
-    active: true
-  - store_code: "925"
-    store_name: "曲ル角ニハ泡喰ライ"
-    source_name: "曲ル角ニハ泡喰ライ（ＨＡＳＳＩＮ）"
-    brand: "AWAKURAI"
-    brand_name: "曲ル角ニハ泡喰ライ"
-    file_prefix: "MAGARU_KADO"
-    is_shared_facility: false
-    active: true
-  - store_code: "926"
-    store_name: "ひよこ飯店"
-    source_name: "ひよこ飯店（ＨＡＳＳＩＮ）"
-    brand: "HIYOKOHANTEN"
-    brand_name: "ひよこ飯店"
-    file_prefix: "HIYOKO_HANTEN"
-    is_shared_facility: false
-    active: true
-  - store_code: "936"
-    store_name: "んだんだ新宿三丁目店"
-    source_name: "んだんだ新宿三丁目店（ＨＡＳＳＩＮ）"
-    brand: "NDANDA"
-    brand_name: "んだんだ"
-    file_prefix: "NDANDA_SHINJUKU"
-    is_shared_facility: false
-    active: true
-  - store_code: "956"
-    store_name: "すさび湯"
-    source_name: "すさび湯（ＨＡＳＳＩＮ）"
+  - store_code: "1006"
+    store_name: "大衆寿司酒場すさび湯"
+    source_name: "0001006_大衆寿司酒場すさび湯"
+    infomart_code: "956"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
-    file_prefix: "SUSABIYU"
-    is_shared_facility: false
-    active: true
-  - store_code: "960"
-    store_name: "UMAMI"
-    source_name: "ＵＭＡＭＩ（ＨＡＳＳＩＮ）"
-    brand: "UMAMI"
-    brand_name: "UMAMI"
-    file_prefix: "UMAMI"
-    is_shared_facility: false
-    active: true
-  - store_code: "973"
-    store_name: "ARATA"
-    source_name: "ＡＲＡＴＡ（ＨＡＳＳＩＮ）"
-    brand: "ARATA"
-    brand_name: "ARATA"
-    file_prefix: "ARATA"
-    is_shared_facility: false
-    active: true
-  - store_code: "974"
-    store_name: "味のたぬきや"
-    source_name: "味のたぬきや（ＨＡＳＳＩＮ）"
-    brand: "TANUKIYA"
-    brand_name: "味のたぬきや"
-    file_prefix: "AJI_TANUKIYA"
     is_shared_facility: false
     active: true
   - store_code: "1015"
     store_name: "すさび湯 歌舞伎町"
-    source_name: "すさび湯　歌舞伎町（ＨＡＳＳＩＮ）"
+    source_name: "0001015_すさび湯 歌舞伎町"
+    infomart_code: "1015"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
-    file_prefix: "SUSABIYU_KABUKICHO"
+    is_shared_facility: false
+    active: true
+  - store_code: "1069"
+    store_name: "ひよこ飯店"
+    source_name: "0001069_ひよこ飯店"
+    infomart_code: "926"
+    brand: "HIYOKOHANTEN"
+    brand_name: "ひよこ飯店"
+    is_shared_facility: false
+    active: true
+  - store_code: "1097"
+    store_name: "ARATA"
+    source_name: "0001097_ARATA"
+    infomart_code: "973"
+    brand: "ARATA"
+    brand_name: "ARATA"
+    is_shared_facility: false
+    active: true
+  - store_code: "1111"
+    store_name: "ちゃーちゃん"
+    source_name: "0001111_ちゃーちゃん"
+    infomart_code: "923"
+    brand: "CHACHAN"
+    brand_name: "ちゃーちゃん"
+    is_shared_facility: false
+    active: true
+  - store_code: "1115"
+    store_name: "大衆酒場 曲ル角ニハ泡喰ライ"
+    source_name: "0001115_大衆酒場 曲ル角ニハ泡喰ライ"
+    infomart_code: "925"
+    brand: "AWAKURAI"
+    brand_name: "曲ル角ニハ泡喰ライ"
+    is_shared_facility: false
+    active: true
+  - store_code: "1131"
+    store_name: "CRAFTMAN UMAMI"
+    source_name: "0001131_CRAFTMAN UMAMI"
+    infomart_code: "960"
+    brand: "UMAMI"
+    brand_name: "UMAMI"
+    is_shared_facility: false
+    active: true
+  - store_code: "1137"
+    store_name: "料理と酒 たいだい"
+    source_name: "0001137_料理と酒 たいだい"
+    infomart_code: "924"
+    brand: "TAIDAI"
+    brand_name: "料理と酒 たいだい"
     is_shared_facility: false
     active: true
   - store_code: "1151"
-    store_name: "Italian Bar NagaGutsu"
-    source_name: "Ｉｔａｌｉａｎ　Ｂａｒ　ＮａｇａＧｕｔｓｕ（ＨＡＳＳＩＮ）"
+    store_name: "NagaGutsu"
+    source_name: "0001151_NagaGutsu"
+    infomart_code: "1151"
     brand: "NAGAGUTSU"
     brand_name: "Italian Bar NagaGutsu"
-    file_prefix: "ITALIAN_BAR_NAGAGUTSU"
+    is_shared_facility: false
+    active: true
+  - store_code: "1154"
+    store_name: "熊の鳥焼"
+    source_name: "0001154_熊の鳥焼"
+    infomart_code: "922"
+    brand: "KUMANOTORIYAKI"
+    brand_name: "熊の鳥焼"
     is_shared_facility: false
     active: true
   - store_code: "1160"
-    store_name: "パフェ&ジェラート LARGO ルクア店"
-    source_name: "パフェ＆ジェラート　ＬＡＲＧＯ　ルクア店（ＨＡＳＳＩＮ）"
+    store_name: "ルクアLargo"
+    source_name: "0001160_ルクアLargo"
+    infomart_code: "1160"
     brand: "LARGO"
     brand_name: "LARGO"
-    file_prefix: "LARGO_LUCUA"
     is_shared_facility: true
+    active: true
+  - store_code: "1162"
+    store_name: "味のたぬきや"
+    source_name: "0001162_味のたぬきや"
+    infomart_code: "974"
+    brand: "TANUKIYA"
+    brand_name: "味のたぬきや"
+    is_shared_facility: false
     active: true
   - store_code: "1163"
     store_name: "フレンチ酒場GOLD"
-    source_name: "フレンチ酒場ＧＯＬＤ（ＨＡＳＳＩＮ）"
+    source_name: "0001163_フレンチ酒場GOLD"
+    infomart_code: "1163"
     brand: "GOLD"
     brand_name: "フレンチ酒場GOLD"
-    file_prefix: "FRENCH_GOLD"
     is_shared_facility: false
     active: true
   - store_code: "1168"
-    store_name: "フレンチ酒場GOLD 京都ポルタ店"
-    source_name: "フレンチ酒場ＧＯＬＤ　京都ポルタ店（ＨＡＳＳＩＮ）"
+    store_name: "GOLD京都ポルタ店"
+    source_name: "0001168_GOLD京都ポルタ店"
+    infomart_code: "1168"
     brand: "GOLD"
     brand_name: "フレンチ酒場GOLD"
-    file_prefix: "FRENCH_GOLD_KYOTO"
     is_shared_facility: true
     active: true
   - store_code: "1169"
-    store_name: "すさび湯 三宮店"
-    source_name: "すさび湯　三宮店（ＨＡＳＳＩＮ）"
+    store_name: "すさび湯三宮店"
+    source_name: "0001169_すさび湯三宮店"
+    infomart_code: "1169"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
-    file_prefix: "SUSABIYU_SANNOMIYA"
     is_shared_facility: false
     active: true
   - store_code: "1712"
-    store_name: "すさび湯 京都烏丸"
-    source_name: "すさび湯　京都烏丸（ＨＡＳＳＩＮ）"
+    store_name: "すさび湯京都烏丸"
+    source_name: "0001712_すさび湯京都烏丸"
+    infomart_code: "1712"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
-    file_prefix: "SUSABIYU_KYOTO"
     is_shared_facility: false
     active: true
   - store_code: "1713"
-    store_name: "喫茶Largo 門真"
-    source_name: "喫茶Ｌａｒｇｏ　門真（ＨＡＳＳＩＮ）"
+    store_name: "門真Largo"
+    source_name: "0001713_門真Largo"
+    infomart_code: "1713"
     brand: "LARGO"
     brand_name: "LARGO"
-    file_prefix: "KISSA_LARGO_KADOMA"
     is_shared_facility: false
     active: true
   - store_code: "1728"
-    store_name: "すさび湯パナンテ京阪天満橋店"
-    source_name: "すさび湯パナンテ京阪天満橋店（ＨＡＳＳＩＮ）"
+    store_name: "すさび湯 天満橋店"
+    source_name: "0001728_すさび湯 天満橋店"
+    infomart_code: "1728"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
-    file_prefix: "SUSABIYU_TENMABASHI"
     is_shared_facility: true
     active: true
   - store_code: "1729"
-    store_name: "フレンチ酒場GOLD お初天神店"
-    source_name: "フレンチ酒場ＧＯＬＤ　お初天神店（ＨＡＳＳＩＮ）"
+    store_name: "フレンチ酒場GOLDお初"
+    source_name: "0001729_フレンチ酒場GOLDお初"
+    infomart_code: "1729"
     brand: "GOLD"
     brand_name: "フレンチ酒場GOLD"
-    file_prefix: "FRENCH_GOLD_OHATSU"
     is_shared_facility: false
     active: true
   - store_code: "1739"
-    store_name: "ぎふやパナンテ天満橋"
-    source_name: "ぎふやパナンテ天満橋（ＨＡＳＳＩＮ）"
+    store_name: "ぎふや 天満橋店"
+    source_name: "0001739_ぎふや 天満橋店"
+    infomart_code: "1739"
     brand: "GIFUYA"
     brand_name: "ぎふや"
-    file_prefix: "GIFUYA_TENMABASHI"
     is_shared_facility: true
     active: true
   - store_code: "1742"
-    store_name: "すさび湯 三条店"
-    source_name: "すさび湯　三条店（ＨＡＳＳＩＮ）"
+    store_name: "すさび湯 京都三条店"
+    source_name: "0001742_すさび湯 京都三条店"
+    infomart_code: "1742"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
-    file_prefix: "SUSABIYU_SANJO"
     is_shared_facility: false
     active: true
   - store_code: "1743"
     store_name: "すさび湯 新宿東口店"
-    source_name: "すさび湯　新宿東口店（ＨＡＳＳＩＮ）"
+    source_name: "0001743_すさび湯 新宿東口店"
+    infomart_code: "1743"
     brand: "SUSABIYU"
     brand_name: "すさび湯"
-    file_prefix: "SUSABIYU_SHINJUKU"
+    is_shared_facility: false
+    active: true
+  - store_code: "1766"
+    store_name: "ぎふや 福岡天神店"
+    source_name: "0001766_ぎふや 福岡天神店"
+    infomart_code: ""
+    brand: "GIFUYA"
+    brand_name: "ぎふや"
+    is_shared_facility: false
+    active: true
+  - store_code: "2004"
+    store_name: "んだんだ"
+    source_name: "0002004_んだんだ"
+    infomart_code: "936"
+    brand: "NDANDA"
+    brand_name: "んだんだ"
     is_shared_facility: false
     active: true

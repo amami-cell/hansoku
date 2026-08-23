@@ -56,6 +56,25 @@ def store_code(value: str | int) -> str:
     return s
 
 
+# FW共有シートの店名に付く先頭のゼロ埋め店舗コード（例 "0001015_すさび湯 歌舞伎町"）
+_CODE_PREFIX = re.compile(r"^0*(\d+)[_\s]+(.*)$")
+
+
+def split_source_store_name(value: str) -> tuple[str | None, str]:
+    """
+    取り込み元の店名を (店舗コード, 店名) に分ける。
+
+    FW共有シートは店名の先頭に店舗コードを埋め込んでいる。
+    コードで突き合わせられるなら、そちらの方が店名の表記揺れより遥かに確実なので
+    優先して使う。コードが無い形式なら (None, 元の文字列) を返す。
+    """
+    s = normalize_text(value)
+    match = _CODE_PREFIX.match(s)
+    if not match:
+        return None, s
+    return match.group(1), match.group(2).strip()
+
+
 def parse_year_month(value: str) -> date:
     """
     「2026-08」「2026/8」「2026年8月」を、その月の1日の date にして返す。
