@@ -1,0 +1,31 @@
+name: 確認用プレビューを公開
+
+# デザイン確認用の公開URL。認証なしで誰でも開ける。
+# 本番（hansoku / Access保護）とは別の Worker（hansoku-preview）として配るので、
+# 全店の実データが公開される心配はない。中身は見本の3店舗のみ。
+
+on:
+  workflow_dispatch:
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cloudflare へ公開（プレビュー・認証なし）
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -o pipefail
+          TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]\"'"'")"
+          ACCOUNT="$(printf '%s' "$CF_ACCOUNT" | tr -d '[:space:]\"'"'")"
+          npm install -g wrangler@4
+          export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT"
+          npx wrangler deploy --config wrangler-preview.toml 2>&1 | tee /tmp/wr.log
+          url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/wr.log | head -1 || true)
+          if [ -n "$url" ]; then
+            echo "## 確認用URL（認証なし）" >> "$GITHUB_STEP_SUMMARY"
+            echo "**$url**" >> "$GITHUB_STEP_SUMMARY"
+          fi

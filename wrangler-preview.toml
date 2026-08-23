@@ -1,0 +1,9 @@
+# デザイン確認用のプレビュー（認証なし・公開）。
+# 本番の hansoku（Access保護・全店実データ）とは別の Worker として配る。
+# 中身は3店舗＋んだんだの推移だけの見本で、全店データは載せない。
+name = "hansoku-preview"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "./web-preview"
+not_found_handling = "single-page-application"
