@@ -13,6 +13,32 @@ sys.path.insert(0, str(ROOT))
 FIXTURE = ROOT / "tests" / "fixtures" / "fw_sheet_sample.json"
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _check_test_database():
+    """
+    テストDBが指定されているのに繋がらない場合、最初に一度だけ落とす。
+
+    そのまま走らせると、DB を使う全テストが同じ接続エラーを出して
+    数十件のエラーに埋もれ、原因が読み取りにくくなる。
+    未指定のときは各フィクスチャが個別にスキップするので、ここでは何もしない。
+    """
+    dsn = os.environ.get("HANSOKU_TEST_DATABASE_URL")
+    if not dsn:
+        return
+    import psycopg
+
+    try:
+        psycopg.connect(dsn, connect_timeout=5).close()
+    except Exception as exc:
+        pytest.exit(
+            f"HANSOKU_TEST_DATABASE_URL に接続できません: {exc}\n"
+            f"  DSN: {dsn}\n"
+            f"  PostgreSQL が起動しているか確認してください。"
+            f" DBを使わないテストだけ流すなら、この環境変数を外してください。",
+            returncode=1,
+        )
+
+
 @pytest.fixture(scope="session")
 def master():
     from hansoku.stores import StoreMaster
