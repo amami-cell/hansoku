@@ -1,0 +1,75 @@
+name: 実績を集計して見る
+
+# 本番の実績を画面から確認するための手動ワークフロー。
+# DBクライアントを用意しなくても、任意の店舗×期間×指標で数字を出せる。
+
+on:
+  workflow_dispatch:
+    inputs:
+      metric:
+        description: '指標'
+        type: choice
+        options:
+          - sales
+          - food_sales
+          - drink_sales
+          - food_purchase
+          - drink_purchase
+          - food_theory_cost
+          - drink_theory_cost
+          - cost_rate
+        default: sales
+      date_from:
+        description: '開始日 YYYY-MM-DD'
+        required: true
+        default: '2026-01-01'
+      date_to:
+        description: '終了日 YYYY-MM-DD'
+        required: true
+        default: '2026-12-31'
+      store:
+        description: '店舗コード（空欄なら全店）'
+        required: false
+        default: ''
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: 集計
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          args="--metric ${{ inputs.metric }} \
+                --date-from ${{ inputs.date_from }} \
+                --date-to ${{ inputs.date_to }}"
+          [ -n "${{ inputs.store }}" ] && args="$args --store ${{ inputs.store }}"
+          # 実行結果はジョブのサマリにも残す（ログを掘らなくても読める）
+          {
+            echo '## 集計結果'
+            echo ''
+            echo "指標: \`${{ inputs.metric }}\` / 期間: ${{ inputs.date_from }} 〜 ${{ inputs.date_to }}"
+            echo ''
+            echo '```'
+            python -m hansoku.cli aggregate $args
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
