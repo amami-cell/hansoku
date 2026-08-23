@@ -197,3 +197,36 @@ class Test施策の制約:
             """
         )
         assert seeded.query("SELECT count(*) c FROM f_campaign_summary")[0]["c"] == 2
+
+
+class Testスキーマの移行:
+    """
+    列を後から足したとき、既に作られているテーブルにも反映されること。
+
+    CREATE TABLE IF NOT EXISTS は既存テーブルには何もしないため、
+    新しい列は ALTER で明示的に足す必要がある。これを忘れると、
+    ローカルの作り立てDBでは通るのに本番だけ落ちる。
+    """
+
+    def test_旧スキーマのテーブルにも列が足される(self, appdb, master):
+        # infomart_code が無かった頃の m_stores を再現する
+        appdb.execute("ALTER TABLE m_stores DROP COLUMN IF EXISTS infomart_code")
+        columns = appdb.query(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'm_stores'"
+        )
+        assert "infomart_code" not in {c["column_name"] for c in columns}
+
+        appdb.ensure_schema()
+
+        columns = appdb.query(
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'm_stores'"
+        )
+        assert "infomart_code" in {c["column_name"] for c in columns}
+        # 移行後に書き込めることまで確かめる（列があるだけでは足りない）
+        assert appdb.sync_stores(master.all) == 24
+
+    def test_移行しても既存データは消えない(self, appdb, master):
+        appdb.sync_stores(master.all)
+        appdb.execute("ALTER TABLE m_stores DROP COLUMN IF EXISTS infomart_code")
+        appdb.ensure_schema()
+        assert appdb.query("SELECT count(*) c FROM m_stores")[0]["c"] == 24

@@ -24,8 +24,17 @@ CREATE TABLE IF NOT EXISTS m_stores (
     active              BOOLEAN     NOT NULL DEFAULT TRUE,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-COMMENT ON TABLE  m_stores IS '店舗マスタ。store_code は FW/インフォマートと共通の結合キー';
-COMMENT ON COLUMN m_stores.source_name IS '取り込み元に現れる生の店名。店名→コードの突き合わせに使う';
+-- 既に作られているテーブルにも列を足せるようにしておく。
+-- CREATE TABLE IF NOT EXISTS は既存テーブルには何もしないため、
+-- 後から増えた列はこの形で明示的に足す（何度流しても安全）。
+ALTER TABLE m_stores ADD COLUMN IF NOT EXISTS infomart_code TEXT NOT NULL DEFAULT '';
+
+COMMENT ON TABLE  m_stores IS '店舗マスタ。store_code は FW（Foodist Journal）の店舗コード';
+COMMENT ON COLUMN m_stores.source_name IS
+    'FW共有シートB列の生の値。"0001015_すさび湯 歌舞伎町" のようにコードを含む';
+COMMENT ON COLUMN m_stores.infomart_code IS
+    'インフォマート側の店舗コード。FW とは別体系で24店中10店が食い違うため、'
+    '原価・仕入の取り込みではこちらで突き合わせる';
 COMMENT ON COLUMN m_stores.brand IS 'ブランドコード。スケジュール画面の色分けの単位';
 
 -- ── 権限マスタ（多対多）──────────────────────────────────────────────────
