@@ -99,6 +99,11 @@ def build(
                 "brand": s.brand,
                 "brand_name": s.brand_name,
                 "region": s.region,
+                # 同エリアの他店（近隣比較の相手）。実績のある店だけ。
+                "neighbors": [
+                    n.store_code for n in master.in_region(s.region)
+                    if n.store_code != s.store_code and n.store_code in monthly
+                ],
                 "shared_facility": s.is_shared_facility,
             }
             for s in master.active

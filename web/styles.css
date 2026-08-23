@@ -162,4 +162,42 @@ tbody tr:last-child td{border-bottom:0;}
 .fine{font-size:11px;color:var(--ink-3);}
 .lgi{cursor:default;transition:opacity .12s;}
 .lgi.mut{opacity:.3;}
+.lgi.own{font-weight:700;color:var(--ink);}
 .mlsvg .ml{transition:stroke-opacity .12s,stroke-width .12s;cursor:pointer;}
+
+/* ── 店カード（TOP・主役）───────────────────────────────── */
+.sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:13px;}
+.scard{text-align:left;font:inherit;cursor:pointer;background:var(--surface);
+  border:1px solid var(--line);border-left:3px solid var(--rc);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:14px 15px 12px;display:flex;flex-direction:column;gap:8px;
+  transition:border-color .12s,transform .12s;}
+.scard:hover{border-color:var(--rc);transform:translateY(-1px);}
+.scard:focus-visible{outline:2px solid var(--rc);outline-offset:2px;}
+.stop{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px;line-height:1.3;}
+.rtag{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.04em;color:#fff;
+  background:var(--rc);border-radius:5px;padding:2px 7px;flex:none;}
+.sbig{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1.05;}
+.sbig .unit{font-size:12px;font-weight:500;color:var(--ink-2);margin-left:2px;}
+.sparkempty{height:40px;}
+.sfoot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px;}
+.more{font-size:12px;color:var(--rc);font-weight:500;}
+.yoy{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;}
+.yoy.up{color:var(--good-ink);} .yoy.down{color:var(--critical-ink);} .yoy.flat{color:var(--ink-3);}
+.big.up{color:var(--good-ink);} .big.down{color:var(--critical-ink);}
+
+/* ── 店舗詳細の見出し ───────────────────────────────────── */
+.crumbs{margin-bottom:14px;}
+.linkbtn{font:inherit;font-size:13px;color:var(--accent);background:none;border:0;padding:0;
+  cursor:pointer;font-weight:500;}
+.linkbtn:hover{text-decoration:underline;}
+.linkbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px;}
+.shd{display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin-bottom:16px;}
+.shd .rtag{--rc:var(--accent);font-size:12px;padding:3px 9px;}
+.sname{font-family:var(--display);font-size:24px;font-weight:700;margin:0;letter-spacing:.02em;}
+.tagx{font-size:11px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line);
+  border-radius:5px;padding:2px 8px;}
+
+/* ── 総合ページへの控えめリンク ─────────────────────────── */
+.ovrlink{margin-top:8px;text-align:center;}
+.ovrlink .linkbtn{color:var(--ink-3);}
+.ovrlink .linkbtn:hover{color:var(--accent);}
