@@ -43,6 +43,10 @@ on:
         description: '集計の代わりに、取り込み元シートのタブ一覧を出す'
         type: boolean
         default: false
+      sample_tabs:
+        description: '中身を覗くタブ名（カンマ区切り。列構造の確認用）'
+        required: false
+        default: ''
 
 env:
   TZ: Asia/Tokyo
@@ -78,7 +82,11 @@ jobs:
             echo '## 取り込み元シートのタブ一覧'
             echo ''
             echo '```'
-            python -m hansoku.cli sheet-tabs
+            args=""
+            for tab in $(echo "${{ inputs.sample_tabs }}" | tr ',' ' '); do
+              args="$args --sample $tab"
+            done
+            python -m hansoku.cli sheet-tabs $args
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

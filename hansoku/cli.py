@@ -157,6 +157,15 @@ def cmd_sheet_tabs(args: argparse.Namespace) -> int:
     unused = [t for t in tabs if t not in known]
     if unused:
         print(f"\n取り込んでいないタブ: {', '.join(unused)}")
+
+    for tab in args.sample or ():
+        if tab not in tabs:
+            print(f"\n[{tab}] このタブは存在しません", file=sys.stderr)
+            continue
+        rows = reader.values(tab)
+        print(f"\n=== {tab} の先頭{min(len(rows), args.sample_rows)}行 ===")
+        for index, row in enumerate(rows[: args.sample_rows], start=1):
+            print(f"  {index:>3}: {row}")
     return 0
 
 
@@ -217,7 +226,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     tabs = sub.add_parser("sheet-tabs", help="取り込み元シートのタブ一覧を出す（診断用）")
     tabs.add_argument("--spreadsheet", help="スプレッドシートID（既定はFW共有シート）")
-    tabs.set_defaults(func=cmd_sheet_tabs)
+    tabs.add_argument(
+        "--sample",
+        action="append",
+        help="このタブの先頭数行を表示する（列構造の確認用。複数指定可）",
+    )
+    tabs.add_argument("--sample-rows", type=int, default=5, help="表示する行数")
+    tabs.set_defaults(func=cmd_sheet_tabs, sample=None)
 
     grant = sub.add_parser("grant-admin", help="admin 権限を付与する")
     grant.add_argument("email")
