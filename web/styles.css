@@ -198,6 +198,66 @@ tbody tr:last-child td{border-bottom:0;}
   border-radius:5px;padding:2px 8px;}
 
 /* ── 総合ページへの控えめリンク ─────────────────────────── */
-.ovrlink{margin-top:8px;text-align:center;}
+.ovrlink{margin-top:10px;display:flex;gap:2px;justify-content:center;align-items:center;flex-wrap:wrap;}
 .ovrlink .linkbtn{color:var(--ink-3);}
 .ovrlink .linkbtn:hover{color:var(--accent);}
+.sep{color:var(--ink-3);margin:0 6px;}
+
+/* ── 全店スケジュール（TOP）─────────────────────────────── */
+.klgrow{display:flex;gap:8px 15px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--ink-2);}
+.klg{display:flex;align-items:center;gap:6px;}
+.klg i{width:15px;height:10px;border-radius:3px;display:inline-block;}
+
+.sched{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  box-shadow:var(--shadow);overflow-x:auto;}
+.sched-inner{min-width:760px;}
+
+.srow{display:grid;grid-template-columns:150px 1fr;border-bottom:1px solid var(--line);}
+.srow:last-child{border-bottom:0;}
+.srow[data-store]{cursor:pointer;}
+.srow[data-store]:hover{background:var(--surface-2);}
+.snm{display:flex;align-items:center;gap:7px;padding:8px 10px 8px 12px;font-size:13px;
+  font-weight:500;overflow:hidden;border-right:1px solid var(--line);}
+.snm .rtag{font-size:10px;padding:2px 6px;}
+.snm-t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.strack{position:relative;min-height:calc(var(--lanes,1) * 24px + 8px);}
+
+.shead-row{border-bottom:1px solid var(--line-strong);}
+.shead-row .snm{border-right:1px solid var(--line-strong);}
+.shead-row .strack{min-height:30px;}
+.mlab{position:absolute;top:4px;transform:translateX(-50%);font-size:10.5px;color:var(--ink-3);
+  white-space:nowrap;font-variant-numeric:tabular-nums;}
+.tdlab{position:absolute;top:15px;transform:translateX(-50%);font-size:9.5px;font-weight:700;
+  color:#fff;background:var(--accent);border-radius:4px;padding:0 5px;line-height:1.5;white-space:nowrap;}
+
+.gl{position:absolute;top:0;bottom:0;width:1px;background:var(--line);}
+.tdl{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed var(--accent);opacity:.65;}
+
+.cbar{position:absolute;left:0;top:calc(var(--lane) * 24px + 5px);height:19px;line-height:19px;
+  min-width:7px;background:var(--kc);color:#fff;font-size:10.5px;padding:0 7px;border-radius:5px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 2px rgba(0,0,0,.14);}
+.cmk{position:absolute;top:calc(var(--lane) * 24px + 5px);height:19px;display:flex;align-items:center;
+  gap:5px;transform:translateX(-5px);font-size:10.5px;color:var(--kc);white-space:nowrap;font-weight:600;}
+.cmk::before{content:"";width:9px;height:9px;background:var(--kc);border-radius:2px;
+  transform:rotate(45deg);flex:none;}
+.none{position:absolute;left:12px;top:7px;color:var(--ink-3);font-size:11px;}
+.is-empty .strack{min-height:26px;}
+.is-empty .snm-t{color:var(--ink-3);font-weight:400;}
+
+.sgrp{display:flex;gap:8px;align-items:baseline;background:var(--surface-2);padding:6px 12px;
+  font-size:12px;font-weight:700;color:var(--ink-2);border-bottom:1px solid var(--line);letter-spacing:.04em;}
+.sgrp-n{color:var(--ink-3);font-weight:400;font-size:11px;}
+
+/* ── 店舗詳細：この店の販促 ─────────────────────────────── */
+.clist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}
+.clist li{display:flex;align-items:flex-start;gap:11px;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);padding:11px 14px;box-shadow:var(--shadow);}
+.kchip{flex:none;font-size:11px;font-weight:600;color:#fff;background:var(--kc);border-radius:5px;
+  padding:3px 9px;margin-top:1px;}
+.cbody{flex:1;min-width:0;}
+.ctitle{font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.cnote{font-size:12px;color:var(--ink-3);margin-top:3px;}
+.crange{flex:none;font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums;
+  white-space:nowrap;margin-top:2px;}
+
+@media (max-width:620px){.srow{grid-template-columns:118px 1fr;}}

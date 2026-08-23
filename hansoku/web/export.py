@@ -11,6 +11,8 @@ import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+import yaml
+
 from ..analytics import RATIO_METRICS, ratio
 from ..db.warehouse import AggregateQuery, Warehouse
 from ..model import (
@@ -21,7 +23,58 @@ from ..model import (
     METRIC_FOOD_THEORY_COST,
     METRIC_SALES,
 )
+from ..settings import ROOT
 from ..stores import StoreMaster
+
+# 施策スケジュールの種類（色分けに使う）。未知の種類は promo に寄せる。
+VALID_KINDS = {"fair", "menu", "promo", "renewal", "closure", "switch"}
+DEFAULT_SCHEDULE_PATH = ROOT / "config" / "schedule.yaml"
+
+
+def load_schedule(
+    master: StoreMaster, path: Path | str | None = None
+) -> list[dict]:
+    """人が書く config/schedule.yaml を読み、画面が使える形に正規化する。
+
+    対象店コードが1つも実在しない施策は捨てる（コードの打ち間違いを黙って通さない）。
+    ファイルが無ければ空リスト（施策ゼロでも画面は成立する）。
+    """
+    path = Path(path) if path else DEFAULT_SCHEDULE_PATH
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    active = set(master.active_codes)
+    out: list[dict] = []
+    for index, camp in enumerate(data.get("campaigns") or []):
+        stores_field = camp.get("stores", "all")
+        scope_all = stores_field in ("all", "*", None, "")
+        if scope_all:
+            codes = sorted(active)
+        else:
+            codes = [str(x) for x in stores_field if str(x) in active]
+        if not codes:
+            continue
+
+        kind = camp.get("kind", "promo")
+        if kind not in VALID_KINDS:
+            kind = "promo"
+        start = str(camp["start"])
+        end = str(camp.get("end", start))
+        out.append(
+            {
+                "id": str(camp.get("id", f"c{index}")),
+                "stores": codes,
+                "scope_all": scope_all,
+                "title": str(camp.get("title", "")),
+                "kind": kind,
+                "start": start,
+                "end": end,
+                "note": str(camp.get("note", "")) if camp.get("note") else "",
+            }
+        )
+    return out
 
 # 画面に出す指標。増やすときはここに足す。
 METRICS = [
@@ -39,6 +92,7 @@ def build(
     *,
     date_from: date,
     date_to: date,
+    campaigns: list[dict] | None = None,
 ) -> dict:
     """画面が必要とするものを1つの辞書にまとめる。"""
     rows = warehouse.aggregate(
@@ -111,8 +165,8 @@ def build(
         ],
         "monthly": monthly,
         "cost_rate": cost_rates,
-        # 施策はこれから作る。画面は空でも成立するようにしてある。
-        "campaigns": [],
+        # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
+        "campaigns": campaigns or [],
     }
 
 

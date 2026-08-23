@@ -29,8 +29,30 @@ const REGION_COLORS = {
 };
 const regionColor = r => REGION_COLORS[r] || "#6B7280";
 
+// 施策の種類（色分け）。config/schedule.yaml の kind と対応。
+const KIND = {
+  fair:    { label: "フェア",     color: "#C8791E" },
+  menu:    { label: "新メニュー", color: "#2E8B57" },
+  promo:   { label: "販促",       color: "#2E4A7D" },
+  renewal: { label: "改装明け",   color: "#1F5FBF" },
+  closure: { label: "休業",       color: "#8A8F99" },
+  switch:  { label: "設備",       color: "#7A4FA0" },
+};
+const kindOf = k => KIND[k] || KIND.promo;
+
+// 日付まわり（"YYYY-MM" と "YYYY-MM-DD" を扱う。文字列比較で前後が分かる）
+const parseDate = s => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d || 1); };
+const monthStart = ym => { const [y, m] = ym.split("-").map(Number); return new Date(y, m - 1, 1); };
+const monthEnd = ym => { const [y, m] = ym.split("-").map(Number); return new Date(y, m, 1); }; // 翌月1日（排他）
+const addMonth = (ym, delta) => {
+  const [y, m] = ym.split("-").map(Number);
+  const t = new Date(y, m - 1 + delta, 1);
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
+};
+const monthRange = (a, b) => { const out = []; let cur = a; while (cur <= b) { out.push(cur); cur = addMonth(cur, 1); } return out; };
+
 let DATA = null;
-let VIEW = { kind: "list" };   // {kind:"list"} | {kind:"store", code} | {kind:"overview"}
+let VIEW = { kind: "schedule" };   // schedule(TOP) | store,code | list(店カード) | overview
 let METRIC = "sales";
 
 const CURRENT_MONTH = (() => {
@@ -140,7 +162,8 @@ function render() {
   const app = document.getElementById("app");
   if (VIEW.kind === "store") app.innerHTML = renderStore(VIEW.code);
   else if (VIEW.kind === "overview") app.innerHTML = renderOverview();
-  else app.innerHTML = renderList();
+  else if (VIEW.kind === "list") app.innerHTML = renderList();
+  else app.innerHTML = renderSchedule();
 
   app.querySelectorAll("[data-store]").forEach(el =>
     el.addEventListener("click", () => go({ kind: "store", code: el.dataset.store })));
@@ -150,7 +173,107 @@ function render() {
 }
 function go(v) { VIEW = v; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
 
-// ── 店一覧（TOP・主役）──────────────────────────────────────────────────
+// ── 全店スケジュール（TOP・主役）────────────────────────────────────────
+// 重なる施策を段（レーン）に振り分ける。start順に、空いた段へ置いていく。
+function packLanes(list) {
+  const laneEnd = [];   // 段ごとの「最後の終了日」
+  const placed = list.map(c => {
+    let li = laneEnd.findIndex(end => end < c.start);
+    if (li === -1) { li = laneEnd.length; laneEnd.push(c.end); }
+    else laneEnd[li] = c.end;
+    return { c, lane: li };
+  });
+  return { placed, laneCount: Math.max(1, laneEnd.length) };
+}
+
+function renderSchedule() {
+  const camps = DATA.campaigns || [];
+  const activeCodes = new Set(DATA.stores.map(s => s.code));
+
+  // 表示する月の窓：今月±3。施策の端がはみ出すなら広げる
+  let lo = addMonth(CURRENT_MONTH, -3), hi = addMonth(CURRENT_MONTH, 3);
+  for (const c of camps) {
+    const s = c.start.slice(0, 7), e = c.end.slice(0, 7);
+    if (s < lo) lo = s;
+    if (e > hi) hi = e;
+  }
+  const months = monthRange(lo, hi);
+  const winStart = monthStart(months[0]);
+  const span = monthEnd(months[months.length - 1]) - winStart;
+  const frac = s => Math.max(0, Math.min(1, (parseDate(s) - winStart) / span));
+  const P = f => (f * 100).toFixed(2) + "%";
+
+  const gridlines = months.map(m => `<div class="gl" style="left:${P(frac(m + "-01"))}"></div>`).join("");
+  const monthLabels = months.map((m, i) => {
+    const mid = (frac(m + "-01") + frac(addMonth(m, 1) + "-01")) / 2;
+    return `<div class="mlab" style="left:${P(mid)}">${axisLabel(months, i)}</div>`;
+  }).join("");
+  const todayF = (new Date() - winStart) / span;
+  const inWin = todayF > 0 && todayF < 1;
+  const todayLine = inWin ? `<div class="tdl" style="left:${P(todayF)}"></div>` : "";
+  const todayLab = inWin ? `<div class="tdlab" style="left:${P(todayF)}">今日</div>` : "";
+
+  const byStore = {};
+  for (const c of camps) for (const code of c.stores) (byStore[code] ||= []).push(c);
+
+  const barFor = ({ c, lane }) => {
+    const k = kindOf(c.kind);
+    const tip = `${c.title}（${c.start === c.end ? c.start : c.start + "〜" + c.end}）`;
+    if (c.start === c.end) {
+      return `<div class="cmk" style="left:${P(frac(c.start))};--lane:${lane};--kc:${k.color}" title="${tip}">
+        <span class="cmk-t">${c.title}</span></div>`;
+    }
+    const l = frac(c.start), w = Math.max(frac(c.end) - l, 0.015);
+    return `<div class="cbar" style="left:${P(l)};width:${P(w)};--lane:${lane};--kc:${k.color}" title="${tip}">${c.title}</div>`;
+  };
+
+  const rowsHtml = DATA.regions.map(r => {
+    const codes = r.stores.filter(c => activeCodes.has(c));
+    if (!codes.length) return "";
+    const rows = codes.map(code => {
+      const list = (byStore[code] || []).slice().sort((a, b) => a.start < b.start ? -1 : 1);
+      const { placed, laneCount } = packLanes(list);
+      const lane = list.length
+        ? placed.map(barFor).join("")
+        : `<span class="none">―</span>`;
+      return `
+        <div class="srow${list.length ? "" : " is-empty"}" style="--lanes:${laneCount}" data-store="${code}">
+          <div class="snm"><span class="rtag" style="--rc:${regionColor(r.name)}">${r.name}</span>
+            <span class="snm-t">${storeName(code)}</span></div>
+          <div class="strack">${gridlines}${todayLine}${lane}</div>
+        </div>`;
+    }).join("");
+    return `<div class="sgrp"><span>${r.name}</span><span class="sgrp-n">${codes.length}店</span></div>${rows}`;
+  }).join("");
+
+  const legend = Object.values(KIND)
+    .map(v => `<span class="klg"><i style="background:${v.color}"></i>${v.label}</span>`).join("");
+  const emptyBanner = camps.length === 0
+    ? `<div class="empty">施策はまだ登録されていません。config/schedule.yaml に追記すると、ここに帯で並びます。</div>`
+    : "";
+
+  return `
+    <section class="block">
+      <div class="bhead"><h2>全店スケジュール</h2>
+        <span class="bnote">${months[0]}〜${months[months.length - 1]}　店を選ぶと詳細へ</span></div>
+      ${emptyBanner}
+      <div class="klgrow">${legend}</div>
+      <div class="sched"><div class="sched-inner">
+        <div class="srow shead-row">
+          <div class="snm"></div>
+          <div class="strack">${gridlines}${monthLabels}${todayLine}${todayLab}</div>
+        </div>
+        ${rowsHtml}
+      </div></div>
+    </section>
+    <div class="ovrlink">
+      <button class="linkbtn" data-view="list">店舗カードで見る →</button>
+      <span class="sep">／</span>
+      <button class="linkbtn" data-view="overview">エリア・全店の表 →</button>
+    </div>`;
+}
+
+// ── 店一覧（店舗カード）──────────────────────────────────────────────────
 function renderList() {
   const months = DATA.months;
   // エリア順に並べる（大阪→東京→…）。エリアは見出しの小さなラベルに留める
@@ -173,6 +296,7 @@ function renderList() {
     })).join("");
 
   return `
+    <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
     <section class="block">
       <div class="bhead"><h2>店舗</h2>
         <span class="bnote">${METRIC_LABELS[METRIC]}・期間合計／前年同月比（当月の暫定は除く）</span></div>
@@ -204,10 +328,15 @@ function renderStore(code) {
         <div class="delta">${y ? `${man(y.prev)} → ${man(y.cur)}` : "前年データなし"}</div></div>
     </div>`;
 
-  // 自店の売上推移（施策帯は施策機能が入ったら重ねる）
+  // この店の施策（config/schedule.yaml 由来）
+  const myCamps = (DATA.campaigns || [])
+    .filter(c => c.stores.includes(code))
+    .sort((a, b) => a.start < b.start ? -1 : 1);
+
+  // 自店の売上推移。施策期間はグラフに帯として重ねる
   const own = `
-    <div class="panel"><div class="chartwrap">${singleLine(code, months, color)}</div>
-      <figcaption>当月は締め前の暫定値。施策を登録すると、この上に施策期間の帯が重なります。</figcaption>
+    <div class="panel"><div class="chartwrap">${singleLine(code, months, color, myCamps)}</div>
+      <figcaption>当月は締め前の暫定値（点線）。色帯は施策期間です。</figcaption>
     </div>`;
 
   // 近隣（同エリア）比較
@@ -231,22 +360,37 @@ function renderStore(code) {
       </section>`;
   }
 
+  // この店の販促（施策の一覧）
+  const promoBlock = myCamps.length
+    ? `<ul class="clist">${myCamps.map(c => {
+        const k = kindOf(c.kind);
+        const range = c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
+        return `<li>
+          <span class="kchip" style="--kc:${k.color}">${k.label}</span>
+          <div class="cbody"><div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}</div>
+            ${c.note ? `<div class="cnote">${c.note}</div>` : ""}</div>
+          <span class="crange">${range}</span>
+        </li>`;
+      }).join("")}</ul>`
+    : `<div class="empty">この店の施策はまだ登録されていません。config/schedule.yaml に追記すると、ここと上の売上グラフに並びます。</div>`;
+
   return `
-    <div class="crumbs"><button class="linkbtn" data-view="list">← 店舗一覧</button></div>
+    <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
     <section class="block">
       <div class="shd"><span class="rtag" style="--rc:${color}">${s.region}</span>
         <h2 class="sname">${s.name}</h2>${s.shared_facility ? '<span class="tagx">共営施設</span>' : ""}</div>
       ${kpis}
     </section>
     <section class="block">
+      <div class="bhead"><h2>この店の販促</h2>
+        <span class="bnote">${myCamps.length}件</span></div>
+      ${promoBlock}
+    </section>
+    <section class="block">
       <div class="bhead"><h2>売上推移</h2><span class="bnote">${METRIC_LABELS[METRIC]}</span></div>
       ${own}
     </section>
     ${neighBlock}
-    <section class="block">
-      <div class="bhead"><h2>この店の販促</h2></div>
-      <div class="empty">施策の登録機能はこれから作ります。登録した施策と結果が、ここと売上グラフに並びます。</div>
-    </section>
   `;
 }
 
@@ -269,7 +413,8 @@ function renderOverview() {
     return `<tr class="grp"><td colspan="${months.length + 1}">${r.name}（${codes.length}店）</td></tr>${rows}`;
   }).join("");
   return `
-    <div class="crumbs"><button class="linkbtn" data-view="list">← 店舗一覧</button></div>
+    <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button>
+      <span class="sep">／</span><button class="linkbtn" data-view="list">店舗カード</button></div>
     <section class="block">
       <div class="bhead"><h2>エリア・全店の一覧</h2>
         <span class="bnote">直近4ヶ月・${METRIC_LABELS[METRIC]}（当月は暫定）</span></div>
@@ -316,7 +461,7 @@ function chartFrame(months, allVals, isRatio) {
     if (i % step === 0 || i === n - 1)
       xlab += `<text x="${x(i)}" y="${H - 12}" text-anchor="middle" class="axt">${axisLabel(months, i)}</text>`;
   });
-  return { W, H, x, y, grid, xlab };
+  return { W, H, x, y, grid, xlab, PT, PB };
 }
 
 function pathOf(ser, x, y) {
@@ -329,12 +474,27 @@ function pathOf(ser, x, y) {
   return d;
 }
 
-function singleLine(code, months, color) {
+function singleLine(code, months, color, camps = []) {
   const isRatio = METRIC === "cost_rate";
   const ser = series(code, months);
   const vals = ser.filter(v => v != null);
   if (!vals.length) return `<div class="empty">データがありません</div>`;
-  const { W, H, x, y, grid, xlab } = chartFrame(months, vals, isRatio);
+  const { W, H, x, y, grid, xlab, PT, PB } = chartFrame(months, vals, isRatio);
+  const n = months.length;
+  // 施策期間を帯として重ねる（該当月の列を薄く塗る）
+  const bands = camps.map(c => {
+    const sM = c.start.slice(0, 7), eM = c.end.slice(0, 7);
+    const si = months.findIndex(m => m >= sM);
+    let ei = -1;
+    for (let i = n - 1; i >= 0; i--) { if (months[i] <= eM) { ei = i; break; } }
+    if (si === -1 || ei === -1 || si > ei) return "";
+    const x0 = si === 0 ? x(0) : (x(si) + x(si - 1)) / 2;
+    const x1 = ei === n - 1 ? x(ei) : (x(ei) + x(ei + 1)) / 2;
+    const k = kindOf(c.kind);
+    return `<rect x="${x0.toFixed(1)}" y="${PT}" width="${(x1 - x0).toFixed(1)}" height="${H - PT - PB}"
+        fill="${k.color}" opacity="0.12"/>
+      <text x="${((x0 + x1) / 2).toFixed(1)}" y="${PT + 10}" text-anchor="middle" class="axt" fill="${k.color}">${c.title}</text>`;
+  }).join("");
   // 確定と暫定（当月）を分けて描く
   const confSer = ser.map((v, i) => months[i] === CURRENT_MONTH ? null : v);
   const area = (() => {
@@ -350,7 +510,7 @@ function singleLine(code, months, color) {
   ).join("");
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" style="min-width:520px" role="img"
       aria-label="${storeName(code)}の${METRIC_LABELS[METRIC]}推移">
-    ${grid}${xlab}${area}
+    ${bands}${grid}${xlab}${area}
     <path d="${pathOf(confSer, x, y)}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
     ${provDot}</svg>`;
 }

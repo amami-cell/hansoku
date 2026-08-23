@@ -217,17 +217,23 @@ def cmd_fw_stores(args: argparse.Namespace) -> int:
 
 
 def cmd_export_web(args: argparse.Namespace) -> int:
-    from .web.export import build, write
+    from .web.export import build, load_schedule, write
 
     settings = load_settings()
     master = StoreMaster.load(args.stores)
+    campaigns = load_schedule(master)
     with get_warehouse(settings) as warehouse:
         payload = build(
-            warehouse, master, date_from=args.date_from, date_to=args.date_to
+            warehouse,
+            master,
+            date_from=args.date_from,
+            date_to=args.date_to,
+            campaigns=campaigns,
         )
     path = write(payload, Path(args.out))
     print(f"書き出し完了: {path}")
-    print(f"  店舗 {len(payload['stores'])} / 月 {len(payload['months'])}")
+    print(f"  店舗 {len(payload['stores'])} / 月 {len(payload['months'])}"
+          f" / 施策 {len(payload['campaigns'])}")
     return 0
 
 
