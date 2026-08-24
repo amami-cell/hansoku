@@ -170,6 +170,90 @@ def _dump_grid(session) -> None:
             print("   ", " | ".join(row))
 
 
+def _click_search(session) -> None:
+    session.click_text("検 索", wait=2.0) or session.click_text("検索", wait=2.0)
+
+
+def _read_month(session) -> str | None:
+    """画面上の「YYYY年MM月」を "YYYY-MM" にして返す。"""
+    txt = session.page.evaluate(
+        """() => {
+        const re = /((19|20)\\d{2})年\\s*(\\d{1,2})月/;
+        for (const el of document.querySelectorAll('input,div,span,td,li')) {
+            if (!el.offsetParent) continue;
+            const s = (el.value || el.innerText || '');
+            const m = s.match(re);
+            if (m) return m[1] + '-' + String(m[3]).padStart(2, '0');
+        }
+        return null;
+    }"""
+    )
+    return txt
+
+
+def _read_sales_budget(session) -> int | None:
+    """「売上高（税抜き）」行の入力値（円）を返す。"""
+    val = session.page.evaluate(
+        """() => {
+        const leaves = [...document.querySelectorAll('*')].filter(
+            el => el.children.length === 0 && (el.innerText || '').replace(/\\s/g, '').includes('売上高'));
+        for (const n of leaves) {
+            let row = n;
+            for (let i = 0; i < 5 && row; i++) {
+                const inp = row.querySelector('input');
+                if (inp) return inp.value;
+                row = row.parentElement;
+            }
+        }
+        return null;
+    }"""
+    )
+    if val is None:
+        return None
+    digits = "".join(ch for ch in str(val) if ch.isdigit())
+    return int(digits) if digits else None
+
+
+def _store_options(session) -> list[str]:
+    """店舗ドロップダウンの選択肢名を返す（<select> か ng-select）。"""
+    return session.page.evaluate(
+        """() => {
+        const clip = s => (s || '').trim();
+        // まず店舗ラベル近傍の <select>
+        const lab = [...document.querySelectorAll('*')].find(
+            el => el.children.length === 0 && clip(el.textContent) === '店舗' && el.offsetParent);
+        let node = lab ? lab.parentElement : document;
+        for (let i = 0; i < 8 && node; i++) {
+            const sel = node.querySelector && node.querySelector('select');
+            if (sel) return [...sel.options].map(o => clip(o.textContent)).filter(Boolean);
+            node = node.parentElement;
+        }
+        return [];
+    }"""
+    )
+
+
+def _select_store(session, name: str) -> bool:
+    """店舗ドロップダウンで name を選ぶ（<select>）。"""
+    ok = session.page.evaluate(
+        """(name) => {
+        const clip = s => (s || '').trim();
+        for (const sel of document.querySelectorAll('select')) {
+            const opt = [...sel.options].find(o => clip(o.textContent) === name);
+            if (opt) {
+                sel.value = opt.value;
+                sel.dispatchEvent(new Event('change', {bubbles: true}));
+                return true;
+            }
+        }
+        return false;
+    }""",
+        name,
+    )
+    time.sleep(0.5)
+    return bool(ok)
+
+
 def probe(artifacts: Path) -> int:
     """月別予算登録に入り、検索してグリッドを吸い出す。CSVも試す。取り込み前の下調べ。"""
     with fw_session(artifacts) as session:
@@ -197,4 +281,91 @@ def probe(artifacts: Path) -> int:
             for line in text.splitlines()[:40]:
                 print(line)
     print(f"\n成果物: {artifacts}")
+    return 0
+
+
+def ingest(
+    warehouse,
+    master,
+    *,
+    artifacts: Path,
+    months_back: int = 3,
+    store_limit: int | None = None,
+    dry_run: bool = False,
+) -> int:
+    """月別予算登録から各店×直近数ヶ月の「売上高（税抜き）」を読み、売上予算として取り込む。
+
+    画面は1ヶ月ずつ表示。店舗を選び→検索→当月を読む→前月へ→…を繰り返す。
+    表示中の月をそのままラベルにするので、月がずれても取り違えない。
+    """
+    from datetime import date as _date
+    from datetime import datetime, timezone
+
+    from ..model import (
+        GRAIN_MONTH,
+        KIND_FINAL,
+        METRIC_SALES_BUDGET,
+        ActualRow,
+    )
+
+    source = "fw_budget"
+    ingested_at = datetime.now(timezone.utc)
+    collected: list[tuple[str, str, int]] = []
+    unresolved: list[str] = []
+
+    with fw_session(artifacts) as session:
+        _open_monthly_budget(session)
+        options = _store_options(session)
+        print(f"[budget] 店舗ドロップダウン {len(options)}件")
+        if store_limit:
+            options = options[:store_limit]
+
+        for name in options:
+            store = master.find_by_name(name)
+            if not store or not store.active:
+                unresolved.append(name)
+                continue
+            if not _select_store(session, name):
+                print(f"[budget] 店舗選択に失敗: {name}")
+                continue
+            _click_search(session)
+            for k in range(months_back):
+                if k > 0:
+                    session.click_text("前月", wait=1.2)
+                    _click_search(session)
+                month = _read_month(session)
+                value = _read_sales_budget(session)
+                if month and value is not None:
+                    collected.append((store.store_code, month, value))
+                    print(f"  {store.store_code} {name[:14]} {month} 売上予算 {value:,}")
+                else:
+                    print(f"  {store.store_code} {name[:14]} 読み取り失敗 (month={month}, val={value})")
+            # 次の店のため当月へ戻す
+            for _ in range(months_back - 1):
+                session.click_text("翌月", wait=0.6)
+
+    if unresolved:
+        print(f"[budget] マスタ未解決の店舗（スキップ）: {unresolved}")
+    print(f"[budget] 収集 {len(collected)} 件")
+
+    if dry_run:
+        print("[budget] dry-run のため書き込みはしません")
+        return 0
+
+    rows = [
+        ActualRow(
+            store_code=code,
+            date=_date(int(m[:4]), int(m[5:7]), 1),
+            grain=GRAIN_MONTH,
+            metric=METRIC_SALES_BUDGET,
+            value=float(value),
+            kind=KIND_FINAL,
+            source=source,
+            ingested_at=ingested_at,
+        )
+        for (code, m, value) in collected
+    ]
+    warehouse.ensure_schema()
+    loaded = warehouse.replace_actuals(rows)
+    print(f"[budget] warehouse へ {loaded} 件 書き込みました")
     return 0

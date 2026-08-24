@@ -16,6 +16,8 @@ on:
           - explore
           - list-stores
           - budget-probe
+          - budget-dry
+          - budget-ingest
         default: explore
       path:
         description: '探索するメニュー名（カンマ区切り）'
@@ -60,6 +62,11 @@ jobs:
         env:
           FOODIST_JOURNAL_USER_ID: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
           FOODIST_JOURNAL_PASSWORD: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           args=""
           for p in $(echo "${{ inputs.path }}" | tr ',' ' '); do
@@ -74,6 +81,10 @@ jobs:
               xvfb-run -a python -m hansoku.cli fw-stores --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "budget-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-budget --mode probe --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "budget-dry" ]; then
+              xvfb-run -a python -m hansoku.cli fw-budget --mode ingest --dry-run --limit 2 --months 2 --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "budget-ingest" ]; then
+              xvfb-run -a python -m hansoku.cli fw-budget --mode ingest --months 3 --artifacts fw-artifacts
             else
               xvfb-run -a python -m hansoku.cli fw-explore $args --artifacts fw-artifacts
             fi
