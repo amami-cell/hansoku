@@ -238,6 +238,48 @@ def _open_store_ngselect(page) -> bool:
     )
 
 
+def _combo_options(session) -> list[dict]:
+    """月別予算登録の店舗コンボボックス（store-combo-box / app-combobox）の
+    選択肢を返す。各 li.option は value=FW店舗コード(0埋め) / title=店名。
+    d-none で隠れているが DOM にはあるので、可視判定はしない。"""
+    return session.page.evaluate(
+        """() => {
+        const out = [];
+        for (const li of document.querySelectorAll(
+                'store-combo-box li.option, app-combobox li.option, li.option')) {
+            const value = (li.getAttribute('value') || '').trim();
+            const name = (li.getAttribute('title') || li.textContent || '').trim();
+            if (value) out.push({ value, name });
+        }
+        return out;
+    }"""
+    )
+
+
+def _select_combo(session, value: str) -> bool:
+    """店舗コンボボックスを開いて value の選択肢をクリックする。"""
+    page = session.page
+    page.evaluate(
+        """() => {
+        const btn = document.querySelector(
+            'store-combo-box .dropdown-btn, app-combobox .dropdown-btn, .combobox .dropdown-btn');
+        if (btn) btn.click();
+    }"""
+    )
+    time.sleep(0.4)
+    ok = page.evaluate(
+        """(value) => {
+        const li = document.querySelector(
+            `store-combo-box li.option[value="${value}"], app-combobox li.option[value="${value}"], li.option[value="${value}"]`);
+        if (li) { li.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true})); return true; }
+        return false;
+    }""",
+        value,
+    )
+    time.sleep(0.4)
+    return bool(ok)
+
+
 def _store_options(session) -> list[str]:
     """店舗ドロップダウンの選択肢名を返す。<select> か ng-select を自動判別する。"""
     page = session.page
@@ -393,20 +435,27 @@ def ingest(
     collected: list[tuple[str, str, int]] = []
     unresolved: list[str] = []
 
+    active_by_code = {s.store_code: s for s in master.active}
+
     with fw_session(artifacts) as session:
         _open_monthly_budget(session)
-        options = _store_options(session)
-        print(f"[budget] 店舗ドロップダウン {len(options)}件")
+        options = _combo_options(session)
+        print(f"[budget] 店舗コンボボックス {len(options)}件")
+        # 稼働24店（store_code一致）に絞る。value は0埋めFWコードなので0を外して照合
+        targets = []
+        for opt in options:
+            code = opt["value"].lstrip("0")
+            store = active_by_code.get(code) or master.find_by_name(opt["name"])
+            if store and store.active:
+                targets.append((opt["value"], store))
+        print(f"[budget] マスタと一致した稼働店 {len(targets)}件")
         if store_limit:
-            options = options[:store_limit]
+            targets = targets[:store_limit]
 
-        for name in options:
-            store = master.find_by_name(name)
-            if not store or not store.active:
-                unresolved.append(name)
-                continue
-            if not _select_store(session, name):
-                print(f"[budget] 店舗選択に失敗: {name}")
+        for value, store in targets:
+            name = store.store_name
+            if not _select_combo(session, value):
+                print(f"[budget] 店舗選択に失敗: {name} ({value})")
                 continue
             _click_search(session)
             for k in range(months_back):
