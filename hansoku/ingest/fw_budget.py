@@ -214,38 +214,96 @@ def _read_sales_budget(session) -> int | None:
     return int(digits) if digits else None
 
 
-def _store_options(session) -> list[str]:
-    """店舗ドロップダウンの選択肢名を返す（<select> か ng-select）。"""
-    return session.page.evaluate(
+_LOOKS_STORE = (
+    "/店|すさび|ぎふや|GOLD|Largo|UMAMI|ARATA|んだんだ|たぬき|ちゃー|"
+    "たいだい|NagaGutsu|熊|ひよこ|泡|CRAFTMAN|寿司/"
+)
+
+
+def _open_store_ngselect(page) -> bool:
+    """店舗ラベル近傍の ng-select を開く。"""
+    return page.evaluate(
         """() => {
-        const clip = s => (s || '').trim();
-        // まず店舗ラベル近傍の <select>
         const lab = [...document.querySelectorAll('*')].find(
-            el => el.children.length === 0 && clip(el.textContent) === '店舗' && el.offsetParent);
-        let node = lab ? lab.parentElement : document;
+            el => el.children.length === 0 && (el.textContent || '').trim() === '店舗' && el.offsetParent);
+        let node = lab ? lab.parentElement : null, trig = null;
         for (let i = 0; i < 8 && node; i++) {
-            const sel = node.querySelector && node.querySelector('select');
-            if (sel) return [...sel.options].map(o => clip(o.textContent)).filter(Boolean);
+            trig = node.querySelector('ng-select,.ng-select,.ng-input,.ng-value-container,.ng-arrow-wrapper');
+            if (trig) break;
             node = node.parentElement;
         }
-        return [];
+        if (trig) { trig.click(); return true; }
+        return false;
     }"""
     )
 
 
-def _select_store(session, name: str) -> bool:
-    """店舗ドロップダウンで name を選ぶ（<select>）。"""
-    ok = session.page.evaluate(
-        """(name) => {
+def _store_options(session) -> list[str]:
+    """店舗ドロップダウンの選択肢名を返す。<select> か ng-select を自動判別する。"""
+    page = session.page
+    native = page.evaluate(
+        """() => {
         const clip = s => (s || '').trim();
+        const looks = t => """
+        + _LOOKS_STORE
+        + """.test(t);
         for (const sel of document.querySelectorAll('select')) {
-            const opt = [...sel.options].find(o => clip(o.textContent) === name);
-            if (opt) {
-                sel.value = opt.value;
-                sel.dispatchEvent(new Event('change', {bubbles: true}));
-                return true;
-            }
+            const o = [...sel.options].map(x => clip(x.textContent)).filter(Boolean);
+            if (o.length > 3 && o.some(looks)) return o;
         }
+        return null;
+    }"""
+    )
+    if native:
+        session._store_kind = "select"
+        return native
+
+    # ng-select：開かないと選択肢が出ない
+    _open_store_ngselect(page)
+    time.sleep(0.7)
+    opts = page.evaluate(
+        """() => [...document.querySelectorAll('.ng-option,[class*="ng-option"],li.option')]
+            .filter(o => o.offsetParent).map(o => (o.textContent || '').trim()).filter(Boolean)"""
+    )
+    try:
+        page.keyboard.press("Escape")
+    except Exception:
+        pass
+    session._store_kind = "ng" if opts else "none"
+    diag = page.evaluate(
+        """() => ({selects: document.querySelectorAll('select').length,
+                   ng: document.querySelectorAll('ng-select,.ng-select').length})"""
+    )
+    print(f"[budget] セレクタ診断: {diag} kind={session._store_kind} 選択肢={len(opts)}")
+    return opts
+
+
+def _select_store(session, name: str) -> bool:
+    """店舗ドロップダウンで name を選ぶ（<select> / ng-select 両対応）。"""
+    page = session.page
+    if getattr(session, "_store_kind", "") == "select":
+        ok = page.evaluate(
+            """(name) => {
+            const clip = s => (s || '').trim();
+            for (const sel of document.querySelectorAll('select')) {
+                const opt = [...sel.options].find(o => clip(o.textContent) === name);
+                if (opt) { sel.value = opt.value; sel.dispatchEvent(new Event('change', {bubbles: true})); return true; }
+            }
+            return false;
+        }""",
+            name,
+        )
+        time.sleep(0.5)
+        return bool(ok)
+
+    # ng-select
+    _open_store_ngselect(page)
+    time.sleep(0.5)
+    ok = page.evaluate(
+        """(name) => {
+        const o = [...document.querySelectorAll('.ng-option,[class*="ng-option"],li.option')]
+            .find(x => (x.textContent || '').trim() === name);
+        if (o) { o.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true})); return true; }
         return false;
     }""",
         name,
