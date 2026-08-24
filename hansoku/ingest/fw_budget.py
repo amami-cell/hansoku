@@ -213,15 +213,20 @@ def _read_month(session) -> str | None:
     return txt
 
 
+# 月別予算登録は表のセルが input で出来ている。行ラベル「売上高（税抜き）」も
+# テキストではなく読み取り専用 input の value。そのため「値が売上高を含む input」を
+# 見つけ、DOM順で次に来る数字入りの input（＝売上高の金額）を返す。
+# 例: [売上高（税抜き）] [20,500,000] [（客数）] [8,009] [（客単価）] [2,560]
 _SALES_JS = """() => {
-    const leaves = [...document.querySelectorAll('*')].filter(
-        el => el.children.length === 0 && (el.innerText || '').replace(/\\s/g, '').includes('売上高'));
-    for (const n of leaves) {
-        let row = n;
-        for (let i = 0; i < 6 && row; i++) {
-            const inp = row.querySelector('input');
-            if (inp && (inp.value || '').trim() !== '') return inp.value;
-            row = row.parentElement;
+    const inputs = [...document.querySelectorAll('input')].filter(
+        i => i.offsetParent && !['button', 'checkbox', 'radio', 'submit'].includes(i.type));
+    for (let i = 0; i < inputs.length; i++) {
+        if ((inputs[i].value || '').replace(/\\s/g, '').includes('売上高')) {
+            for (let j = i + 1; j < inputs.length; j++) {
+                const nv = (inputs[j].value || '').trim();
+                if (/[0-9]/.test(nv)) return nv;   // 最初の数字入り＝金額
+                if (/[（(]/.test(nv)) break;        // 次のラベル（客数）に達したら空扱い
+            }
         }
     }
     return null;
