@@ -1,0 +1,28 @@
+# 販促の制作物（チラシ・POP・メニュー・グランドメニュー等のPDF）の一覧。
+#
+# 考え方は schedule.yaml と同じ「人は台帳を書くだけ」。
+# PDF 本体は Cloudflare R2（bucket: hansoku-creatives）に置き、ここに1行ずつ書く。
+# 画面は本番サイトと同じドメイン（Cloudflare Access の内側）から /creatives/... で配信する。
+# ＝ ログインした人だけが閲覧でき、外には出ない。
+#
+# PDF のアップロードは:
+#   python -m hansoku.cli creatives-upload <PDFのパス> --campaign <施策id> --title "夏おすすめ チラシ"
+# 実行すると R2 に保存し、貼り付け用の1行（file: 付き）を表示するので、それを下に足す。
+#
+# 各項目:
+#   id:        制作物の一意なID（省略時は c0, c1… と自動採番）
+#   title:     表示名（必須）
+#   campaign:  紐づく施策ID（schedule.yaml の id）。書くと対象店・種類を引き継ぐ
+#   stores:    対象店（all / 店舗コードor店名の配列）。campaign があれば省略可
+#   date:      作成・掲出日（YYYY-MM-DD、任意）
+#   kind:      種類（施策と同じ色分け: gm/lunch/osusume/bounenkai/dev。省略時は施策の種類）
+#   file:      R2上のキー（creatives/…）。creatives-upload が表示する値をそのまま貼る
+#
+# 例（PDFをアップロードしたら、コメントを外して file: を実際のキーに）:
+# - id: summer26-flyer
+#   title: 夏おすすめフェア チラシ
+#   campaign: summer2026
+#   date: 2026-06-01
+#   file: creatives/2026/summer2026/summer_flyer.pdf
+
+creatives: []

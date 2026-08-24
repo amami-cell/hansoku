@@ -30,6 +30,27 @@ from ..stores import StoreMaster
 # 施策スケジュールの種類（色分けに使う）。未知の種類は dev（その他開発）に寄せる。
 VALID_KINDS = {"gm", "lunch", "osusume", "bounenkai", "dev", "closure"}
 DEFAULT_SCHEDULE_PATH = ROOT / "config" / "schedule.yaml"
+DEFAULT_CREATIVES_PATH = ROOT / "config" / "creatives.yaml"
+
+
+def _resolve_stores(master: StoreMaster, stores_field) -> tuple[list[str], bool]:
+    """stores 欄（all / コードor店名の配列）を稼働店コードの一覧に直す。
+
+    返り値は (コード一覧, 全店フラグ)。実在しないコード・店名は黙って落とす。
+    """
+    active = set(master.active_codes)
+    if stores_field in ("all", "*", None, ""):
+        return sorted(active), True
+    codes: list[str] = []
+    for raw in stores_field:
+        token = str(raw)
+        if token in active:
+            codes.append(token)
+            continue
+        hit = master.find_by_name(token)
+        if hit and hit.store_code in active:
+            codes.append(hit.store_code)
+    return list(dict.fromkeys(codes)), False  # 重複を除く（順序は保つ）
 
 
 def load_schedule(
@@ -99,6 +120,66 @@ def _parse_target(value) -> int | None:
     except (ValueError, TypeError):
         return None
 
+
+def load_creatives(
+    master: StoreMaster,
+    campaigns: list[dict] | None = None,
+    path: Path | str | None = None,
+) -> list[dict]:
+    """人が書く config/creatives.yaml を読み、ギャラリーが使える形に正規化する。
+
+    施策(campaign)に紐づけると対象店・種類をそこから引き継ぐ。file（R2キー）が
+    無い項目は「まだPDF未登録」なので落とす。ファイルが無ければ空リスト。
+    URL は本番と同一ドメインの /creatives/... にする（Cloudflare Access の内側で配信）。
+    """
+    path = Path(path) if path else DEFAULT_CREATIVES_PATH
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    by_id = {c["id"]: c for c in (campaigns or [])}
+    out: list[dict] = []
+    for index, item in enumerate(data.get("creatives") or []):
+        key = str(item.get("file") or "").strip()
+        title = str(item.get("title") or "").strip()
+        if not key or not title:
+            continue  # PDF未登録 or 名前なしは出さない
+
+        camp_id = str(item.get("campaign") or "").strip()
+        camp = by_id.get(camp_id)
+
+        if "stores" in item and item.get("stores") not in (None, ""):
+            codes, scope_all = _resolve_stores(master, item["stores"])
+        elif camp is not None:
+            codes, scope_all = list(camp["stores"]), bool(camp.get("scope_all"))
+        else:
+            codes, scope_all = sorted(master.active_codes), True
+        if not codes:
+            continue
+
+        kind = str(item.get("kind") or (camp["kind"] if camp else "dev"))
+        if kind not in VALID_KINDS:
+            kind = "dev"
+
+        out.append(
+            {
+                "id": str(item.get("id", f"cr{index}")),
+                "title": title,
+                "campaign_id": camp_id if camp is not None else "",
+                "campaign_title": camp["title"] if camp is not None else "",
+                "stores": codes,
+                "scope_all": scope_all,
+                "kind": kind,
+                "date": str(item.get("date") or ""),
+                # 同一ドメイン配信（Worker が R2 から返す）。先頭スラッシュ必須。
+                "url": "/" + key.lstrip("/"),
+            }
+        )
+    # 新しい掲出日から先に並べる（日付なしは末尾）
+    out.sort(key=lambda c: c["date"] or "0000-00-00", reverse=True)
+    return out
+
 # 画面に出す指標。増やすときはここに足す。
 METRICS = [
     METRIC_SALES,
@@ -116,6 +197,7 @@ def build(
     date_from: date,
     date_to: date,
     campaigns: list[dict] | None = None,
+    creatives: list[dict] | None = None,
 ) -> dict:
     """画面が必要とするものを1つの辞書にまとめる。"""
     rows = warehouse.aggregate(
@@ -207,6 +289,8 @@ def build(
         "budget": budget,
         # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
         "campaigns": campaigns or [],
+        # 制作物ギャラリー（config/creatives.yaml 由来）。空でも画面は成立する。
+        "creatives": creatives or [],
     }
 
 

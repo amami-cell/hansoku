@@ -12,9 +12,15 @@ main = "worker/index.js"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Worker が /api/* を捌き、それ以外は env.ASSETS で静的配信する。
+# Worker が /api/* と /creatives/* を捌き、それ以外は env.ASSETS で静的配信する。
 [assets]
 directory = "./web"
 binding = "ASSETS"
 # SPA。未知のパスは index.html を返す（今は単一ページだが将来のルーティングに備える）
 not_found_handling = "single-page-application"
+
+# 制作物PDFの置き場（Cloudflare R2）。/creatives/* を Worker がここから返す。
+# バケットは deploy.yml が無ければ作る（冪等）。
+[[r2_buckets]]
+binding = "CREATIVES"
+bucket_name = "hansoku-creatives"

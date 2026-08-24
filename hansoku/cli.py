@@ -241,11 +241,12 @@ def cmd_fw_budget(args: argparse.Namespace) -> int:
 
 
 def cmd_export_web(args: argparse.Namespace) -> int:
-    from .web.export import build, load_schedule, write
+    from .web.export import build, load_creatives, load_schedule, write
 
     settings = load_settings()
     master = StoreMaster.load(args.stores)
     campaigns = load_schedule(master)
+    creatives = load_creatives(master, campaigns)
     # アプリ内で入力された目標（Neon）を焼き込む。届かなければ yaml の値のまま。
     try:
         with get_appdb(settings) as db:
@@ -262,11 +263,61 @@ def cmd_export_web(args: argparse.Namespace) -> int:
             date_from=args.date_from,
             date_to=args.date_to,
             campaigns=campaigns,
+            creatives=creatives,
         )
     path = write(payload, Path(args.out))
     print(f"書き出し完了: {path}")
     print(f"  店舗 {len(payload['stores'])} / 月 {len(payload['months'])}"
-          f" / 施策 {len(payload['campaigns'])}")
+          f" / 施策 {len(payload['campaigns'])} / 制作物 {len(payload['creatives'])}")
+    return 0
+
+
+def cmd_creatives_upload(args: argparse.Namespace) -> int:
+    """制作物PDFを R2（ローカルはFS）へ保存し、creatives.yaml に貼る1行を出す。"""
+    from datetime import date as _date
+
+    from .db import creative_key, get_object_store
+
+    src = Path(args.file)
+    if not src.exists():
+        raise SystemExit(f"ファイルが見つかりません: {src}")
+    data = src.read_bytes()
+    year = args.year or _date.today().year
+    campaign_id = args.campaign or "misc"
+    key = creative_key(year, campaign_id, src.name)
+
+    ctype = "application/pdf" if src.suffix.lower() == ".pdf" else "application/octet-stream"
+    store = get_object_store(load_settings())
+    url = store.put(key, data, content_type=ctype)
+    title = args.title or src.stem
+
+    print(f"保存しました（{len(data):,} bytes）: {key}")
+    print(f"  参照URL: {url}")
+    print("\n── config/creatives.yaml に以下を追記してください ──")
+    print(f"- id: {campaign_id}-{src.stem}")
+    print(f"  title: {title}")
+    if args.campaign:
+        print(f"  campaign: {campaign_id}")
+    if args.date:
+        print(f"  date: {args.date}")
+    print(f"  file: {key}")
+    return 0
+
+
+def cmd_creatives_list(args: argparse.Namespace) -> int:
+    """creatives.yaml を解決して一覧表示する（画面に載る形の確認）。"""
+    from .web.export import load_creatives, load_schedule
+
+    master = StoreMaster.load(args.stores)
+    creatives = load_creatives(master, load_schedule(master))
+    if not creatives:
+        print("制作物はまだありません（config/creatives.yaml は空、または file 未設定）。")
+        return 0
+    for cr in creatives:
+        scope = "全店" if cr["scope_all"] else f"{len(cr['stores'])}店"
+        link = f" ←{cr['campaign_title']}" if cr["campaign_title"] else ""
+        print(f"[{cr['date'] or '日付なし'}] {cr['title']}（{scope}{link}）  {cr['url']}")
+    print(f"\n合計 {len(creatives)} 件")
     return 0
 
 
@@ -380,6 +431,18 @@ def build_parser() -> argparse.ArgumentParser:
     grant = sub.add_parser("grant-admin", help="admin 権限を付与する")
     grant.add_argument("email")
     grant.set_defaults(func=cmd_grant_admin)
+
+    cup = sub.add_parser("creatives-upload", help="制作物PDFをR2へ保存する")
+    cup.add_argument("file", help="アップロードするPDFのパス")
+    cup.add_argument("--campaign", default=None, help="紐づく施策ID（schedule.yaml）")
+    cup.add_argument("--title", default=None, help="表示名（省略時はファイル名）")
+    cup.add_argument("--year", type=int, default=None, help="保管年（省略時は今年）")
+    cup.add_argument("--date", default=None, help="掲出日 YYYY-MM-DD（貼付用）")
+    cup.set_defaults(func=cmd_creatives_upload)
+
+    sub.add_parser("creatives-list", help="制作物ギャラリーの一覧を表示する").set_defaults(
+        func=cmd_creatives_list
+    )
 
     sub.add_parser("stores", help="店舗マスタを表示する").set_defaults(func=cmd_stores)
     return parser

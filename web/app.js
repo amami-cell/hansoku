@@ -256,6 +256,7 @@ function render() {
   if (VIEW.kind === "store") app.innerHTML = renderStore(VIEW.code);
   else if (VIEW.kind === "overview") app.innerHTML = renderOverview();
   else if (VIEW.kind === "list") app.innerHTML = renderList();
+  else if (VIEW.kind === "gallery") app.innerHTML = renderGallery();
   else if (VIEW.kind === "calendar") app.innerHTML = renderCalendar();
   else app.innerHTML = renderSchedule();
 
@@ -375,6 +376,8 @@ function renderSchedule() {
       <button class="linkbtn" data-view="list">店舗カードで見る →</button>
       <span class="sep">／</span>
       <button class="linkbtn" data-view="overview">エリア・全店の表 →</button>
+      <span class="sep">／</span>
+      <button class="linkbtn" data-view="gallery">制作物ギャラリー →</button>
     </div>`;
 }
 
@@ -493,6 +496,46 @@ function renderList() {
   `;
 }
 
+// ── 制作物ギャラリー（config/creatives.yaml 由来）──────────────────────────
+// この店に掛かる制作物（全店ものも含む）。掲出日の新しい順は export 側で済み。
+const creativesFor = code => (DATA.creatives || []).filter(cr => cr.scope_all || cr.stores.includes(code));
+
+function creativeCard(cr) {
+  const k = kindOf(cr.kind);
+  const meta = [
+    cr.date || "",
+    cr.campaign_title ? "施策: " + cr.campaign_title : "",
+    cr.scope_all ? "全店" : cr.stores.length + "店",
+  ].filter(Boolean).join("　·　");
+  // PDFは同一ドメイン（Access内）/creatives/… から配信。新規タブで開く。
+  return `<div class="ccard">
+    <a class="cthumb" style="--kc:${k.color}" href="${cr.url}" target="_blank" rel="noopener" title="PDFを開く">
+      <span class="cext">PDF</span></a>
+    <div class="ccbody">
+      <span class="kchip" style="--kc:${k.color}">${k.label}</span>
+      <div class="cctitle">${cr.title}</div>
+      <div class="ccmeta">${meta}</div>
+      <a class="pdfbtn" href="${cr.url}" target="_blank" rel="noopener">PDFを開く ↗</a>
+    </div>
+  </div>`;
+}
+
+function renderGallery() {
+  const all = DATA.creatives || [];
+  const body = all.length
+    ? `<div class="cgrid">${all.map(creativeCard).join("")}</div>`
+    : `<div class="empty">まだ制作物が登録されていません。<br>
+        PDF を <code>hansoku creatives-upload &lt;PDF&gt; --campaign &lt;施策id&gt;</code> でアップロードし、
+        <code>config/creatives.yaml</code> に1行足すと、ここと各店の詳細に並びます。</div>`;
+  return `
+    <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
+    <section class="block">
+      <div class="bhead"><h2>制作物ギャラリー</h2>
+        <span class="bnote">チラシ・POP・メニュー等のPDF${all.length ? "　" + all.length + "件" : ""}</span></div>
+      ${body}
+    </section>`;
+}
+
 // ── 店舗詳細（販促×売上×近隣）───────────────────────────────────────────
 function renderStore(code) {
   const s = store(code);
@@ -559,6 +602,15 @@ function renderStore(code) {
       </section>`;
   }
 
+  // この店の制作物（PDF）。1件以上あるときだけ節を出す
+  const myCreatives = creativesFor(code);
+  const myCreativesBlock = myCreatives.length
+    ? `<section class="block">
+        <div class="bhead"><h2>この店の制作物</h2><span class="bnote">${myCreatives.length}件</span></div>
+        <div class="cgrid">${myCreatives.map(creativeCard).join("")}</div>
+      </section>`
+    : "";
+
   // この店の販促（施策の一覧）。実施中→予定→終了 の順、同状態内は日付順
   const STATUS_ORDER = { live: 0, soon: 1, done: 2 };
   const sortedCamps = myCamps.slice().sort((a, b) => {
@@ -618,6 +670,7 @@ function renderStore(code) {
         <span class="bnote">${myCamps.length}件</span></div>
       ${promoBlock}
     </section>
+    ${myCreativesBlock}
     <section class="block">
       <div class="bhead"><h2>売上推移</h2><span class="bnote">${METRIC_LABELS[METRIC]}</span></div>
       ${own}

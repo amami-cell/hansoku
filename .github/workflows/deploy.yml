@@ -80,6 +80,12 @@ jobs:
             exit 1
           fi
 
+          # 制作物用の R2 バケットを用意（無ければ作る・冪等）。
+          # Worker の CREATIVES バインドが実在バケットを要求するため、deploy の前に。
+          echo "── R2バケットを用意 ──"
+          npx wrangler r2 bucket create hansoku-creatives 2>&1 | tail -2 || \
+            echo "（バケットは既存か、権限が無ければ deploy で検出されます）"
+
           echo "── 公開 ──"
           npx wrangler deploy 2>&1 | tee /tmp/wr.log
 

@@ -23,10 +23,32 @@ export default {
         return json({ error: String((e && e.message) || e) }, 500);
       }
     }
+    // 制作物PDF（R2）。Access の内側で同一ドメイン配信する。
+    if (url.pathname.startsWith("/creatives/")) {
+      try {
+        return await handleCreative(url, env);
+      } catch (e) {
+        return json({ error: String((e && e.message) || e) }, 500);
+      }
+    }
     // それ以外は静的アセット（web/）を返す
     return env.ASSETS.fetch(request);
   },
 };
+
+async function handleCreative(url, env) {
+  if (!env.CREATIVES) return json({ error: "no-bucket" }, 503);
+  const key = decodeURIComponent(url.pathname.slice(1)); // 先頭の / を落として R2 キーに
+  const obj = await env.CREATIVES.get(key);
+  if (!obj) return json({ error: "not-found", key }, 404);
+  const headers = new Headers();
+  obj.writeHttpMetadata(headers);
+  headers.set("content-type", (obj.httpMetadata && obj.httpMetadata.contentType) || "application/pdf");
+  headers.set("etag", obj.httpEtag);
+  // Access の内側限定なので private。1時間はキャッシュ可。
+  headers.set("cache-control", "private, max-age=3600");
+  return new Response(obj.body, { headers });
+}
 
 async function handleTargets(request, env) {
   if (!env.DATABASE_URL) return json({ error: "no-db" }, 503);
