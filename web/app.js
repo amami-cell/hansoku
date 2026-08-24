@@ -441,6 +441,18 @@ function renderCalendar() {
 }
 
 // ── 店一覧（店舗カード）──────────────────────────────────────────────────
+// 店の「実施中の販促」件数と、目標が入っている分の達成率（確定分）
+function storePromoSummary(code) {
+  const live = (DATA.campaigns || []).filter(c => c.stores.includes(code) && campStatus(c).k === "live");
+  if (!live.length) return null;
+  let a = 0, t = 0;
+  for (const c of live) {
+    const tg = targetOf(c), e = campEffect(code, c);
+    if (tg && e && e.cur) { a += e.cur; t += tg; }
+  }
+  return { count: live.length, rate: t ? a / t * 100 : null };
+}
+
 function renderList() {
   const months = DATA.months;
   // エリア順に並べる（大阪→東京→…）。エリアは見出しの小さなラベルに留める
@@ -453,11 +465,16 @@ function renderList() {
       const yline = y
         ? `<span class="yoy ${y.pct >= 0 ? "up" : "down"}">前年比 ${signed(y.pct)}%</span>`
         : `<span class="yoy flat">前年比 ―</span>`;
+      const promo = storePromoSummary(code);
+      const promoLine = promo
+        ? `<div class="scamp">実施中 ${promo.count}件${promo.rate != null ? ` ・ 達成 <span class="${promo.rate >= 100 ? "up" : "down"}">${promo.rate.toFixed(0)}%</span>` : ""}</div>`
+        : `<div class="scamp muted">実施中の販促なし</div>`;
       return `
         <button class="scard" data-store="${code}" style="--rc:${color}">
           <div class="stop"><span class="rtag">${r.name}</span>${storeName(code)}</div>
           <div class="sbig">${man(total)}<span class="unit">円</span></div>
           ${spark}
+          ${promoLine}
           <div class="sfoot">${yline}<span class="more">詳しく →</span></div>
         </button>`;
     })).join("");
@@ -623,24 +640,31 @@ function liveSummary() {
   }
   const withEff = live.filter(r => r.eff && r.eff.pct != null);
   const pos = withEff.filter(r => r.eff.pct >= 0).length;
+  const withGoal = live.filter(r => targetOf(r.c) != null).length;
   const body = live.map(({ code, c, eff }) => {
     const k = kindOf(c.kind);
     const cell = eff && eff.pct != null
       ? `<span class="${eff.pct >= 0 ? "up" : "down"}">${signed(eff.pct)}%</span> <span class="sub">${eff.months}ヶ月</span>`
       : `<span class="sub">―</span>`;
+    const tgt = targetOf(c);
+    const rate = (tgt && eff && eff.cur) ? eff.cur / tgt * 100 : null;
+    const goalCell = tgt == null
+      ? `<span class="sub">未設定</span>`
+      : `${man(tgt)}<span class="sub"> / </span>${rate != null ? `<span class="${rate >= 100 ? "up" : "down"}">${rate.toFixed(0)}%</span>` : `<span class="sub">―</span>`}`;
     return `<tr data-store="${code}">
       <td>${storeName(code)}</td>
       <td class="nowrap"><span class="kdot" style="background:${k.color}"></span>${k.label}</td>
       <td>${c.title}</td>
       <td class="sub nowrap">${c.start}〜${c.end}</td>
-      <td class="num">${cell}</td></tr>`;
+      <td class="num">${cell}</td>
+      <td class="num">${goalCell}</td></tr>`;
   }).join("");
   return `<section class="block">
     <div class="bhead"><h2>実施中の施策</h2>
-      <span class="bnote">${live.length}件　前年比が出た${withEff.length}件中 ${pos}件がプラス（確定月・月単位の概算）</span></div>
+      <span class="bnote">${live.length}件　前年比プラス ${pos}/${withEff.length}　目標設定 ${withGoal}/${live.length}（確定月・月単位の概算）</span></div>
     <div class="panel"><div class="chartwrap">
       <table class="efftbl">
-        <thead><tr><th>店舗</th><th>種類</th><th>施策</th><th>期間</th><th class="num">前年比（確定分）</th></tr></thead>
+        <thead><tr><th>店舗</th><th>種類</th><th>施策</th><th>期間</th><th class="num">前年比（確定分）</th><th class="num">目標／達成</th></tr></thead>
         <tbody>${body}</tbody>
       </table>
     </div></div>
