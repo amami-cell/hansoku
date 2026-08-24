@@ -265,6 +265,7 @@ function render() {
   if (VIEW.kind === "store") app.innerHTML = renderStore(VIEW.code);
   else if (VIEW.kind === "overview") app.innerHTML = renderOverview();
   else if (VIEW.kind === "list") app.innerHTML = renderList();
+  else if (VIEW.kind === "campaigns") app.innerHTML = renderCampaigns();
   else if (VIEW.kind === "gallery") app.innerHTML = renderGallery();
   else if (VIEW.kind === "calendar") app.innerHTML = renderCalendar();
   else app.innerHTML = renderSchedule();
@@ -285,6 +286,38 @@ function go(v) { VIEW = v; render(); window.scrollTo({ top: 0, behavior: "smooth
 function viewToggle(active) {
   const t = (k, label) => `<button class="vtab${active === k ? " on" : ""}" data-view="${k}">${label}</button>`;
   return `<div class="viewtabs">${t("schedule", "タイムライン")}${t("calendar", "カレンダー")}</div>`;
+}
+
+// ── 直近のアクション（TOPの一番上・人がやることを促す）──────────────────
+const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000);
+function actionPanel() {
+  const camps = DATA.campaigns || [];
+  // まもなく開始（今日〜21日先）
+  const soon = camps
+    .map(c => ({ c, d: daysBetween(TODAY, c.start) }))
+    .filter(x => campStatus(x.c).k === "soon" && x.d >= 0 && x.d <= 21)
+    .sort((a, b) => a.d - b.d).slice(0, 8);
+  // 実施中なのに目標が未入力（その場で入れられる）
+  const noGoal = camps.filter(c => campStatus(c).k === "live" && targetOf(c) == null).slice(0, 8);
+  if (!soon.length && !noGoal.length) return "";
+
+  const scopeOf = c => c.scope_all ? "全店" : `${c.stores.length}店`;
+  const soonHtml = soon.map(({ c, d }) => {
+    const k = kindOf(c.kind);
+    return `<li><span class="kdot" style="background:${k.color}"></span>
+      <span class="amain">${c.title}</span><span class="atag">${scopeOf(c)}</span>
+      <span class="aday${d <= 3 ? " near" : ""}">${d === 0 ? "本日開始" : `あと${d}日`}</span></li>`;
+  }).join("");
+  const goalHtml = noGoal.map(c =>
+    `<li><span class="kdot" style="background:${kindOf(c.kind).color}"></span>
+      <span class="amain">${c.title}</span><span class="atag">${scopeOf(c)}</span>
+      <button class="goalbtn add" data-goal="${c.id}">＋ 目標を入力</button></li>`).join("");
+
+  const cols = [];
+  if (soon.length) cols.push(`<div class="acol"><div class="ahd">まもなく開始</div><ul class="alist">${soonHtml}</ul></div>`);
+  if (noGoal.length) cols.push(`<div class="acol"><div class="ahd">目標が未入力（実施中）</div><ul class="alist">${goalHtml}</ul></div>`);
+  return `<section class="actions"><div class="ahead">直近のアクション</div>
+    <div class="acols">${cols.join("")}</div></section>`;
 }
 
 // ── 全店スケジュール（TOP・主役）────────────────────────────────────────
@@ -367,6 +400,7 @@ function renderSchedule() {
     : "";
 
   return `
+    ${actionPanel()}
     ${viewToggle("schedule")}
     <section class="block">
       <div class="bhead"><h2>全店スケジュール</h2>
@@ -382,6 +416,8 @@ function renderSchedule() {
       </div></div>
     </section>
     <div class="ovrlink">
+      <button class="linkbtn" data-view="campaigns">施策の効果 →</button>
+      <span class="sep">／</span>
       <button class="linkbtn" data-view="list">店舗カードで見る →</button>
       <span class="sep">／</span>
       <button class="linkbtn" data-view="overview">エリア・全店の表 →</button>
@@ -507,6 +543,79 @@ function renderList() {
     </section>
     <div class="ovrlink"><button class="linkbtn" data-view="overview">エリア・全店の一覧を見る →</button></div>
   `;
+}
+
+// ── 施策の効果ランキング（施策を全店横断で集計）──────────────────────────
+// 1施策を、対象店それぞれの campEffect（確定月のみ）で合算する。
+function campaignSummary(c) {
+  let cur = 0, prev = 0, prevOk = true, stores = 0, monthsMax = 0, tot = 0;
+  for (const code of c.stores) {
+    if (!hasData(code)) continue;
+    tot += 1;
+    const e = campEffect(code, c);
+    if (!e) continue;
+    stores += 1; cur += e.cur; monthsMax = Math.max(monthsMax, e.months);
+    if (e.prev != null) prev += e.prev; else prevOk = false;
+  }
+  return {
+    total: tot, stores, cur, months: monthsMax,
+    prev: prevOk ? prev : null,
+    pct: (prevOk && prev) ? (cur / prev - 1) * 100 : null,
+  };
+}
+
+function renderCampaigns() {
+  const isRatio = METRIC === "cost_rate";
+  // 状態順（実施中→予定→終了）→ 同状態内は前年比の良い順（データ無しは後ろ）
+  const STORD = { live: 0, soon: 1, done: 2 };
+  const rows = (DATA.campaigns || []).map(c => ({ c, s: campStatus(c), sum: campaignSummary(c) }));
+  rows.sort((a, b) => {
+    const d = STORD[a.s.k] - STORD[b.s.k];
+    if (d) return d;
+    const pa = a.sum.pct == null ? -Infinity : a.sum.pct;
+    const pb = b.sum.pct == null ? -Infinity : b.sum.pct;
+    if (pa !== pb) return pb - pa;
+    return b.sum.cur - a.sum.cur;
+  });
+
+  const body = rows.map(({ c, s, sum }) => {
+    const k = kindOf(c.kind);
+    const range = c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
+    const scope = c.scope_all ? "全店" : `${sum.total}店`;
+    const tgt = targetOf(c);
+    // 効果（確定分の実績合計・前年比）。売上のときだけ意味を持つ
+    let effHtml = `<span class="muted">確定待ち</span>`;
+    if (isRatio) {
+      effHtml = `<span class="muted">―</span>`;
+    } else if (sum.stores) {
+      const yoy = sum.pct != null
+        ? `<span class="${sum.pct >= 0 ? "up" : "down"}">前年比 ${signed(sum.pct)}%</span>`
+        : `<span class="muted">前年比 ―</span>`;
+      effHtml = `<b>${man(sum.cur)}円</b>　${yoy}<span class="sub">（確定${sum.months}ヶ月・${sum.stores}店）</span>`;
+    }
+    const goalHtml = tgt != null
+      ? `<span class="cgtag">目標 ${man(tgt)}円</span>` : "";
+    return `<li>
+      <span class="kchip" style="--kc:${k.color}">${k.label}</span>
+      <div class="cbody">
+        <div class="ctitle">${c.title}<span class="tagx">${scope}</span>
+          <span class="cstat ${s.k}">${s.label}</span>${goalHtml}</div>
+        ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
+        <div class="ceff">${effHtml}</div>
+      </div>
+      <span class="crange">${range}</span>
+    </li>`;
+  }).join("");
+
+  const withEff = rows.filter(r => r.sum.stores && r.sum.pct != null);
+  const plus = withEff.filter(r => r.sum.pct >= 0).length;
+  return `
+    <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
+    <section class="block">
+      <div class="bhead"><h2>施策の効果</h2>
+        <span class="bnote">${METRIC_LABELS[METRIC]}・確定月の全店合算／前年同月比　${withEff.length ? `前年比プラス ${plus}/${withEff.length}` : ""}</span></div>
+      ${rows.length ? `<ul class="clist">${body}</ul>` : `<div class="empty">施策がまだ登録されていません。</div>`}
+    </section>`;
 }
 
 // ── 制作物ギャラリー（config/creatives.yaml 由来）──────────────────────────
@@ -753,6 +862,30 @@ function liveSummary() {
 }
 
 // ── エリア・全店の一覧（控えめ・下位ページ）──────────────────────────────
+// 予算達成ランキング（直近確定月・実績÷予算）。売上のときだけ。
+function budgetRanking() {
+  if (METRIC !== "sales") return "";
+  const rows = DATA.stores.map(s => ({ s, br: budgetRate(s.code) }))
+    .filter(x => x.br).sort((a, b) => b.br.rate - a.br.rate);
+  if (!rows.length) return "";
+  const max = Math.max(...rows.map(x => x.br.rate), 120);
+  const at = p => (p / max * 100).toFixed(1) + "%";
+  const bars = rows.map(({ s, br }) => {
+    const cls = br.rate >= 100 ? "up" : "down";
+    return `<li>
+      <button class="brk-name linkbtn" data-store="${s.code}">${s.name}</button>
+      <div class="brk-bar"><span class="brk-fill ${cls}" style="width:${at(br.rate)}"></span>
+        <span class="brk-100" style="left:${at(100)}"></span></div>
+      <span class="brk-val ${cls}">${br.rate.toFixed(0)}%</span>
+    </li>`;
+  }).join("");
+  return `<section class="block">
+    <div class="bhead"><h2>予算達成ランキング</h2>
+      <span class="bnote">直近確定月・実績÷予算（FW月別予算）・${rows.length}店　点線=100%</span></div>
+    <ul class="brk">${bars}</ul>
+  </section>`;
+}
+
 function renderOverview() {
   const months = DATA.months.slice(-4);
   const head = months.map(m =>
@@ -774,6 +907,7 @@ function renderOverview() {
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button>
       <span class="sep">／</span><button class="linkbtn" data-view="list">店舗カード</button></div>
     ${liveSummary()}
+    ${budgetRanking()}
     <section class="block">
       <div class="bhead"><h2>エリア・全店の売上</h2>
         <span class="bnote">直近4ヶ月・${METRIC_LABELS[METRIC]}（当月は暫定）</span></div>
