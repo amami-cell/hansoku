@@ -320,5 +320,16 @@ tbody tr:last-child td{border-bottom:0;}
 .ceff b{color:var(--ink);font-weight:700;}
 .ceff.muted{color:var(--ink-3);}
 .ceff .up{color:var(--good-ink);font-weight:600;} .ceff .down{color:var(--critical-ink);font-weight:600;}
+.cgoal{font-size:12px;color:var(--ink-2);margin-top:4px;font-variant-numeric:tabular-nums;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.cgoal b{color:var(--ink);font-weight:700;}
+.cgoal .up{color:var(--good-ink);font-weight:700;} .cgoal .down{color:var(--warning-ink);font-weight:700;}
+.cgoal .sub{color:var(--ink-3);}
+.goalbtn{font:inherit;font-size:11px;color:var(--accent);background:var(--accent-soft);
+  border:1px solid var(--accent-line);border-radius:6px;padding:1px 8px;cursor:pointer;line-height:1.6;}
+.goalbtn:hover{background:var(--accent);color:#fff;}
+:root[data-theme="dark"] .goalbtn:hover,:root:not([data-theme="light"]) .goalbtn:hover{color:#0E1116;}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]) .goalbtn:hover{color:#fff;}}
+.goalbtn.add{color:var(--ink-2);}
 
 @media (max-width:620px){.srow{grid-template-columns:118px 1fr;}}

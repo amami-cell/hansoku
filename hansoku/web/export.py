@@ -82,9 +82,21 @@ def load_schedule(
                 "start": start,
                 "end": end,
                 "note": str(camp.get("note", "")) if camp.get("note") else "",
+                # 販促の目標数値（売上・円）。アプリ内で入力していく。未設定は None。
+                "target": _parse_target(camp.get("target")),
             }
         )
     return out
+
+
+def _parse_target(value) -> int | None:
+    """目標値を円の整数に正規化する。空・数字でないものは None。"""
+    if value is None or value == "":
+        return None
+    try:
+        return int(round(float(str(value).replace(",", "").replace("円", "").strip())))
+    except (ValueError, TypeError):
+        return None
 
 # 画面に出す指標。増やすときはここに足す。
 METRICS = [

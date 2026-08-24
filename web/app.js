@@ -56,6 +56,23 @@ let DATA = null;
 let VIEW = { kind: "schedule" };   // schedule(TOP) | calendar | store,code | list | overview
 let METRIC = "sales";
 let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"）
+let GOALS = {};                   // アプリ内で入力した販促の目標（施策id→円）。当面は端末内保存。
+
+function loadGoals() { try { return JSON.parse(localStorage.getItem("hansoku_goals") || "{}"); } catch (e) { return {}; } }
+function saveGoals() { try { localStorage.setItem("hansoku_goals", JSON.stringify(GOALS)); } catch (e) { /* 保存不可でも表示は続ける */ } }
+// 有効な目標＝アプリ入力があればそれ、無ければデータ（schedule.yaml）の値
+const targetOf = c => (c.id in GOALS) ? GOALS[c.id] : (c.target != null ? c.target : null);
+
+function editGoal(id) {
+  const cur = (id in GOALS) ? GOALS[id] : "";
+  const v = window.prompt("この販促の目標売上（円）を入力してください（空欄で削除）", cur === "" ? "" : String(cur));
+  if (v === null) return;
+  const cleaned = String(v).replace(/[,，円\s]/g, "");
+  if (cleaned === "") { delete GOALS[id]; }
+  else { const n = parseInt(cleaned, 10); if (isNaN(n)) return; GOALS[id] = n; }
+  saveGoals();
+  render();
+}
 
 const CURRENT_MONTH = (() => {
   const d = new Date();
@@ -106,6 +123,7 @@ async function boot() {
     return;
   }
   CAL_MONTH = CURRENT_MONTH;
+  GOALS = loadGoals();
   buildMetricSelect();
   buildStoreJump();
   render();
@@ -204,6 +222,8 @@ function render() {
     el.addEventListener("click", () => go({ kind: el.dataset.view })));
   app.querySelectorAll("[data-cal]").forEach(el =>
     el.addEventListener("click", () => { CAL_MONTH = addMonth(CAL_MONTH, el.dataset.cal === "next" ? 1 : -1); render(); }));
+  app.querySelectorAll("[data-goal]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); editGoal(el.dataset.goal); }));
   wireEmphasis(app);
 }
 function go(v) { VIEW = v; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
@@ -488,12 +508,26 @@ function renderStore(code) {
         } else if (st.k !== "soon" && METRIC !== "cost_rate") {
           effHtml = `<div class="ceff muted">確定した月の売上が出たら、前年同月比を表示します（月単位で集計）。</div>`;
         }
+        // 目標対比（アプリ内で入力した目標／schedule.yaml の目標）
+        const tgt = targetOf(c);
+        let goalHtml;
+        if (tgt != null) {
+          const actual = eff ? eff.cur : null;
+          const rate = (actual != null && tgt > 0) ? actual / tgt * 100 : null;
+          const prog = rate != null
+            ? ` ・ 実績(確定) ${man(actual)}円 ・ <span class="${rate >= 100 ? "up" : "down"}">達成 ${rate.toFixed(0)}%</span>`
+            : ` ・ <span class="sub">実績は確定月が出てから</span>`;
+          goalHtml = `<div class="cgoal">目標 <b>${man(tgt)}円</b>${prog} <button class="goalbtn" data-goal="${c.id}" title="目標を編集">✎</button></div>`;
+        } else {
+          goalHtml = `<div class="cgoal muted"><button class="goalbtn add" data-goal="${c.id}">＋ 目標を入力</button></div>`;
+        }
         return `<li>
           <span class="kchip" style="--kc:${k.color}">${k.label}</span>
           <div class="cbody">
             <div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}<span class="cstat ${st.k}">${st.label}</span></div>
             ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
             ${effHtml}
+            ${goalHtml}
           </div>
           <span class="crange">${range}</span>
         </li>`;

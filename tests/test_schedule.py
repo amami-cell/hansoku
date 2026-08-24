@@ -1,7 +1,16 @@
 """施策スケジュール（config/schedule.yaml）の読み込みと正規化。"""
 import textwrap
 
-from hansoku.web.export import load_schedule
+from hansoku.web.export import _parse_target, load_schedule
+
+
+def test_目標値の正規化():
+    assert _parse_target("5,000,000") == 5_000_000
+    assert _parse_target("1600000円") == 1_600_000
+    assert _parse_target(3000000) == 3_000_000
+    assert _parse_target(None) is None
+    assert _parse_target("") is None
+    assert _parse_target("未定") is None
 
 
 def _write(tmp_path, body: str):
@@ -74,6 +83,29 @@ def test_店名でも指定できる(master, tmp_path):
     """)
     camps = load_schedule(master, path)
     assert camps[0]["stores"] == [code]
+
+
+def test_目標はyamlからも渡せる(master, tmp_path):
+    code = master.active_codes[0]
+    path = _write(tmp_path, f"""
+        campaigns:
+          - id: withgoal
+            stores: ["{code}"]
+            title: 目標つき
+            kind: osusume
+            start: "2026-09-01"
+            end: "2026-09-30"
+            target: "5,000,000"
+          - id: nogoal
+            stores: ["{code}"]
+            title: 目標なし
+            kind: osusume
+            start: "2026-09-01"
+            end: "2026-09-30"
+    """)
+    camps = {c["id"]: c for c in load_schedule(master, path)}
+    assert camps["withgoal"]["target"] == 5_000_000
+    assert camps["nogoal"]["target"] is None
 
 
 def test_終了日省略は単日になる(master, tmp_path):
