@@ -13,6 +13,7 @@ CSV を読む方が壊れにくい（既存パイプラインでも CSV 経由�
 """
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from .fw_browser import FWError, fw_session
@@ -64,6 +65,69 @@ def _download_csv(session, artifacts: Path, name: str) -> Path | None:
         return None
 
 
+def _pick_first_store(session) -> str | None:
+    """店舗セレクタ（ng-select）を開いて先頭の店舗を選ぶ。best-effort。"""
+    page = session.page
+    page.evaluate(
+        """() => {
+        const lab = [...document.querySelectorAll('*')].find(
+            el => el.children.length === 0 && el.textContent.trim() === '店舗' && el.offsetParent);
+        let node = lab ? lab.parentElement : null, trig = null;
+        for (let i = 0; i < 8 && node; i++) {
+            trig = node.querySelector('ng-select,.ng-select,.ng-input,.ng-value-container,.ng-arrow-wrapper');
+            if (trig) break;
+            node = node.parentElement;
+        }
+        if (trig) trig.click();
+    }"""
+    )
+    time.sleep(0.8)
+    picked = page.evaluate(
+        """() => {
+        const opts = [...document.querySelectorAll('.ng-option,[class*="ng-option"],li.option,mat-option')]
+            .filter(o => o.offsetParent);
+        if (opts.length) {
+            opts[0].dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+            return opts[0].textContent.trim();
+        }
+        return null;
+    }"""
+    )
+    time.sleep(0.8)
+    return picked
+
+
+def _dump_inputs_grouped(session) -> None:
+    """入力欄を「行ラベルごと」にまとめて吸い出す（表ではなく div/input 構成のため）。"""
+    rows = session.page.evaluate(
+        """() => {
+        const clip = s => (s || '').replace(/\\s+/g, ' ').trim();
+        const inputs = [...document.querySelectorAll('input')]
+            .filter(i => i.offsetParent && !['button','checkbox','radio','submit'].includes(i.type));
+        const rows = [];
+        const byLabel = new Map();
+        for (const inp of inputs) {
+            let node = inp, label = '';
+            for (let i = 0; i < 6 && node; i++) {
+                node = node.parentElement;
+                if (!node) break;
+                const leaf = [...node.querySelectorAll('*')].find(
+                    el => el.children.length === 0 && clip(el.innerText) &&
+                          el.tagName !== 'INPUT' && el.tagName !== 'BUTTON');
+                if (leaf) { label = clip(leaf.innerText); break; }
+            }
+            if (!byLabel.has(label)) { byLabel.set(label, []); rows.push(label); }
+            byLabel.get(label).push(clip(inp.value));
+        }
+        return rows.map(l => ({ label: l, vals: byLabel.get(l) }));
+    }"""
+    )
+    print(f"---- 入力欄（行ラベル別） {len(rows)}行 ----")
+    for r in rows[:50]:
+        vals = " | ".join(r["vals"][:14])
+        print(f"   [{r['label']}] {vals}")
+
+
 def _dump_grid(session) -> None:
     """画面のグリッド（表・入力欄）を 2 次元で吸い出して表示する。"""
     tables = session.page.evaluate(
@@ -113,11 +177,14 @@ def probe(artifacts: Path) -> int:
         items = session.dump_clickables("budget_screen")
         print(f"[budget] 月別予算登録の操作要素 {len(items)} 件")
 
-        # まず検索を押してデータを読み込ませる（登録画面は検索しないと空のことがある）
+        # 店舗を選んでから検索する（登録画面は店舗未選択だと空のことがある）
+        store = _pick_first_store(session)
+        print(f"[budget] 選んだ店舗: {store}")
         if session.click_text("検 索", wait=2.5) or session.click_text("検索", wait=2.5):
             print("[budget] 検索を押した")
         session.snapshot("after_search")
         session.dump_clickables("after_search")
+        _dump_inputs_grouped(session)
         _dump_grid(session)
 
         # CSV出力も試す（新規タブ/ダイアログのこともある）
