@@ -19,8 +19,6 @@ on:
           - budget-dry
           - budget-ingest
           - daily-probe
-          - daily-dry
-          - daily-ingest
         default: explore
       path:
         description: '探索するメニュー名（カンマ区切り）'
@@ -90,10 +88,6 @@ jobs:
               xvfb-run -a python -m hansoku.cli fw-budget --mode ingest --months 3 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "daily-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode probe --artifacts fw-artifacts
-            elif [ "${{ inputs.mode }}" = "daily-dry" ]; then
-              xvfb-run -a python -m hansoku.cli fw-daily --mode ingest --dry-run --limit 2 --months 2 --artifacts fw-artifacts
-            elif [ "${{ inputs.mode }}" = "daily-ingest" ]; then
-              xvfb-run -a python -m hansoku.cli fw-daily --mode ingest --months 2 --artifacts fw-artifacts
             else
               xvfb-run -a python -m hansoku.cli fw-explore $args --artifacts fw-artifacts
             fi

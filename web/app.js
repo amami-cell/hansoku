@@ -191,6 +191,15 @@ const hasData = code => !!DATA.monthly[code];
 // 店舗の月次売上予算（FW月別予算登録）。未取込なら undefined。
 const budgetAt = (code, month) => ((DATA.budget || {})[code] || {})[month];
 const hasBudget = code => DATA.budget && DATA.budget[code] && Object.values(DATA.budget[code]).some(v => v > 0);
+// 直近確定月の予算達成率（％）。売上のときだけ、予算が正のときだけ。無ければ null。
+function budgetRate(code) {
+  if (METRIC !== "sales") return null;
+  const latest = latestConfirmed(code);
+  if (!latest) return null;
+  const b = budgetAt(code, latest.m);
+  if (typeof b !== "number" || b <= 0) return null;
+  return { m: latest.m, rate: latest.v / b * 100 };
+}
 
 function valueAt(code, month) {
   if (METRIC === "cost_rate") return (DATA.cost_rate[code] || {})[month];
@@ -475,13 +484,17 @@ function renderList() {
       const promoLine = promo
         ? `<div class="scamp">実施中 ${promo.count}件${promo.rate != null ? ` ・ 達成 <span class="${promo.rate >= 100 ? "up" : "down"}">${promo.rate.toFixed(0)}%</span>` : ""}</div>`
         : `<div class="scamp muted">実施中の販促なし</div>`;
+      const br = budgetRate(code);
+      const budLine = br
+        ? `<span class="budg ${br.rate >= 100 ? "up" : "down"}" title="${br.m} の 実績÷予算">予算 ${br.rate.toFixed(0)}%</span>`
+        : "";
       return `
         <button class="scard" data-store="${code}" style="--rc:${color}">
           <div class="stop"><span class="rtag">${r.name}</span>${storeName(code)}</div>
           <div class="sbig">${man(total)}<span class="unit">円</span></div>
           ${spark}
           ${promoLine}
-          <div class="sfoot">${yline}<span class="more">詳しく →</span></div>
+          <div class="sfoot">${yline}${budLine}<span class="more">詳しく →</span></div>
         </button>`;
     })).join("");
 
