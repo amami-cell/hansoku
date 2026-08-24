@@ -216,6 +216,14 @@ def cmd_fw_stores(args: argparse.Namespace) -> int:
     return list_stores(Path(args.artifacts))
 
 
+def cmd_fw_budget(args: argparse.Namespace) -> int:
+    from .ingest.fw_budget import probe
+
+    if args.mode == "probe":
+        return probe(Path(args.artifacts))
+    raise SystemExit(f"未知のモード: {args.mode}")
+
+
 def cmd_export_web(args: argparse.Namespace) -> int:
     from .web.export import build, load_schedule, write
 
@@ -335,6 +343,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fwstores.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
     fwstores.set_defaults(func=cmd_fw_stores)
+
+    fwbudget = sub.add_parser(
+        "fw-budget", help="FW月別予算登録から売上予算を取り込む（まずは probe）"
+    )
+    fwbudget.add_argument("--mode", default="probe", choices=["probe"], help="動作")
+    fwbudget.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
+    fwbudget.set_defaults(func=cmd_fw_budget)
 
     export = sub.add_parser("export-web", help="画面が読む JSON を書き出す")
     export.add_argument("--date-from", required=True, type=_date, dest="date_from")

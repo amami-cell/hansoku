@@ -15,6 +15,7 @@ on:
         options:
           - explore
           - list-stores
+          - budget-probe
         default: explore
       path:
         description: '探索するメニュー名（カンマ区切り）'
@@ -71,6 +72,8 @@ jobs:
             echo '```'
             if [ "${{ inputs.mode }}" = "list-stores" ]; then
               xvfb-run -a python -m hansoku.cli fw-stores --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "budget-probe" ]; then
+              xvfb-run -a python -m hansoku.cli fw-budget --mode probe --artifacts fw-artifacts
             else
               xvfb-run -a python -m hansoku.cli fw-explore $args --artifacts fw-artifacts
             fi
