@@ -240,6 +240,14 @@ def cmd_fw_budget(args: argparse.Namespace) -> int:
     raise SystemExit(f"未知のモード: {args.mode}")
 
 
+def cmd_fw_daily(args: argparse.Namespace) -> int:
+    from .ingest.fw_daily import probe
+
+    if args.mode == "probe":
+        return probe(Path(args.artifacts))
+    raise SystemExit(f"未知のモード: {args.mode}")
+
+
 def cmd_export_web(args: argparse.Namespace) -> int:
     from .web.export import build, load_creatives, load_schedule, write
 
@@ -421,6 +429,17 @@ def build_parser() -> argparse.ArgumentParser:
     fwbudget.add_argument("--stores", default=None, help="stores.yaml のパス")
     fwbudget.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
     fwbudget.set_defaults(func=cmd_fw_budget)
+
+    fwdaily = sub.add_parser(
+        "fw-daily", help="FW日別実績入力から日別の実績を取り込む（まずprobe）"
+    )
+    fwdaily.add_argument("--mode", default="probe", choices=["probe", "ingest"], help="動作")
+    fwdaily.add_argument("--months", type=int, default=2, help="遡る月数")
+    fwdaily.add_argument("--limit", type=int, default=None, help="先頭N店だけ（試走用）")
+    fwdaily.add_argument("--dry-run", action="store_true", help="書き込まず印字のみ")
+    fwdaily.add_argument("--stores", default=None, help="stores.yaml のパス")
+    fwdaily.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
+    fwdaily.set_defaults(func=cmd_fw_daily)
 
     export = sub.add_parser("export-web", help="画面が読む JSON を書き出す")
     export.add_argument("--date-from", required=True, type=_date, dest="date_from")
