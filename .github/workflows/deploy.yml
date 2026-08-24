@@ -32,6 +32,10 @@ jobs:
         env:
           HANSOKU_ENV: cloud
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          # load_settings は cloud だと R2 も要求するため、書き出しと同じ環境を渡す
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           if [ -n "$NEON_DATABASE_URL" ]; then
             python -m hansoku.cli init-schema
