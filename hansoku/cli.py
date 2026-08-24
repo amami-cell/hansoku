@@ -312,6 +312,41 @@ def cmd_creatives_upload(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_creatives_sync(args: argparse.Namespace) -> int:
+    """creatives.yaml が指す file(R2キー) を、手元のソースPDFから R2 へ揃える。
+
+    ソースは assets/creatives-src/（コミット済み）。キーの basename が一致する
+    PDF を、宣言どおりのキーで put する（冪等・上書き）。デプロイから毎回呼べば
+    R2 は台帳に追従する。既に同じキーがあれば飛ばす。
+    """
+    from .db import get_object_store
+    from .web.export import load_creatives, load_schedule
+
+    src_dir = Path(args.src)
+    master = StoreMaster.load(args.stores)
+    creatives = load_creatives(master, load_schedule(master))
+    store = get_object_store(load_settings())
+
+    put = skipped = missing = 0
+    for cr in creatives:
+        key = cr["url"].lstrip("/")
+        local = src_dir / Path(key).name
+        if not local.exists():
+            print(f"[creatives] ソース無し（スキップ）: {local}")
+            missing += 1
+            continue
+        if not args.force and store.exists(key):
+            print(f"[creatives] 既にR2にあり（スキップ）: {key}")
+            skipped += 1
+            continue
+        ctype = "application/pdf" if local.suffix.lower() == ".pdf" else "application/octet-stream"
+        store.put(key, local.read_bytes(), content_type=ctype)
+        print(f"[creatives] R2へ: {key}（{local.stat().st_size:,} bytes）")
+        put += 1
+    print(f"[creatives] 完了: 追加 {put} / 既存 {skipped} / ソース無し {missing}")
+    return 0
+
+
 def cmd_creatives_list(args: argparse.Namespace) -> int:
     """creatives.yaml を解決して一覧表示する（画面に載る形の確認）。"""
     from .web.export import load_creatives, load_schedule
@@ -458,6 +493,14 @@ def build_parser() -> argparse.ArgumentParser:
     cup.add_argument("--year", type=int, default=None, help="保管年（省略時は今年）")
     cup.add_argument("--date", default=None, help="掲出日 YYYY-MM-DD（貼付用）")
     cup.set_defaults(func=cmd_creatives_upload)
+
+    csync = sub.add_parser(
+        "creatives-sync", help="creatives.yaml のPDFをソースからR2へ揃える"
+    )
+    csync.add_argument("--src", default="assets/creatives-src", help="ソースPDFの置き場")
+    csync.add_argument("--stores", default=None, help="stores.yaml のパス")
+    csync.add_argument("--force", action="store_true", help="既存キーも上書きする")
+    csync.set_defaults(func=cmd_creatives_sync)
 
     sub.add_parser("creatives-list", help="制作物ギャラリーの一覧を表示する").set_defaults(
         func=cmd_creatives_list

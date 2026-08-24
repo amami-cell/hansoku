@@ -25,4 +25,11 @@
 #   date: 2026-06-01
 #   file: creatives/2026/summer2026/summer_flyer.pdf
 
-creatives: []
+creatives:
+  - id: largo-kisetsu-2025
+    title: 季節メニューPOP パフェ・ジェラート（2025）
+    stores: ["1160"]     # ルクアLargo
+    kind: osusume
+    date: "2025-06-01"
+    file: creatives/2025/kisetsu2025/LG3_kisetsu_menu_POP_2506.pdf
+
