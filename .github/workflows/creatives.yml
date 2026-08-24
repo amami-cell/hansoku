@@ -1,0 +1,64 @@
+name: 制作物PDFをR2へ載せる
+
+# 手動起動。assets/creatives-src/ に置いた（コミットした）PDFを Cloudflare R2 へ
+# アップロードする。R2の認証情報は GitHub Secrets にあり、ここでしか使えない。
+# 実行後、表示される file: の行を config/creatives.yaml に足してデプロイすると
+# ギャラリーと各店の詳細に並ぶ。
+
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: 'アップロードするPDFのパス（例 assets/creatives-src/xxx.pdf）'
+        required: true
+      campaign:
+        description: '施策ID（保管フォルダにもなる。無ければ misc）'
+        required: false
+        default: 'misc'
+      title:
+        description: '表示名'
+        required: false
+        default: ''
+      year:
+        description: '保管年（例 2025）。空なら今年'
+        required: false
+        default: ''
+      date:
+        description: '掲出日 YYYY-MM-DD（貼付用・任意）'
+        required: false
+        default: ''
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+      - name: R2へアップロード
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          args=(--campaign "${{ inputs.campaign }}")
+          [ -n "${{ inputs.title }}" ] && args+=(--title "${{ inputs.title }}")
+          [ -n "${{ inputs.year }}" ] && args+=(--year "${{ inputs.year }}")
+          [ -n "${{ inputs.date }}" ] && args+=(--date "${{ inputs.date }}")
+          {
+            echo '## 制作物アップロード'
+            echo ''
+            echo '```'
+            python -m hansoku.cli creatives-upload "${{ inputs.file }}" "${args[@]}"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
