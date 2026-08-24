@@ -191,27 +191,55 @@ def _read_month(session) -> str | None:
     return txt
 
 
-def _read_sales_budget(session) -> int | None:
-    """「売上高（税抜き）」行の入力値（円）を返す。"""
-    val = session.page.evaluate(
-        """() => {
-        const leaves = [...document.querySelectorAll('*')].filter(
-            el => el.children.length === 0 && (el.innerText || '').replace(/\\s/g, '').includes('売上高'));
-        for (const n of leaves) {
-            let row = n;
-            for (let i = 0; i < 5 && row; i++) {
-                const inp = row.querySelector('input');
-                if (inp) return inp.value;
-                row = row.parentElement;
-            }
+_SALES_JS = """() => {
+    const leaves = [...document.querySelectorAll('*')].filter(
+        el => el.children.length === 0 && (el.innerText || '').replace(/\\s/g, '').includes('売上高'));
+    for (const n of leaves) {
+        let row = n;
+        for (let i = 0; i < 6 && row; i++) {
+            const inp = row.querySelector('input');
+            if (inp && (inp.value || '').trim() !== '') return inp.value;
+            row = row.parentElement;
         }
-        return null;
+    }
+    return null;
+}"""
+
+
+def _read_sales_budget(session, retries: int = 12, delay: float = 0.5) -> int | None:
+    """「売上高（税抜き）」行の入力値（円）を返す。検索直後は非同期で値が
+    入るので、非空になるまで少し粘る。"""
+    for _ in range(retries):
+        val = session.page.evaluate(_SALES_JS)
+        if val is not None:
+            digits = "".join(ch for ch in str(val) if ch.isdigit())
+            if digits:
+                return int(digits)
+        time.sleep(delay)
+    return None
+
+
+def _store_text(session) -> str:
+    """コンボボックスに今表示されている店舗テキスト。"""
+    return session.page.evaluate(
+        """() => {
+        const inp = document.querySelector('store-combo-box input.form-control, app-combobox input.form-control');
+        return inp ? (inp.value || '').trim() : '';
     }"""
     )
-    if val is None:
-        return None
-    digits = "".join(ch for ch in str(val) if ch.isdigit())
-    return int(digits) if digits else None
+
+
+def _diag_budget(session) -> None:
+    info = session.page.evaluate(
+        """() => {
+        const leaf = [...document.querySelectorAll('*')].find(
+            el => el.children.length === 0 && (el.innerText || '').replace(/\\s/g, '').includes('売上高'));
+        let html = '';
+        if (leaf) { let n = leaf; for (let i = 0; i < 3 && n.parentElement; i++) n = n.parentElement; html = (n.outerHTML || '').replace(/\\s+/g, ' ').slice(0, 500); }
+        return { hasSalesLeaf: !!leaf, salesRow: html };
+    }"""
+    )
+    print(f"[budget]   診断: 店舗='{_store_text(session)}' 売上高行={info.get('salesRow')}")
 
 
 _LOOKS_STORE = (
@@ -452,23 +480,26 @@ def ingest(
         if store_limit:
             targets = targets[:store_limit]
 
-        for value, store in targets:
+        for ti, (value, store) in enumerate(targets):
             name = store.store_name
             if not _select_combo(session, value):
                 print(f"[budget] 店舗選択に失敗: {name} ({value})")
                 continue
             _click_search(session)
+            if ti == 0:
+                # 最初の1店だけ、選択・グリッド読み取りの状態を診断出力する
+                _diag_budget(session)
             for k in range(months_back):
                 if k > 0:
                     session.click_text("前月", wait=1.2)
                     _click_search(session)
                 month = _read_month(session)
-                value = _read_sales_budget(session)
-                if month and value is not None:
-                    collected.append((store.store_code, month, value))
-                    print(f"  {store.store_code} {name[:14]} {month} 売上予算 {value:,}")
+                budget_val = _read_sales_budget(session)
+                if month and budget_val is not None:
+                    collected.append((store.store_code, month, budget_val))
+                    print(f"  {store.store_code} {name[:14]} {month} 売上予算 {budget_val:,}")
                 else:
-                    print(f"  {store.store_code} {name[:14]} 読み取り失敗 (month={month}, val={value})")
+                    print(f"  {store.store_code} {name[:14]} 読み取り失敗 (month={month}, val={budget_val})")
             # 次の店のため当月へ戻す
             for _ in range(months_back - 1):
                 session.click_text("翌月", wait=0.6)
