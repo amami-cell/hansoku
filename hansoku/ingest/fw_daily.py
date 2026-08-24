@@ -7,7 +7,8 @@ input で組んだグリッド。まず ``probe`` で日別グリッドの構造
 
 メニュー階層（探索で確認済み）:
   損益管理 → 実績管理業務(/app/profit_loss/pl-menu-actual-result)
-           → 日別実績入力
+           → 日別損益計算書（日別）  … 1ヶ月分の日別売上が1画面に並ぶ帳票
+（日別実績入力 は1日ずつの手入力画面で全店一括には向かないため使わない）
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ from .fw_budget import (
     _select_combo,
 )
 
-DAILY_MENU = ("損益管理", "実績管理業務", "日別実績入力")
+DAILY_MENU = ("損益管理", "実績管理業務", "日別損益計算書（日別）")
 
 
 def _open_daily(session) -> None:
@@ -64,6 +65,42 @@ def _dump_grid_tables(session) -> None:
             print("   ", " | ".join(row))
 
 
+def _dump_report_rows(session) -> None:
+    """div で組んだ帳票向け。日付(YYYY/MM/DD や M/D)を含む行を探して、その
+    行の数値セルを並べて出す。表(table)でなくても日別行を捉えられる。"""
+    rows = session.page.evaluate(
+        """() => {
+        const clip = s => (s || '').replace(/\\s+/g, ' ').trim();
+        const dateRe = /^\\s*\\d{1,4}[\\/\\-年]\\d{1,2}([\\/\\-月]\\d{1,2})?|^\\s*\\d{1,2}\\s*[日()（]/;
+        const out = [];
+        // 日付らしいテキストを持つ葉を起点に、共通の行コンテナを推定して数値を集める
+        const leaves = [...document.querySelectorAll('*')].filter(
+            el => el.children.length === 0 && dateRe.test(el.innerText || ''));
+        const seen = new Set();
+        for (const leaf of leaves.slice(0, 40)) {
+            let row = leaf;
+            for (let i = 0; i < 4 && row.parentElement; i++) {
+                row = row.parentElement;
+                const nums = [...row.querySelectorAll('*')].filter(
+                    e => e.children.length === 0 && /[0-9]/.test(e.innerText || ''));
+                if (nums.length >= 3) break;
+            }
+            const key = clip(row.innerText).slice(0, 40);
+            if (!key || seen.has(key)) continue;
+            seen.add(key);
+            const cells = [...row.querySelectorAll('*')]
+                .filter(e => e.children.length === 0 && clip(e.innerText))
+                .map(e => clip(e.innerText)).slice(0, 12);
+            out.push(cells);
+        }
+        return out.slice(0, 20);
+    }"""
+    )
+    print(f"---- 帳票の日別行らしきもの {len(rows)}件 ----")
+    for r in rows:
+        print("   ", " | ".join(r))
+
+
 def probe(artifacts: Path) -> int:
     """日別実績入力に入り、店舗を選び検索して、グリッド構造を吸い出す。"""
     with fw_session(artifacts) as session:
@@ -98,6 +135,7 @@ def probe(artifacts: Path) -> int:
         print(f"[daily]   table={info['tables']} input={info['inputs']}")
         print(f"[daily]   売上/客数などのラベル: {info['hits']}")
         _dump_grid_tables(session)
+        _dump_report_rows(session)
         _dump_inputs_grouped(session)
     print(f"\n成果物: {artifacts}")
     return 0
