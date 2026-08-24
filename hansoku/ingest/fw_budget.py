@@ -171,7 +171,29 @@ def _dump_grid(session) -> None:
 
 
 def _click_search(session) -> None:
-    session.click_text("検 索", wait=2.0) or session.click_text("検索", wait=2.0)
+    """「検索」を押す。ボタンが <input type=button value=検索> のこともあるため、
+    click_text（innerText 一致）で駄目なら value 属性まで見て押す。"""
+    if session.click_text("検 索", wait=2.0) or session.click_text("検索", wait=2.0):
+        return True
+    clicked = session.page.evaluate(
+        """() => {
+        const norm = s => (s || '').replace(/\\s/g, '');
+        const els = document.querySelectorAll(
+            'button, a, input[type=button], input[type=submit], div[role=button], span, label');
+        for (const el of els) {
+            if (!el.offsetParent) continue;
+            const t = norm(el.innerText) || norm(el.value);
+            if (t.includes('検索')) {
+                el.click();
+                el.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                return true;
+            }
+        }
+        return false;
+    }"""
+    )
+    session._settle(2.0)
+    return bool(clicked)
 
 
 def _read_month(session) -> str | None:
@@ -230,16 +252,58 @@ def _store_text(session) -> str:
 
 
 def _diag_budget(session) -> None:
+    """検索後の画面を丸ごと吸い出す。売上高グリッドが出ているか、
+    出ていないなら何が出ているかを、テキストで確認するため。"""
+    session.snapshot("budget_after_search")
     info = session.page.evaluate(
         """() => {
-        const leaf = [...document.querySelectorAll('*')].find(
-            el => el.children.length === 0 && (el.innerText || '').replace(/\\s/g, '').includes('売上高'));
-        let html = '';
-        if (leaf) { let n = leaf; for (let i = 0; i < 3 && n.parentElement; i++) n = n.parentElement; html = (n.outerHTML || '').replace(/\\s+/g, ' ').slice(0, 500); }
-        return { hasSalesLeaf: !!leaf, salesRow: html };
+        const clip = s => (s || '').replace(/\\s+/g, ' ').trim();
+        // 売上/税抜/予算 を含む葉要素（グリッドが出ていれば行ラベルが拾える）
+        const hits = [];
+        for (const el of document.querySelectorAll('*')) {
+            if (el.children.length) continue;
+            const t = clip(el.innerText);
+            if (t && /売上|税抜|予算/.test(t)) hits.push(el.tagName.toLowerCase() + ':' + t.slice(0, 24));
+        }
+        // 可視 input を行ラベルごとにまとめる
+        const rows = [], byLabel = new Map();
+        for (const inp of document.querySelectorAll('input')) {
+            if (!inp.offsetParent) continue;
+            if (['button', 'checkbox', 'radio', 'submit'].includes(inp.type)) continue;
+            let node = inp, label = '';
+            for (let i = 0; i < 6 && node; i++) {
+                node = node.parentElement; if (!node) break;
+                const leaf = [...node.querySelectorAll('*')].find(
+                    e => !e.children.length && clip(e.innerText) && e.tagName !== 'INPUT' && e.tagName !== 'BUTTON');
+                if (leaf) { label = clip(leaf.innerText); break; }
+            }
+            if (!byLabel.has(label)) { byLabel.set(label, []); rows.push(label); }
+            byLabel.get(label).push(clip(inp.value));
+        }
+        // 押せる要素（検索ボタンの正体を確認）
+        const btns = [];
+        for (const el of document.querySelectorAll('button, input[type=button], input[type=submit], a')) {
+            if (!el.offsetParent) continue;
+            const t = clip(el.innerText) || clip(el.value);
+            if (t && t.length < 20) btns.push(el.tagName.toLowerCase() + ':' + t);
+        }
+        return {
+            url: location.href,
+            iframes: document.querySelectorAll('iframe').length,
+            tables: document.querySelectorAll('table').length,
+            inputs: document.querySelectorAll('input').length,
+            hits: [...new Set(hits)].slice(0, 30),
+            rows: rows.slice(0, 40).map(l => ({ label: l, vals: (byLabel.get(l) || []).slice(0, 12) })),
+            btns: [...new Set(btns)].slice(0, 30),
+        };
     }"""
     )
-    print(f"[budget]   診断: 店舗='{_store_text(session)}' 売上高行={info.get('salesRow')}")
+    print(f"[budget]   診断: 店舗='{_store_text(session)}' url={info.get('url')}")
+    print(f"[budget]   iframe={info.get('iframes')} table={info.get('tables')} input={info.get('inputs')}")
+    print(f"[budget]   売上/税抜/予算を含む要素: {info.get('hits')}")
+    print(f"[budget]   押せる要素: {info.get('btns')}")
+    for r in info.get("rows", []):
+        print(f"[budget]   [{r['label']}] {' | '.join(r['vals'])}")
 
 
 _LOOKS_STORE = (
