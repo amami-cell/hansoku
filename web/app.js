@@ -62,6 +62,35 @@ const CURRENT_MONTH = (() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 })();
 const isProvisional = m => m === CURRENT_MONTH;
+const TODAY = (() => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+})();
+
+// 施策の状態（今日基準）。予定 / 実施中 / 終了
+function campStatus(c) {
+  if (TODAY < c.start) return { k: "soon", label: "予定" };
+  if (TODAY > c.end) return { k: "done", label: "終了" };
+  return { k: "live", label: "実施中" };
+}
+// 施策期間の効果（月次・確定分のみ）。施策が掛かる確定月の売上を、前年同月と比べる。
+// 月次データしか無いので月単位の概算。当月（暫定）と未来月は含めない。
+function campEffect(code, c) {
+  if (METRIC === "cost_rate") return null;
+  const sM = c.start.slice(0, 7), eM = c.end.slice(0, 7);
+  let cur = 0, prev = 0, months = 0, prevOk = true;
+  for (const m of DATA.months) {
+    if (m >= CURRENT_MONTH || m < sM || m > eM) continue;
+    const a = valueAt(code, m);
+    if (typeof a !== "number") continue;
+    const [y, mo] = m.split("-");
+    const b = valueAt(code, `${+y - 1}-${mo}`);
+    cur += a; months += 1;
+    if (typeof b === "number") prev += b; else prevOk = false;
+  }
+  if (!months) return null;
+  return { months, cur, prev: prevOk ? prev : null, pct: (prevOk && prev) ? (cur / prev - 1) * 100 : null };
+}
 
 // ── 起動 ─────────────────────────────────────────────────────────────────
 async function boot() {
@@ -438,15 +467,34 @@ function renderStore(code) {
       </section>`;
   }
 
-  // この店の販促（施策の一覧）
-  const promoBlock = myCamps.length
-    ? `<ul class="clist">${myCamps.map(c => {
+  // この店の販促（施策の一覧）。実施中→予定→終了 の順、同状態内は日付順
+  const STATUS_ORDER = { live: 0, soon: 1, done: 2 };
+  const sortedCamps = myCamps.slice().sort((a, b) => {
+    const d = STATUS_ORDER[campStatus(a).k] - STATUS_ORDER[campStatus(b).k];
+    return d !== 0 ? d : (a.start < b.start ? -1 : 1);
+  });
+  const promoBlock = sortedCamps.length
+    ? `<ul class="clist">${sortedCamps.map(c => {
         const k = kindOf(c.kind);
         const range = c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
+        const st = campStatus(c);
+        const eff = campEffect(code, c);
+        let effHtml = "";
+        if (eff) {
+          const cmp = eff.pct != null
+            ? `<span class="${eff.pct >= 0 ? "up" : "down"}">前年比 ${signed(eff.pct)}%</span>（前年 ${man(eff.prev)}円）`
+            : "前年データなし";
+          effHtml = `<div class="ceff">期間中の${METRIC_LABELS[METRIC]}（確定${eff.months}ヶ月）<b>${man(eff.cur)}円</b>・${cmp}</div>`;
+        } else if (st.k !== "soon" && METRIC !== "cost_rate") {
+          effHtml = `<div class="ceff muted">確定した月の売上が出たら、前年同月比を表示します（月単位で集計）。</div>`;
+        }
         return `<li>
           <span class="kchip" style="--kc:${k.color}">${k.label}</span>
-          <div class="cbody"><div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}</div>
-            ${c.note ? `<div class="cnote">${c.note}</div>` : ""}</div>
+          <div class="cbody">
+            <div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}<span class="cstat ${st.k}">${st.label}</span></div>
+            ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
+            ${effHtml}
+          </div>
           <span class="crange">${range}</span>
         </li>`;
       }).join("")}</ul>`
