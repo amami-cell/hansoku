@@ -152,6 +152,17 @@ tbody tr:last-child td{border-bottom:0;}
 .rank td:nth-child(4){width:34%;}
 
 /* ── 総合表 ─────────────────────────────────────────────── */
+/* ── 実施中の施策サマリ（集約ページ）───────────────────── */
+.efftbl{min-width:560px;}
+.efftbl tbody tr{cursor:pointer;}
+.efftbl tbody tr:hover{background:var(--surface-2);}
+.efftbl td{font-size:13px;}
+.efftbl .num{font-weight:700;}
+.efftbl .up{color:var(--good-ink);} .efftbl .down{color:var(--critical-ink);}
+.efftbl .sub{color:var(--ink-3);font-size:11.5px;font-weight:400;}
+.efftbl .nowrap{white-space:nowrap;}
+.kdot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:0;}
+
 .ovr{min-width:520px;}
 .ovr .grp td{background:var(--surface-2);font-weight:700;font-size:12px;color:var(--ink-2);
   letter-spacing:.04em;padding:7px 10px;}

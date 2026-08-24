@@ -520,6 +520,59 @@ function renderStore(code) {
   `;
 }
 
+// ── 集約ページ（実施中の施策サマリ ＋ エリア別売上表）─────────────────────
+// 全店で今日実施中の施策を、前年比の良い順に並べる
+function activeCampaignRows() {
+  const rows = [];
+  for (const c of (DATA.campaigns || [])) {
+    if (campStatus(c).k !== "live") continue;
+    for (const code of c.stores) {
+      if (!hasData(code)) continue;
+      rows.push({ code, c, eff: campEffect(code, c) });
+    }
+  }
+  rows.sort((a, b) => {
+    const pa = a.eff && a.eff.pct != null ? a.eff.pct : -Infinity;
+    const pb = b.eff && b.eff.pct != null ? b.eff.pct : -Infinity;
+    return pb - pa;
+  });
+  return rows;
+}
+
+function liveSummary() {
+  const live = activeCampaignRows();
+  if (!live.length) {
+    return `<section class="block">
+      <div class="bhead"><h2>実施中の施策</h2></div>
+      <div class="empty">今日時点で実施中の施策はありません。</div>
+    </section>`;
+  }
+  const withEff = live.filter(r => r.eff && r.eff.pct != null);
+  const pos = withEff.filter(r => r.eff.pct >= 0).length;
+  const body = live.map(({ code, c, eff }) => {
+    const k = kindOf(c.kind);
+    const cell = eff && eff.pct != null
+      ? `<span class="${eff.pct >= 0 ? "up" : "down"}">${signed(eff.pct)}%</span> <span class="sub">${eff.months}ヶ月</span>`
+      : `<span class="sub">―</span>`;
+    return `<tr data-store="${code}">
+      <td>${storeName(code)}</td>
+      <td class="nowrap"><span class="kdot" style="background:${k.color}"></span>${k.label}</td>
+      <td>${c.title}</td>
+      <td class="sub nowrap">${c.start}〜${c.end}</td>
+      <td class="num">${cell}</td></tr>`;
+  }).join("");
+  return `<section class="block">
+    <div class="bhead"><h2>実施中の施策</h2>
+      <span class="bnote">${live.length}件　前年比が出た${withEff.length}件中 ${pos}件がプラス（確定月・月単位の概算）</span></div>
+    <div class="panel"><div class="chartwrap">
+      <table class="efftbl">
+        <thead><tr><th>店舗</th><th>種類</th><th>施策</th><th>期間</th><th class="num">前年比（確定分）</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div></div>
+  </section>`;
+}
+
 // ── エリア・全店の一覧（控えめ・下位ページ）──────────────────────────────
 function renderOverview() {
   const months = DATA.months.slice(-4);
@@ -541,8 +594,9 @@ function renderOverview() {
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button>
       <span class="sep">／</span><button class="linkbtn" data-view="list">店舗カード</button></div>
+    ${liveSummary()}
     <section class="block">
-      <div class="bhead"><h2>エリア・全店の一覧</h2>
+      <div class="bhead"><h2>エリア・全店の売上</h2>
         <span class="bnote">直近4ヶ月・${METRIC_LABELS[METRIC]}（当月は暫定）</span></div>
       <div class="panel"><div class="chartwrap">
         <table class="ovr"><thead><tr><th>店舗</th>${head}</tr></thead><tbody>${body}</tbody></table>
