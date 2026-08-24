@@ -271,10 +271,32 @@ def _store_options(session) -> list[str]:
         pass
     session._store_kind = "ng" if opts else "none"
     diag = page.evaluate(
-        """() => ({selects: document.querySelectorAll('select').length,
-                   ng: document.querySelectorAll('ng-select,.ng-select').length})"""
+        """() => {
+        const has = t => [...document.querySelectorAll('button,a,li,span,div')]
+            .some(e => e.offsetParent && (e.innerText || '').replace(/\\s/g,'').includes(t));
+        // 「店舗」ラベルの入っている行コンテナの outerHTML（先頭のみ）
+        const lab = [...document.querySelectorAll('*')].find(
+            el => el.children.length === 0 && (el.textContent || '').trim() === '店舗' && el.offsetParent);
+        let html = '';
+        if (lab) {
+            let node = lab;
+            for (let i = 0; i < 4 && node.parentElement; i++) node = node.parentElement;
+            html = (node.outerHTML || '').replace(/\\s+/g, ' ').slice(0, 900);
+        }
+        return {
+            url: location.href,
+            selects: document.querySelectorAll('select').length,
+            ng: document.querySelectorAll('ng-select,.ng-select').length,
+            hasSearch: has('検索'), hasPrev: has('前月'), hasNext: has('翌月'),
+            storeArea: html,
+        };
+    }"""
     )
-    print(f"[budget] セレクタ診断: {diag} kind={session._store_kind} 選択肢={len(opts)}")
+    print(f"[budget] セレクタ診断: kind={session._store_kind} 選択肢={len(opts)}")
+    print(f"[budget]   url={diag.get('url')}")
+    print(f"[budget]   select={diag.get('selects')} ng={diag.get('ng')} "
+          f"検索={diag.get('hasSearch')} 前月={diag.get('hasPrev')} 翌月={diag.get('hasNext')}")
+    print(f"[budget]   店舗エリアHTML: {diag.get('storeArea')}")
     return opts
 
 
