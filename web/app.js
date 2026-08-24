@@ -51,6 +51,9 @@ const addMonth = (ym, delta) => {
   return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
 };
 const monthRange = (a, b) => { const out = []; let cur = a; while (cur <= b) { out.push(cur); cur = addMonth(cur, 1); } return out; };
+// 人が入力した文字（要因メモ等）を安全に埋め込む。改行は <br> に。
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const escBr = s => esc(s).replace(/\n/g, "<br>");
 
 let DATA = null;
 let VIEW = { kind: "schedule" };   // schedule(TOP) | calendar | store,code | list | overview
@@ -113,6 +116,59 @@ async function editGoal(id) {
   render();
 }
 
+// 販促の要因メモ（施策id→本文）。目標と同じく本番=Neon(/api/notes)共有、
+// API が無い所では端末内(localStorage)に保存する。
+let SERVER_NOTES = {};           // id → {note, by, at}（サーバ値）
+let NOTES = {};                  // id → 本文（端末内フォールバック）
+function loadNotes() { try { return JSON.parse(localStorage.getItem("hansoku_notes") || "{}"); } catch (e) { return {}; } }
+function saveNotes() { try { localStorage.setItem("hansoku_notes", JSON.stringify(NOTES)); } catch (e) { /* 保存不可でも表示は続ける */ } }
+
+async function fetchServerNotes() {
+  try {
+    const res = await fetch("/api/notes", { headers: { accept: "application/json" }, cache: "no-store" });
+    const ct = res.headers.get("content-type") || "";
+    if (!res.ok || !ct.includes("application/json")) return;
+    const data = await res.json();
+    if (data && data.notes) SERVER_NOTES = data.notes;
+  } catch (e) { /* API 無し → 端末内保存で動く */ }
+}
+
+// 有効な要因メモ＝サーバ値（本番）→ 端末内 → 書き出し時に焼いた memo の順
+function memoOf(c) {
+  if (API_OK) {
+    const s = SERVER_NOTES[c.id];
+    if (s && s.note) return s.note;
+    return c.memo || "";
+  }
+  if (NOTES[c.id]) return NOTES[c.id];
+  return c.memo || "";
+}
+
+async function editMemo(id) {
+  const cur = API_OK ? (SERVER_NOTES[id] && SERVER_NOTES[id].note) : NOTES[id];
+  const v = window.prompt("この販促の要因メモ（なぜ動いた/動かなかったか）。空欄で削除", cur || "");
+  if (v === null) return;
+  const note = String(v).trim();
+
+  if (API_OK) {
+    try {
+      const res = await fetch("/api/notes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id, note }),
+      });
+      if (res.status === 401) { alert("メモの保存にはログインが必要です。"); return; }
+      if (!res.ok) { alert("メモの保存に失敗しました。時間をおいて再度お試しください。"); return; }
+      if (!note) delete SERVER_NOTES[id];
+      else SERVER_NOTES[id] = { note, by: "自分", at: new Date().toISOString() };
+    } catch (e) { alert("メモの保存に失敗しました（通信エラー）。"); return; }
+  } else {
+    if (!note) delete NOTES[id]; else NOTES[id] = note;
+    saveNotes();
+  }
+  render();
+}
+
 const CURRENT_MONTH = (() => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -163,7 +219,9 @@ async function boot() {
   }
   CAL_MONTH = CURRENT_MONTH;
   GOALS = loadGoals();
+  NOTES = loadNotes();
   await fetchServerTargets();   // 本番は Neon の共有目標を読む。無ければ端末内保存で動く
+  await fetchServerNotes();     // 要因メモも同様（本番=共有、無ければ端末内）
   buildMetricSelect();
   buildStoreJump();
   render();
@@ -278,6 +336,8 @@ function render() {
     el.addEventListener("click", () => { CAL_MONTH = addMonth(CAL_MONTH, el.dataset.cal === "next" ? 1 : -1); render(); }));
   app.querySelectorAll("[data-goal]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); editGoal(el.dataset.goal); }));
+  app.querySelectorAll("[data-memo]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); editMemo(el.dataset.memo); }));
   wireEmphasis(app);
 }
 function go(v) { VIEW = v; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
@@ -595,6 +655,10 @@ function renderCampaigns() {
     }
     const goalHtml = tgt != null
       ? `<span class="cgtag">目標 ${man(tgt)}円</span>` : "";
+    const memo = memoOf(c);
+    const memoHtml = memo
+      ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${c.id}" title="メモを編集">✎</button></div>`
+      : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${c.id}">＋ 要因メモ</button></div>`;
     return `<li>
       <span class="kchip" style="--kc:${k.color}">${k.label}</span>
       <div class="cbody">
@@ -602,6 +666,7 @@ function renderCampaigns() {
           <span class="cstat ${s.k}">${s.label}</span>${goalHtml}</div>
         ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
         <div class="ceff">${effHtml}</div>
+        ${memoHtml}
       </div>
       <span class="crange">${range}</span>
     </li>`;
@@ -767,6 +832,11 @@ function renderStore(code) {
         } else {
           goalHtml = `<div class="cgoal muted"><button class="goalbtn add" data-goal="${c.id}">＋ 目標を入力</button></div>`;
         }
+        // 要因メモ（アプリ内で入力・共有）
+        const memo = memoOf(c);
+        const memoHtml = memo
+          ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${c.id}" title="メモを編集">✎</button></div>`
+          : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${c.id}">＋ 要因メモ</button></div>`;
         return `<li>
           <span class="kchip" style="--kc:${k.color}">${k.label}</span>
           <div class="cbody">
@@ -774,6 +844,7 @@ function renderStore(code) {
             ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
             ${effHtml}
             ${goalHtml}
+            ${memoHtml}
           </div>
           <span class="crange">${range}</span>
         </li>`;

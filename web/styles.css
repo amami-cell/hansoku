@@ -341,6 +341,11 @@ tbody tr:last-child td{border-bottom:0;}
 :root[data-theme="dark"] .goalbtn:hover,:root:not([data-theme="light"]) .goalbtn:hover{color:#0E1116;}
 @media (prefers-color-scheme:light){:root:not([data-theme="dark"]) .goalbtn:hover{color:#fff;}}
 .goalbtn.add{color:var(--ink-2);}
+.cmemo{font-size:12px;color:var(--ink-2);margin-top:5px;line-height:1.7;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:6px 10px;
+  display:flex;align-items:flex-start;gap:8px;justify-content:space-between;}
+.cmemo.muted{background:none;border:none;padding:0;}
+.cmemo .goalbtn{flex:none;}
 
 /* ── 直近のアクション（TOP） ───────────────────────────── */
 .actions{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);

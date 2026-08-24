@@ -10,7 +10,7 @@ import pytest
 EXPECTED_TABLES = {
     "m_stores", "m_access", "m_timeslots", "m_campaigns", "m_goals",
     "m_share_targets", "m_creatives", "m_reviews", "f_daily", "f_campaign_summary",
-    "promo_targets",
+    "promo_targets", "promo_notes",
 }
 
 
@@ -43,6 +43,27 @@ class Test販促目標:
         appdb.ensure_schema()
         rows = appdb.query("SELECT count(*) c FROM m_stores")
         assert rows[0]["c"] >= 0
+
+
+class Test要因メモ:
+    def test_登録更新削除できる(self, appdb):
+        assert appdb.list_promo_notes() == {}
+        appdb.set_promo_note("s1006-natsu", "客足が伸びた。天候も良好", set_by="amami@8sin.co.jp")
+        assert appdb.list_promo_notes() == {"s1006-natsu": "客足が伸びた。天候も良好"}
+        # 上書き（更新者も残る）
+        appdb.set_promo_note("s1006-natsu", "前年並みに落ち着いた", set_by="other@example.com")
+        assert appdb.list_promo_notes()["s1006-natsu"] == "前年並みに落ち着いた"
+        row = appdb.query(
+            "SELECT set_by FROM promo_notes WHERE campaign_id = 's1006-natsu'"
+        )[0]
+        assert row["set_by"] == "other@example.com"
+        # 削除
+        appdb.delete_promo_note("s1006-natsu")
+        assert appdb.list_promo_notes() == {}
+
+    def test_空メモは一覧に出さない(self, appdb):
+        appdb.set_promo_note("s1006-natsu", "   ", set_by="amami@8sin.co.jp")
+        assert appdb.list_promo_notes() == {}
 
 
 class Test店舗マスタ同期:

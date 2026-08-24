@@ -23,6 +23,13 @@ export default {
         return json({ error: String((e && e.message) || e) }, 500);
       }
     }
+    if (url.pathname === "/api/notes") {
+      try {
+        return await handleNotes(request, env);
+      } catch (e) {
+        return json({ error: String((e && e.message) || e) }, 500);
+      }
+    }
     // 制作物PDF（R2）。Access の内側で同一ドメイン配信する。
     if (url.pathname.startsWith("/creatives/")) {
       try {
@@ -35,6 +42,48 @@ export default {
     return env.ASSETS.fetch(request);
   },
 };
+
+async function handleNotes(request, env) {
+  if (!env.DATABASE_URL) return json({ error: "no-db" }, 503);
+  const sql = neon(env.DATABASE_URL);
+
+  if (request.method === "GET") {
+    const rows = await sql`SELECT campaign_id, note, set_by, set_at FROM promo_notes`;
+    const notes = {};
+    for (const r of rows) {
+      if ((r.note || "").trim()) notes[r.campaign_id] = { note: r.note, by: r.set_by, at: r.set_at };
+    }
+    return json({ notes });
+  }
+
+  if (request.method === "POST") {
+    const email = request.headers.get("Cf-Access-Authenticated-User-Email") || "";
+    if (!email) return json({ error: "unauthenticated" }, 401);
+
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "bad-json" }, 400);
+    }
+    const id = typeof body.id === "string" ? body.id.slice(0, 128) : "";
+    if (!id) return json({ error: "no-id" }, 400);
+
+    const note = typeof body.note === "string" ? body.note.slice(0, 2000).trim() : "";
+    if (!note) {
+      await sql`DELETE FROM promo_notes WHERE campaign_id = ${id}`;
+      return json({ ok: true, id, note: "" });
+    }
+    await sql`
+      INSERT INTO promo_notes (campaign_id, note, set_by, set_at)
+      VALUES (${id}, ${note}, ${email}, now())
+      ON CONFLICT (campaign_id) DO UPDATE
+        SET note = EXCLUDED.note, set_by = EXCLUDED.set_by, set_at = now()`;
+    return json({ ok: true, id, note, by: email });
+  }
+
+  return json({ error: "method" }, 405);
+}
 
 async function handleCreative(url, env) {
   if (!env.CREATIVES) return json({ error: "no-bucket" }, 503);

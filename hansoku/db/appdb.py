@@ -182,3 +182,31 @@ class AppDb:
         self.execute(
             "DELETE FROM promo_targets WHERE campaign_id = %s", (campaign_id,)
         )
+
+    # ── 販促の要因メモ（アプリ内入力）──────────────────────────────────────
+    def list_promo_notes(self) -> dict[str, str]:
+        """施策id → 要因メモ（本文）の辞書。空文字のものは含めない。"""
+        return {
+            r["campaign_id"]: r["note"]
+            for r in self.query("SELECT campaign_id, note FROM promo_notes")
+            if (r["note"] or "").strip()
+        }
+
+    def set_promo_note(self, campaign_id: str, note: str, set_by: str = "") -> None:
+        """要因メモを登録／更新する（誰が更新したかを set_by に残す）。"""
+        self.execute(
+            """
+            INSERT INTO promo_notes (campaign_id, note, set_by, set_at)
+            VALUES (%s, %s, %s, now())
+            ON CONFLICT (campaign_id) DO UPDATE SET
+                note   = EXCLUDED.note,
+                set_by = EXCLUDED.set_by,
+                set_at = now()
+            """,
+            (campaign_id, note, set_by),
+        )
+
+    def delete_promo_note(self, campaign_id: str) -> None:
+        self.execute(
+            "DELETE FROM promo_notes WHERE campaign_id = %s", (campaign_id,)
+        )

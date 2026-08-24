@@ -106,6 +106,8 @@ def load_schedule(
                 "note": str(camp.get("note", "")) if camp.get("note") else "",
                 # 販促の目標数値（売上・円）。アプリ内で入力していく。未設定は None。
                 "target": _parse_target(camp.get("target")),
+                # 要因メモ（アプリ内で入力・Neon共有）。書き出し時に焼き込む。未設定は空。
+                "memo": "",
             }
         )
     return out
