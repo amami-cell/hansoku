@@ -33,6 +33,9 @@ METRIC_DRINK_THEORY_COST: Final = "drink_theory_cost"
 METRIC_FOOD_BUDGET_COST: Final = "food_budget_cost"
 METRIC_DRINK_BUDGET_COST: Final = "drink_budget_cost"
 
+# FW 損益管理 → 月別予算登録 の売上予算（店舗の目標＝予算対比の基準）
+METRIC_SALES_BUDGET: Final = "sales_budget"
+
 # インフォマートの棚卸（月次集計タブ）
 METRIC_FOOD_INVENTORY: Final = "food_inventory"
 METRIC_DRINK_INVENTORY: Final = "drink_inventory"
@@ -53,6 +56,7 @@ METRICS: Final = (
     METRIC_DRINK_THEORY_COST,
     METRIC_FOOD_BUDGET_COST,
     METRIC_DRINK_BUDGET_COST,
+    METRIC_SALES_BUDGET,
     METRIC_FOOD_INVENTORY,
     METRIC_DRINK_INVENTORY,
     METRIC_SUPPLY_INVENTORY,
@@ -74,6 +78,7 @@ ADDITIVE_METRICS: Final = frozenset(
         METRIC_DRINK_THEORY_COST,
         METRIC_FOOD_BUDGET_COST,
         METRIC_DRINK_BUDGET_COST,
+        METRIC_SALES_BUDGET,
         METRIC_FOOD_INVENTORY,
         METRIC_DRINK_INVENTORY,
         METRIC_SUPPLY_INVENTORY,

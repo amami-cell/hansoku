@@ -22,6 +22,7 @@ from ..model import (
     METRIC_FOOD_SALES,
     METRIC_FOOD_THEORY_COST,
     METRIC_SALES,
+    METRIC_SALES_BUDGET,
 )
 from ..settings import ROOT
 from ..stores import StoreMaster
@@ -138,6 +139,21 @@ def build(
             round(row["value"])
         )
 
+    # 売上予算（FW 月別予算登録）。予算対比の基準。指標選択には出さず別枠で持つ。
+    budget: dict[str, dict[str, int]] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_SALES_BUDGET],
+            store_codes=master.active_codes,
+            group_by=("store_code", "date", "metric"),
+        )
+    ):
+        month = row["date"].strftime("%Y-%m")
+        budget.setdefault(row["store_code"], {})[month] = round(row["value"])
+
     # 原価率は行ごとに平均できないため、分子・分母を合計してから割る
     cost_rates: dict[str, dict[str, float]] = {}
     for month in sorted(months):
@@ -187,6 +203,8 @@ def build(
         ],
         "monthly": monthly,
         "cost_rate": cost_rates,
+        # 店舗の月次売上予算（FW月別予算登録）。まだ取り込み前は空。
+        "budget": budget,
         # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
         "campaigns": campaigns or [],
     }

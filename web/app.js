@@ -188,6 +188,9 @@ function wireTheme() {
 const store = code => DATA.stores.find(s => s.code === code) || {};
 const storeName = code => store(code).name || code;
 const hasData = code => !!DATA.monthly[code];
+// 店舗の月次売上予算（FW月別予算登録）。未取込なら undefined。
+const budgetAt = (code, month) => ((DATA.budget || {})[code] || {})[month];
+const hasBudget = code => DATA.budget && DATA.budget[code] && Object.keys(DATA.budget[code]).length > 0;
 
 function valueAt(code, month) {
   if (METRIC === "cost_rate") return (DATA.cost_rate[code] || {})[month];
@@ -501,6 +504,16 @@ function renderStore(code) {
   // 見出しKPI
   const total = periodTotal(code);
   const latest = latestConfirmed(code);
+  // 予算対比（FW月別予算）。売上のときだけ、直近確定月の実績÷予算。
+  const budKpi = (() => {
+    if (METRIC !== "sales" || !latest) return "";
+    const b = budgetAt(code, latest.m);
+    if (typeof b !== "number" || !b) return "";
+    const rate = latest.v / b * 100;
+    return `<div class="kpi"><div class="lbl">予算対比（${latest.m}）</div>
+        <div class="big ${rate >= 100 ? "up" : "down"}">${rate.toFixed(0)}%</div>
+        <div class="delta">予算 ${man(b)} → 実績 ${man(latest.v)}</div></div>`;
+  })();
   const kpis = `
     <div class="kpis">
       <div class="kpi"><div class="lbl">期間合計（${METRIC_LABELS[METRIC]}）</div>
@@ -510,6 +523,7 @@ function renderStore(code) {
       <div class="kpi"><div class="lbl">前年同月比</div>
         <div class="big ${y ? (y.pct >= 0 ? "up" : "down") : ""}">${y ? signed(y.pct) + "%" : "―"}</div>
         <div class="delta">${y ? `${man(y.prev)} → ${man(y.cur)}` : "前年データなし"}</div></div>
+      ${budKpi}
     </div>`;
 
   // この店の施策（config/schedule.yaml 由来）
@@ -518,9 +532,10 @@ function renderStore(code) {
     .sort((a, b) => a.start < b.start ? -1 : 1);
 
   // 自店の売上推移。施策期間はグラフに帯として重ねる
+  const budNote = (METRIC === "sales" && hasBudget(code)) ? "　破線は月予算（FW）。" : "";
   const own = `
     <div class="panel"><div class="chartwrap">${singleLine(code, months, color, myCamps)}</div>
-      <figcaption>当月は締め前の暫定値（点線）。色帯は施策期間です。</figcaption>
+      <figcaption>当月は締め前の暫定値（点線）。色帯は施策期間です。${budNote}</figcaption>
     </div>`;
 
   // 近隣（同エリア）比較
@@ -757,8 +772,17 @@ function singleLine(code, months, color, camps = []) {
   const ser = series(code, months);
   const vals = ser.filter(v => v != null);
   if (!vals.length) return `<div class="empty">データがありません</div>`;
-  const { W, H, x, y, grid, xlab, PT, PB } = chartFrame(months, vals, isRatio);
+  // 売上のときは予算（FW月別予算）を破線で重ねる
+  const budSer = METRIC === "sales"
+    ? months.map(m => { const b = budgetAt(code, m); return typeof b === "number" ? b : null; })
+    : months.map(() => null);
+  const frameVals = vals.concat(budSer.filter(v => v != null));
+  const { W, H, x, y, grid, xlab, PT, PB } = chartFrame(months, frameVals, isRatio);
   const n = months.length;
+  const budLine = budSer.some(v => v != null)
+    ? `<path d="${pathOf(budSer, x, y)}" fill="none" stroke="var(--ink-3)" stroke-width="1.6"
+        stroke-dasharray="5 4" stroke-linejoin="round" opacity="0.9"/>`
+    : "";
   // 施策期間を帯として重ねる（該当月の列を薄く塗る）
   const bands = camps.map(c => {
     const sM = c.start.slice(0, 7), eM = c.end.slice(0, 7);
@@ -788,7 +812,7 @@ function singleLine(code, months, color, camps = []) {
   ).join("");
   return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" style="min-width:520px" role="img"
       aria-label="${storeName(code)}の${METRIC_LABELS[METRIC]}推移">
-    ${bands}${grid}${xlab}${area}
+    ${bands}${grid}${xlab}${area}${budLine}
     <path d="${pathOf(confSer, x, y)}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
     ${provDot}</svg>`;
 }
