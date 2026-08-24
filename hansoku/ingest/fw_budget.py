@@ -64,21 +64,70 @@ def _download_csv(session, artifacts: Path, name: str) -> Path | None:
         return None
 
 
+def _dump_grid(session) -> None:
+    """画面のグリッド（表・入力欄）を 2 次元で吸い出して表示する。"""
+    tables = session.page.evaluate(
+        """() => {
+        const clip = s => (s || '').replace(/\\s+/g, ' ').trim().slice(0, 24);
+        const tables = [...document.querySelectorAll('table')].filter(t => t.offsetParent);
+        return tables.slice(0, 4).map(t => {
+            const rows = [];
+            for (const tr of t.querySelectorAll('tr')) {
+                const cells = [];
+                for (const c of tr.querySelectorAll('th,td')) {
+                    const inp = c.querySelector('input,select');
+                    cells.push(clip(inp ? (inp.value || '') : c.innerText));
+                }
+                if (cells.some(x => x)) rows.push(cells);
+            }
+            return rows;
+        });
+    }"""
+    )
+    # 選択中の店舗・期間まわりのラベルも拾う
+    context = session.page.evaluate(
+        """() => {
+        const clip = s => (s || '').replace(/\\s+/g, ' ').trim();
+        const out = [];
+        for (const el of document.querySelectorAll('input,select,.ng-value,[class*="store"],[class*="date"],[class*="month"]')) {
+            if (!el.offsetParent) continue;
+            const v = clip(el.value || el.innerText);
+            if (v && v.length < 30) out.push(el.tagName.toLowerCase() + ':' + v);
+        }
+        return [...new Set(out)].slice(0, 30);
+    }"""
+    )
+    print("---- 選択中の状態（店舗/期間/入力欄） ----")
+    for c in context:
+        print("   ", c)
+    for ti, rows in enumerate(tables):
+        print(f"---- 表 {ti} （{len(rows)}行）----")
+        for row in rows[:25]:
+            print("   ", " | ".join(row))
+
+
 def probe(artifacts: Path) -> int:
-    """月別予算登録に入り、CSV を落として中身（先頭）を表示する。取り込み前の下調べ。"""
+    """月別予算登録に入り、検索してグリッドを吸い出す。CSVも試す。取り込み前の下調べ。"""
     with fw_session(artifacts) as session:
         _open_monthly_budget(session)
         items = session.dump_clickables("budget_screen")
         print(f"[budget] 月別予算登録の操作要素 {len(items)} 件")
 
+        # まず検索を押してデータを読み込ませる（登録画面は検索しないと空のことがある）
+        if session.click_text("検 索", wait=2.5) or session.click_text("検索", wait=2.5):
+            print("[budget] 検索を押した")
+        session.snapshot("after_search")
+        session.dump_clickables("after_search")
+        _dump_grid(session)
+
+        # CSV出力も試す（新規タブ/ダイアログのこともある）
         path = _download_csv(session, artifacts, "budget_monthly.csv")
-        if not path:
-            return 1
-        raw = path.read_bytes()
-        text, enc = _decode(raw)
-        print(f"[budget] CSV {len(raw)} bytes, enc={enc}")
-        print("---- CSV 先頭40行 ----")
-        for line in text.splitlines()[:40]:
-            print(line)
+        if path:
+            raw = path.read_bytes()
+            text, enc = _decode(raw)
+            print(f"[budget] CSV {len(raw)} bytes, enc={enc}")
+            print("---- CSV 先頭40行 ----")
+            for line in text.splitlines()[:40]:
+                print(line)
     print(f"\n成果物: {artifacts}")
     return 0
