@@ -111,8 +111,9 @@ def appdb():
     db = AppDb(AppDbSettings(env="local", dsn=dsn))
     db.execute(
         """
-        DROP TABLE IF EXISTS f_campaign_summary, f_daily, m_reviews, m_creatives,
-             m_share_targets, m_goals, m_campaigns, m_timeslots, m_access, m_stores CASCADE
+        DROP TABLE IF EXISTS promo_targets, f_campaign_summary, f_daily, m_reviews,
+             m_creatives, m_share_targets, m_goals, m_campaigns, m_timeslots,
+             m_access, m_stores CASCADE
         """
     )
     db.ensure_schema()

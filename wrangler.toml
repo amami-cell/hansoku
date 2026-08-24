@@ -1,16 +1,20 @@
-# Cloudflare Workers（静的アセット）で画面を配信する設定。
+# Cloudflare Workers で画面を配信する設定（本番 hansoku・Access保護）。
 #
-# Cloudflare の新しいダッシュボードは Pages ではなく Workers のフローに寄っていて、
-# ビルド設定に「出力ディレクトリ」の欄が出ない。このファイルがあれば、
-# `npx wrangler deploy` が web/ の中身をそのまま静的サイトとして配る。
+# 静的アセット（web/）の配信に加えて、販促目標の読み書きAPI（/api/targets）を
+# Worker コード（worker/index.js）で捌く。目標は Neon に保存する。
+# API は Cloudflare Access の内側にあるので、ログインした本人だけが書き込める。
 #
-# 画面は dashboard.json を読むだけの静的サイトなので、Worker のコードは要らない。
-# assets だけを指定する。
+# デプロイ前に `npm install` して @neondatabase/serverless を用意し、
+# Worker の秘密 DATABASE_URL に Neon 接続文字列を入れておくこと（deploy.yml 参照）。
 
 name = "hansoku"
+main = "worker/index.js"
 compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
 
+# Worker が /api/* を捌き、それ以外は env.ASSETS で静的配信する。
 [assets]
 directory = "./web"
+binding = "ASSETS"
 # SPA。未知のパスは index.html を返す（今は単一ページだが将来のルーティングに備える）
 not_found_handling = "single-page-application"

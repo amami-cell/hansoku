@@ -10,6 +10,7 @@ import pytest
 EXPECTED_TABLES = {
     "m_stores", "m_access", "m_timeslots", "m_campaigns", "m_goals",
     "m_share_targets", "m_creatives", "m_reviews", "f_daily", "f_campaign_summary",
+    "promo_targets",
 }
 
 
@@ -19,6 +20,23 @@ class Testスキーマ:
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
         )
         assert {r["table_name"] for r in rows} >= EXPECTED_TABLES
+
+
+class Test販促目標:
+    def test_登録更新削除できる(self, appdb):
+        assert appdb.list_promo_targets() == {}
+        appdb.set_promo_target("s1006-natsu", 16_000_000, set_by="amami@8sin.co.jp")
+        assert appdb.list_promo_targets() == {"s1006-natsu": 16_000_000}
+        # 同じidは上書き（更新者も残る）
+        appdb.set_promo_target("s1006-natsu", 17_000_000, set_by="other@example.com")
+        assert appdb.list_promo_targets()["s1006-natsu"] == 17_000_000
+        row = appdb.query(
+            "SELECT set_by FROM promo_targets WHERE campaign_id = 's1006-natsu'"
+        )[0]
+        assert row["set_by"] == "other@example.com"
+        # 削除
+        appdb.delete_promo_target("s1006-natsu")
+        assert appdb.list_promo_targets() == {}
 
     def test_何度流しても壊れない(self, appdb):
         appdb.ensure_schema()

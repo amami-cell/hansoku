@@ -28,6 +28,17 @@ jobs:
       - name: 依存パッケージをインストール
         run: pip install -r requirements.txt
 
+      - name: スキーマを適用（promo_targets 等・冪等）
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          if [ -n "$NEON_DATABASE_URL" ]; then
+            python -m hansoku.cli init-schema
+          else
+            echo "::notice::NEON_DATABASE_URL 未設定のためスキーマ適用をスキップ"
+          fi
+
       - name: データを書き出す
         env:
           HANSOKU_ENV: cloud
@@ -47,11 +58,14 @@ jobs:
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
         run: |
           set -o pipefail   # パイプの途中が失敗したら step も失敗させる
           # トークンに紛れ込みやすい前後の空白・改行・引用符を落とす。
           TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]\"'"'")"
           ACCOUNT="$(printf '%s' "$CF_ACCOUNT" | tr -d '[:space:]\"'"'")"
+          # Worker（/api/targets）が使う @neondatabase/serverless を用意する。
+          npm install
           npm install -g wrangler@4
           export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT"
 
@@ -64,6 +78,15 @@ jobs:
 
           echo "── 公開 ──"
           npx wrangler deploy 2>&1 | tee /tmp/wr.log
+
+          # 目標APIが使う Neon 接続文字列を Worker の秘密に入れる（毎回上書きで冪等）。
+          if [ -n "$NEON_DATABASE_URL" ]; then
+            echo "── DATABASE_URL を設定 ──"
+            printf '%s' "$NEON_DATABASE_URL" | npx wrangler secret put DATABASE_URL 2>&1 | tail -2 || \
+              echo "::warning::DATABASE_URL の設定に失敗。目標の保存(API)が使えない可能性があります。"
+          else
+            echo "::warning::NEON_DATABASE_URL 未設定。目標の保存(API)は無効です。"
+          fi
           url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/wr.log | head -1 || true)
           if [ -n "$url" ]; then
             echo "## 公開URL" >> "$GITHUB_STEP_SUMMARY"

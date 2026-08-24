@@ -151,3 +151,34 @@ class AppDb:
         for code in codes:
             self.grant(email, code, "admin")
         return len(codes)
+
+    # ── 販促の目標（アプリ内入力）────────────────────────────────────────
+    def list_promo_targets(self) -> dict[str, int]:
+        """施策id → 目標売上（円）の辞書。"""
+        return {
+            r["campaign_id"]: int(r["target_value"])
+            for r in self.query(
+                "SELECT campaign_id, target_value FROM promo_targets"
+            )
+        }
+
+    def set_promo_target(
+        self, campaign_id: str, target_value: int, set_by: str = ""
+    ) -> None:
+        """目標を登録／更新する（誰が更新したかを set_by に残す）。"""
+        self.execute(
+            """
+            INSERT INTO promo_targets (campaign_id, target_value, set_by, set_at)
+            VALUES (%s, %s, %s, now())
+            ON CONFLICT (campaign_id) DO UPDATE SET
+                target_value = EXCLUDED.target_value,
+                set_by       = EXCLUDED.set_by,
+                set_at       = now()
+            """,
+            (campaign_id, int(target_value), set_by),
+        )
+
+    def delete_promo_target(self, campaign_id: str) -> None:
+        self.execute(
+            "DELETE FROM promo_targets WHERE campaign_id = %s", (campaign_id,)
+        )

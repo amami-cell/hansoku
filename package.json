@@ -1,0 +1,8 @@
+{
+  "name": "hansoku-web",
+  "private": true,
+  "description": "本番 Worker（静的配信＋販促目標API）の依存",
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4"
+  }
+}

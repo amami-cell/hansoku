@@ -56,21 +56,60 @@ let DATA = null;
 let VIEW = { kind: "schedule" };   // schedule(TOP) | calendar | store,code | list | overview
 let METRIC = "sales";
 let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"）
-let GOALS = {};                   // アプリ内で入力した販促の目標（施策id→円）。当面は端末内保存。
+// 販促の目標（施策id→円）。本番は Neon（/api/targets）に共有保存、
+// プレビュー等 API が無い所では端末内（localStorage）に保存する。
+let API_OK = false;              // 目標APIが使えるか（本番=true）
+let SERVER_TARGETS = {};         // id → {value, by, at}（サーバ値）
+let GOALS = {};                  // id → 円（端末内フォールバック）
 
 function loadGoals() { try { return JSON.parse(localStorage.getItem("hansoku_goals") || "{}"); } catch (e) { return {}; } }
 function saveGoals() { try { localStorage.setItem("hansoku_goals", JSON.stringify(GOALS)); } catch (e) { /* 保存不可でも表示は続ける */ } }
-// 有効な目標＝アプリ入力があればそれ、無ければデータ（schedule.yaml）の値
-const targetOf = c => (c.id in GOALS) ? GOALS[c.id] : (c.target != null ? c.target : null);
 
-function editGoal(id) {
-  const cur = (id in GOALS) ? GOALS[id] : "";
-  const v = window.prompt("この販促の目標売上（円）を入力してください（空欄で削除）", cur === "" ? "" : String(cur));
+async function fetchServerTargets() {
+  try {
+    const res = await fetch("/api/targets", { headers: { accept: "application/json" }, cache: "no-store" });
+    const ct = res.headers.get("content-type") || "";
+    if (!res.ok || !ct.includes("application/json")) return;   // プレビューはHTMLが返る→端末内保存へ
+    const data = await res.json();
+    if (data && data.targets) { SERVER_TARGETS = data.targets; API_OK = true; }
+  } catch (e) { /* API 無し → 端末内保存で動く */ }
+}
+
+// 有効な目標＝サーバ値（本番）→ 端末内 → schedule.yaml の順
+function targetOf(c) {
+  if (API_OK) {
+    const s = SERVER_TARGETS[c.id];
+    if (s && typeof s.value === "number") return s.value;
+    return c.target != null ? c.target : null;
+  }
+  if (c.id in GOALS) return GOALS[c.id];
+  return c.target != null ? c.target : null;
+}
+
+async function editGoal(id) {
+  const cur = API_OK ? (SERVER_TARGETS[id] && SERVER_TARGETS[id].value) : GOALS[id];
+  const v = window.prompt("この販促の目標売上（円）を入力してください（空欄で削除）", cur == null ? "" : String(cur));
   if (v === null) return;
   const cleaned = String(v).replace(/[,，円\s]/g, "");
-  if (cleaned === "") { delete GOALS[id]; }
-  else { const n = parseInt(cleaned, 10); if (isNaN(n)) return; GOALS[id] = n; }
-  saveGoals();
+  let value = null;
+  if (cleaned !== "") { const n = parseInt(cleaned, 10); if (isNaN(n)) return; value = n; }
+
+  if (API_OK) {
+    try {
+      const res = await fetch("/api/targets", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id, target: value }),
+      });
+      if (res.status === 401) { alert("目標の保存にはログインが必要です。"); return; }
+      if (!res.ok) { alert("目標の保存に失敗しました。時間をおいて再度お試しください。"); return; }
+      if (value === null) delete SERVER_TARGETS[id];
+      else SERVER_TARGETS[id] = { value, by: "自分", at: new Date().toISOString() };
+    } catch (e) { alert("目標の保存に失敗しました（通信エラー）。"); return; }
+  } else {
+    if (value === null) delete GOALS[id]; else GOALS[id] = value;
+    saveGoals();
+  }
   render();
 }
 
@@ -124,6 +163,7 @@ async function boot() {
   }
   CAL_MONTH = CURRENT_MONTH;
   GOALS = loadGoals();
+  await fetchServerTargets();   // 本番は Neon の共有目標を読む。無ければ端末内保存で動く
   buildMetricSelect();
   buildStoreJump();
   render();
