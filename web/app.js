@@ -190,7 +190,7 @@ const storeName = code => store(code).name || code;
 const hasData = code => !!DATA.monthly[code];
 // 店舗の月次売上予算（FW月別予算登録）。未取込なら undefined。
 const budgetAt = (code, month) => ((DATA.budget || {})[code] || {})[month];
-const hasBudget = code => DATA.budget && DATA.budget[code] && Object.keys(DATA.budget[code]).length > 0;
+const hasBudget = code => DATA.budget && DATA.budget[code] && Object.values(DATA.budget[code]).some(v => v > 0);
 
 function valueAt(code, month) {
   if (METRIC === "cost_rate") return (DATA.cost_rate[code] || {})[month];
@@ -774,7 +774,7 @@ function singleLine(code, months, color, camps = []) {
   if (!vals.length) return `<div class="empty">データがありません</div>`;
   // 売上のときは予算（FW月別予算）を破線で重ねる
   const budSer = METRIC === "sales"
-    ? months.map(m => { const b = budgetAt(code, m); return typeof b === "number" ? b : null; })
+    ? months.map(m => { const b = budgetAt(code, m); return typeof b === "number" && b > 0 ? b : null; })
     : months.map(() => null);
   const frameVals = vals.concat(budSer.filter(v => v != null));
   const { W, H, x, y, grid, xlab, PT, PB } = chartFrame(months, frameVals, isRatio);
