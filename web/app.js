@@ -59,6 +59,7 @@ let DATA = null;
 let VIEW = { kind: "schedule" };   // schedule(TOP) | calendar | store,code | list | overview
 let METRIC = "sales";
 let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"）
+let CAMP_FILTER = { status: "all", kind: "all" };   // 施策の効果ビューの絞り込み
 // 販促の目標（施策id→円）。本番は Neon（/api/targets）に共有保存、
 // プレビュー等 API が無い所では端末内（localStorage）に保存する。
 let API_OK = false;              // 目標APIが使えるか（本番=true）
@@ -338,6 +339,12 @@ function render() {
     el.addEventListener("click", e => { e.stopPropagation(); editGoal(el.dataset.goal); }));
   app.querySelectorAll("[data-memo]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); editMemo(el.dataset.memo); }));
+  app.querySelectorAll("[data-cfilter]").forEach(el =>
+    el.addEventListener("click", () => {
+      const [dim, val] = el.dataset.cfilter.split(":");
+      CAMP_FILTER = { ...CAMP_FILTER, [dim]: val };
+      render();
+    }));
   wireEmphasis(app);
 }
 function go(v) { VIEW = v; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
@@ -628,7 +635,10 @@ function renderCampaigns() {
   const isRatio = METRIC === "cost_rate";
   // 状態順（実施中→予定→終了）→ 同状態内は前年比の良い順（データ無しは後ろ）
   const STORD = { live: 0, soon: 1, done: 2 };
-  const rows = (DATA.campaigns || []).map(c => ({ c, s: campStatus(c), sum: campaignSummary(c) }));
+  const all = (DATA.campaigns || []).map(c => ({ c, s: campStatus(c), sum: campaignSummary(c) }));
+  const rows = all.filter(r =>
+    (CAMP_FILTER.status === "all" || r.s.k === CAMP_FILTER.status) &&
+    (CAMP_FILTER.kind === "all" || r.c.kind === CAMP_FILTER.kind));
   rows.sort((a, b) => {
     const d = STORD[a.s.k] - STORD[b.s.k];
     if (d) return d;
@@ -674,12 +684,27 @@ function renderCampaigns() {
 
   const withEff = rows.filter(r => r.sum.stores && r.sum.pct != null);
   const plus = withEff.filter(r => r.sum.pct >= 0).length;
+
+  const chip = (dim, val, label) =>
+    `<button class="fchip${CAMP_FILTER[dim] === val ? " on" : ""}" data-cfilter="${dim}:${val}">${label}</button>`;
+  const statusChips = [["all", "すべて"], ["live", "実施中"], ["soon", "予定"], ["done", "終了"]]
+    .map(([v, l]) => chip("status", v, l)).join("");
+  const kindChips = [chip("kind", "all", "すべて")]
+    .concat(Object.entries(KIND).map(([k, v]) => chip("kind", k, v.label))).join("");
+  const fbar = `<div class="fbar">
+    <span class="flabel">状態</span>${statusChips}
+    <span class="fsep"></span><span class="flabel">種類</span>${kindChips}</div>`;
+
+  const empty = all.length
+    ? `<div class="empty">この条件の施策はありません。</div>`
+    : `<div class="empty">施策がまだ登録されていません。</div>`;
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
     <section class="block">
       <div class="bhead"><h2>施策の効果</h2>
         <span class="bnote">${METRIC_LABELS[METRIC]}・確定月の全店合算／前年同月比　${withEff.length ? `前年比プラス ${plus}/${withEff.length}` : ""}</span></div>
-      ${rows.length ? `<ul class="clist">${body}</ul>` : `<div class="empty">施策がまだ登録されていません。</div>`}
+      ${fbar}
+      ${rows.length ? `<ul class="clist">${body}</ul>` : empty}
     </section>`;
 }
 
@@ -957,6 +982,41 @@ function budgetRanking() {
   </section>`;
 }
 
+// ブランド比較（直近確定月の売上合計・前年比）。売上のときだけ。
+function brandCompare() {
+  if (METRIC !== "sales") return "";
+  const by = {};
+  for (const s of DATA.stores) {
+    const lc = latestConfirmed(s.code);
+    if (!lc) continue;
+    const key = s.brand_name || s.brand || "その他";
+    const b = by[key] || (by[key] = { name: key, stores: 0, cur: 0, prev: 0, prevOk: true });
+    b.stores += 1; b.cur += lc.v;
+    const [y, mo] = lc.m.split("-");
+    const pv = valueAt(s.code, `${+y - 1}-${mo}`);
+    if (typeof pv === "number") b.prev += pv; else b.prevOk = false;
+  }
+  const rows = Object.values(by).sort((a, b) => b.cur - a.cur);
+  if (rows.length < 2) return "";
+  const body = rows.map(b => {
+    const pct = (b.prevOk && b.prev) ? (b.cur / b.prev - 1) * 100 : null;
+    const yoy = pct != null
+      ? `<span class="${pct >= 0 ? "up" : "down"}">${signed(pct)}%</span>`
+      : "―";
+    return `<tr><td class="rgn">${b.name}</td><td class="num">${b.stores}店</td>
+      <td class="num">${yen(b.cur)}</td><td class="num">${yoy}</td></tr>`;
+  }).join("");
+  return `<section class="block">
+    <div class="bhead"><h2>ブランド比較</h2>
+      <span class="bnote">直近確定月・売上合計と前年同月比・${rows.length}ブランド</span></div>
+    <div class="panel"><div class="chartwrap">
+      <table class="ovr"><thead><tr><th>ブランド</th><th class="num">店数</th>
+        <th class="num">直近確定月 売上</th><th class="num">前年比</th></tr></thead>
+        <tbody>${body}</tbody></table>
+    </div></div>
+  </section>`;
+}
+
 function renderOverview() {
   const months = DATA.months.slice(-4);
   const head = months.map(m =>
@@ -979,6 +1039,7 @@ function renderOverview() {
       <span class="sep">／</span><button class="linkbtn" data-view="list">店舗カード</button></div>
     ${liveSummary()}
     ${budgetRanking()}
+    ${brandCompare()}
     <section class="block">
       <div class="bhead"><h2>エリア・全店の売上</h2>
         <span class="bnote">直近4ヶ月・${METRIC_LABELS[METRIC]}（当月は暫定）</span></div>
