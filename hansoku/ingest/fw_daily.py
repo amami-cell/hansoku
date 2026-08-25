@@ -714,8 +714,30 @@ def ingest_abc(
         if not products:
             # 天の確認: ABCは「店舗選択」を押すとポップアップ/別画面で店を選ぶ。
             # そのポップアップの中身を調べて、店の選び方（モーダルの行/セレクト）を特定する。
-            print("[ABC] 全店データなし。『店舗選択』ポップアップを調べる。")
-            session.click_text("店舗選択", wait=1.8)
+            print("[ABC] 全店データなし。『店舗選択』ラジオを正確に押してポップアップを調べる。")
+            # 「全店 店舗選択」は1つの容器内のラジオ2つ。容器ごと掴まず、テキストが
+            # ちょうど「店舗選択」の最小要素／近傍のラジオを押す。
+            clicked = session.page.evaluate(
+                r"""() => {
+                const clip=s=>(s||'').replace(/\s+/g,' ').trim();
+                // ちょうど「店舗選択」の葉要素
+                let leaf=[...document.querySelectorAll('*')].find(
+                  el=>el.children.length===0 && clip(el.innerText)==='店舗選択' && el.offsetParent);
+                let target=leaf;
+                // 近傍のラジオ/ラベルを優先
+                if(leaf){
+                  const forId=leaf.getAttribute && leaf.getAttribute('for');
+                  if(forId){ const r=document.getElementById(forId); if(r) target=r; }
+                  else { let p=leaf; for(let i=0;i<3&&p;i++){ p=p.parentElement; if(!p)break;
+                    const r=p.querySelector('input[type=radio],input[type=checkbox]'); if(r){target=r;break;} } }
+                }
+                if(target){ target.click();
+                  target.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true})); return true; }
+                return false;
+            }"""
+            )
+            print(f"[ABC] 店舗選択ラジオ click: {clicked}")
+            time.sleep(1.8)
             session.snapshot("abc_store_popup")
             info = session.page.evaluate(
                 r"""() => {
