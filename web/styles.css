@@ -326,6 +326,8 @@ tbody tr:last-child td{border-bottom:0;}
 .ceff{font-size:12px;color:var(--ink-2);margin-top:5px;font-variant-numeric:tabular-nums;}
 .ceff b{color:var(--ink);font-weight:700;}
 .ceff.muted{color:var(--ink-3);}
+.ceff.sub2{margin-top:2px;font-size:11px;color:var(--ink-3);}
+.ceff.sub2 b{color:var(--ink-2);}
 .ceff .up{color:var(--good-ink);font-weight:600;} .ceff .down{color:var(--critical-ink);font-weight:600;}
 .ceff .sub,.ceff .muted{color:var(--ink-3);font-weight:400;}
 .ceff .sub{margin-left:4px;}

@@ -186,27 +186,27 @@ function campStatus(c) {
   if (TODAY > c.end) return { k: "done", label: "終了" };
   return { k: "live", label: "実施中" };
 }
-// 施策期間の効果（月次・確定分のみ）。施策が掛かる確定月の売上を、前年同月と比べる。
+// 施策期間の効果（月次・確定分のみ）。施策が掛かる確定月の値を、前年同月と比べる。
 // 月次データしか無いので月単位の概算。当月（暫定）と未来月は含めない。
-function campEffect(code, c) {
-  if (METRIC === "cost_rate") return null;
+// accessor(code, month) で「売上」でも「客数」でも同じ計算を使い回す。
+function effectOver(code, c, accessor) {
   const sM = c.start.slice(0, 7), eM = c.end.slice(0, 7);
   let cur = 0, prev = 0, months = 0, prevOk = true;
   for (const m of DATA.months) {
     if (m >= CURRENT_MONTH || m < sM || m > eM) continue;
-    const a = valueAt(code, m);
+    const a = accessor(code, m);
     if (typeof a !== "number") continue;
     const [y, mo] = m.split("-");
-    const b = valueAt(code, `${+y - 1}-${mo}`);
+    const b = accessor(code, `${+y - 1}-${mo}`);
     cur += a; months += 1;
     if (typeof b === "number") prev += b; else prevOk = false;
   }
   if (!months) return null;
-  // 前月比：施策開始の直前・同じ月数ぶんの売上と比べる（季節性は前年比で見る前提の補助）
+  // 前月比：施策開始の直前・同じ月数ぶんと比べる（季節性は前年比で見る前提の補助）
   let momPrev = 0, momOk = true, m = sM;
   for (let k = 0; k < months; k++) {
     m = addMonth(m, -1);
-    const a = valueAt(code, m);
+    const a = accessor(code, m);
     if (typeof a === "number") momPrev += a; else momOk = false;
   }
   return {
@@ -216,6 +216,15 @@ function campEffect(code, c) {
     momPrev: momOk ? momPrev : null,
     momPct: (momOk && momPrev) ? (cur / momPrev - 1) * 100 : null,
   };
+}
+function campEffect(code, c) {
+  if (METRIC === "cost_rate") return null;
+  return effectOver(code, c, valueAt);
+}
+// 施策期間の集客（客数）効果。売上と別枠（DATA.covers）。指標選択に依らず常に客数。
+function campCovers(code, c) {
+  if (!DATA.covers || !DATA.covers[code]) return null;
+  return effectOver(code, c, coversAt);
 }
 
 // ── 起動 ─────────────────────────────────────────────────────────────────
@@ -310,6 +319,29 @@ function yoy(code) {
   const b = valueAt(code, prev);
   if (typeof b !== "number" || !b) return null;
   return { month: last.m, cur: last.v, prev: b, pct: (last.v / b - 1) * 100 };
+}
+
+// ── 集客（客数）。売上と別枠の DATA.covers を読む。人数なので円と混ぜない ──
+const nin = n => Math.round(n).toLocaleString("ja-JP") + "人";
+const coversAt = (code, month) => ((DATA.covers || {})[code] || {})[month];
+// 店の集客サマリ：確定月の期間合計客数と、直近確定月の前年同月比
+function coversSummary(code) {
+  const per = DATA.covers && DATA.covers[code];
+  if (!per) return null;
+  let total = 0, has = false, last = null;
+  for (const m of DATA.months) {
+    const v = per[m];
+    if (typeof v !== "number" || m >= CURRENT_MONTH) continue;
+    total += v; has = true; last = { m, v };
+  }
+  if (!has) return null;
+  let yoyPct = null;
+  if (last) {
+    const [y, mo] = last.m.split("-");
+    const b = per[`${+y - 1}-${mo}`];
+    if (typeof b === "number" && b) yoyPct = (last.v / b - 1) * 100;
+  }
+  return { total, last, yoyPct };
 }
 
 // ── コントロール ─────────────────────────────────────────────────────────
@@ -630,6 +662,8 @@ function renderList() {
 function campaignSummary(c) {
   let cur = 0, prev = 0, prevOk = true, stores = 0, monthsMax = 0, tot = 0;
   let mom = 0, momOk = true;
+  // 集客（客数）も同じ期間で合算する。売上と別枠（DATA.covers）
+  let cCur = 0, cPrev = 0, cPrevOk = true, cOk = false;
   for (const code of c.stores) {
     if (!hasData(code)) continue;
     tot += 1;
@@ -638,12 +672,19 @@ function campaignSummary(c) {
     stores += 1; cur += e.cur; monthsMax = Math.max(monthsMax, e.months);
     if (e.prev != null) prev += e.prev; else prevOk = false;
     if (e.momPrev != null) mom += e.momPrev; else momOk = false;
+    const cv = campCovers(code, c);
+    if (cv) {
+      cOk = true; cCur += cv.cur;
+      if (cv.prev != null) cPrev += cv.prev; else cPrevOk = false;
+    }
   }
   return {
     total: tot, stores, cur, months: monthsMax,
     prev: prevOk ? prev : null,
     pct: (prevOk && prev) ? (cur / prev - 1) * 100 : null,
     momPct: (momOk && mom) ? (cur / mom - 1) * 100 : null,
+    covers: cOk ? cCur : null,
+    coversPct: (cOk && cPrevOk && cPrev) ? (cCur / cPrev - 1) * 100 : null,
   };
 }
 
@@ -680,6 +721,12 @@ function renderCampaigns() {
       const mom = sum.momPct != null
         ? `　<span class="${sum.momPct >= 0 ? "up" : "down"}">前月比 ${signed(sum.momPct)}%</span>` : "";
       effHtml = `<b>${man(sum.cur)}円</b>　${yoy}${mom}<span class="sub">（確定${sum.months}ヶ月・${sum.stores}店）</span>`;
+      // 集客（客数）。売上表示のときだけ、同期間の客数を前年比つきで添える
+      if (METRIC === "sales" && sum.covers != null) {
+        const cy = sum.coversPct != null
+          ? `<span class="${sum.coversPct >= 0 ? "up" : "down"}">前年比 ${signed(sum.coversPct)}%</span>` : "前年 ―";
+        effHtml += `<div class="ceff sub2">集客 <b>${nin(sum.covers)}</b>・${cy}</div>`;
+      }
     }
     const goalHtml = tgt != null
       ? `<span class="cgtag">目標 ${man(tgt)}円</span>` : "";
@@ -795,6 +842,18 @@ function renderStore(code) {
     if (typeof pv !== "number" || !pv) return null;
     return { pm, prev: pv, pct: (latest.v / pv - 1) * 100 };
   })();
+  // 集客（客数）。売上指標のときだけ出す（原価率などと並べても意味が薄いため）
+  const covKpi = (() => {
+    if (METRIC !== "sales") return "";
+    const cs = coversSummary(code);
+    if (!cs) return "";
+    const yc = cs.yoyPct != null
+      ? `<span class="${cs.yoyPct >= 0 ? "up" : "down"}">前年比 ${signed(cs.yoyPct)}%</span>`
+      : "前年比 ―";
+    return `<div class="kpi"><div class="lbl">集客（期間合計客数）</div>
+        <div class="big">${nin(cs.total)}</div>
+        <div class="delta">${yc}${cs.last ? `（直近 ${cs.last.m}）` : ""}</div></div>`;
+  })();
   const kpis = `
     <div class="kpis">
       <div class="kpi"><div class="lbl">期間合計（${METRIC_LABELS[METRIC]}）</div>
@@ -808,6 +867,7 @@ function renderStore(code) {
         <div class="big ${mom ? (mom.pct >= 0 ? "up" : "down") : ""}">${mom ? signed(mom.pct) + "%" : "―"}</div>
         <div class="delta">${mom ? `${man(mom.prev)} → ${man(latest.v)}` : "前月データなし"}</div></div>
       ${budKpi}
+      ${covKpi}
     </div>`;
 
   // この店の施策（config/schedule.yaml 由来）
@@ -872,6 +932,17 @@ function renderStore(code) {
           const mom = eff.momPct != null
             ? `・<span class="${eff.momPct >= 0 ? "up" : "down"}">前月比 ${signed(eff.momPct)}%</span>` : "";
           effHtml = `<div class="ceff">期間中の${METRIC_LABELS[METRIC]}（確定${eff.months}ヶ月）<b>${man(eff.cur)}円</b>・${cmp}${mom}</div>`;
+          // 集客（客数）の効果。売上表示のときだけ、同じ期間の客数を前年比・前月比で添える
+          if (METRIC === "sales") {
+            const cov = campCovers(code, c);
+            if (cov) {
+              const cy = cov.pct != null
+                ? `<span class="${cov.pct >= 0 ? "up" : "down"}">前年比 ${signed(cov.pct)}%</span>` : "前年 ―";
+              const cmom = cov.momPct != null
+                ? `・<span class="${cov.momPct >= 0 ? "up" : "down"}">前月比 ${signed(cov.momPct)}%</span>` : "";
+              effHtml += `<div class="ceff sub2">期間中の集客 <b>${nin(cov.cur)}</b>・${cy}${cmom}</div>`;
+            }
+          }
         } else if (st.k !== "soon" && METRIC !== "cost_rate") {
           effHtml = `<div class="ceff muted">確定した月の売上が出たら、前年同月比を表示します（月単位で集計）。</div>`;
         }

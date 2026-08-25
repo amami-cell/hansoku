@@ -17,6 +17,7 @@ from ..analytics import RATIO_METRICS, ratio
 from ..db.warehouse import AggregateQuery, Warehouse
 from ..model import (
     GRAIN_MONTH,
+    METRIC_COVERS,
     METRIC_DRINK_SALES,
     METRIC_DRINK_THEORY_COST,
     METRIC_FOOD_SALES,
@@ -238,6 +239,23 @@ def build(
         month = row["date"].strftime("%Y-%m")
         budget.setdefault(row["store_code"], {})[month] = round(row["value"])
 
+    # 客数（集客）。FW月別日別売上推移 由来。前年同月ぶんも入っているので、
+    # 施策期間の集客を前年比・前月比で見られる。指標選択には出さず別枠で持つ
+    # （客数は「人」で、円の指標と混ぜると書式が壊れるため）。
+    covers: dict[str, dict[str, int]] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_COVERS],
+            store_codes=master.active_codes,
+            group_by=("store_code", "date", "metric"),
+        )
+    ):
+        month = row["date"].strftime("%Y-%m")
+        covers.setdefault(row["store_code"], {})[month] = round(row["value"])
+
     # 原価率は行ごとに平均できないため、分子・分母を合計してから割る
     cost_rates: dict[str, dict[str, float]] = {}
     for month in sorted(months):
@@ -289,6 +307,8 @@ def build(
         "cost_rate": cost_rates,
         # 店舗の月次売上予算（FW月別予算登録）。まだ取り込み前は空。
         "budget": budget,
+        # 店舗の月次客数（FW月別日別売上推移）。集客の前年比・前月比に使う。空でも可。
+        "covers": covers,
         # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
         "campaigns": campaigns or [],
         # 制作物ギャラリー（config/creatives.yaml 由来）。空でも画面は成立する。
