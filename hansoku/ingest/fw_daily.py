@@ -586,6 +586,35 @@ def _open_abc(session) -> None:
     _open_menu(session, ABC_MENU)
 
 
+# ABC分析の期間は「日付プリセット」コンボ（datefield-combo）が駆動する。
+# 値: 0前日 1先週 2今週 3直近7日 4直近30日 5月初から今日 6先月。
+_ABC_PRESET_LASTMONTH = "6"  # 先月
+
+
+def _select_date_preset(session, value: str) -> bool:
+    """ABC分析の日付プリセット（datefield-combo）で value を選ぶ。"""
+    page = session.page
+    page.evaluate(
+        """() => {
+        const w = document.querySelector('app-combobox.datefield-combo');
+        const btn = w && w.querySelector('.dropdown-btn');
+        if (btn) btn.click();
+    }"""
+    )
+    time.sleep(0.4)
+    ok = page.evaluate(
+        """(v) => {
+        const w = document.querySelector('app-combobox.datefield-combo');
+        const li = w && w.querySelector(`li.option[value="${v}"]`);
+        if (li) { li.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true})); return true; }
+        return false;
+    }""",
+        value,
+    )
+    time.sleep(0.4)
+    return bool(ok)
+
+
 def _extract_product_grid(session) -> list[dict]:
     """ABC分析のグリッドを視覚行に復元し、商品行だけ返す。
 
@@ -671,7 +700,11 @@ def ingest_abc(
     with fw_session(artifacts) as session:
         _open_abc(session)
         print(f"[ABC] 全店ぶんを取り込む / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
+        # ABCは日付プリセットが駆動する。「先月」を選ぶ（既定の対象月＝前月と一致）。
+        # 併せて from/to も入れておく（プリセットが効かない環境の保険）。
+        preset_ok = _select_date_preset(session, _ABC_PRESET_LASTMONTH)
         _set_date_range(session, d_from, d_to)
+        print(f"[ABC] 日付プリセット『先月』選択: {preset_ok}")
         _click_search(session)
         time.sleep(1.5)
         products = _extract_product_grid(session)
