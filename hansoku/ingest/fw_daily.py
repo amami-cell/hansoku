@@ -668,28 +668,38 @@ def ingest_abc(
         options = _combo_options(session)
         print(f"[ABC] 店舗コンボボックス {len(options)}件 / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
         if len(options) < 20:
-            # 店舗コンボが少ない＝別セレクタの可能性。実体を診断出力する。
-            print(f"[ABC] 候補（診断）: {[(o['value'], o['name'][:14]) for o in options[:12]]}")
+            # 店舗コンボが少ない＝別セレクタ。app-combobox 群を、近傍ラベルつきで、
+            # dropdown-btn を開いてから option 数を数えて診断する。店舗コンボを特定する。
             combos = session.page.evaluate(
                 r"""() => {
+                const clip = s => (s || '').replace(/\s+/g,' ').trim();
                 const out = [];
-                for (const w of document.querySelectorAll(
-                        'store-combo-box, app-combobox, .combobox, ng-select, select')) {
-                    if (!w.offsetParent && w.tagName !== 'SELECT') continue;
-                    const opts = w.querySelectorAll('li.option, option, .ng-option');
-                    out.push({
-                        tag: w.tagName.toLowerCase(),
-                        cls: (w.className || '').toString().slice(0, 40),
-                        opts: opts.length,
-                        sample: [...opts].slice(0, 3).map(o =>
-                            (o.getAttribute && o.getAttribute('title')) || o.textContent.trim().slice(0, 12)),
-                    });
+                for (const w of document.querySelectorAll('app-combobox, store-combo-box')) {
+                    // 近傍ラベル（親を数階層さかのぼって最初のテキスト葉）
+                    let node = w, label = '';
+                    for (let i=0;i<5 && node;i++){ node = node.parentElement; if(!node) break;
+                        const leaf=[...node.querySelectorAll('*')].find(e=>!e.children.length
+                            && clip(e.innerText) && e.tagName!=='INPUT' && e.tagName!=='BUTTON');
+                        if(leaf){label=clip(leaf.innerText).slice(0,16);break;} }
+                    const btn = w.querySelector('.dropdown-btn');
+                    if (btn) btn.click();
+                    const opts = w.querySelectorAll('li.option');
+                    out.push({ cls:(w.className||'').toString().slice(0,44), label,
+                        opts:opts.length,
+                        sample:[...opts].slice(0,3).map(o=>(o.getAttribute('title')||o.textContent||'').trim().slice(0,12)),
+                        val: (w.querySelector('input.form-control')||{}).value || '' });
                 }
                 return out;
             }"""
             )
-            print(f"[ABC] コンボ系要素（診断）: {combos}")
-            session.dump_clickables("abc_selector")
+            print(f"[ABC] app-combobox 群（開いて診断）:")
+            for c in combos:
+                print(f"    label='{c['label']}' val='{c['val']}' opts={c['opts']} cls={c['cls']} sample={c['sample']}")
+            # 開いた後にもう一度 li.option を全部数える（店舗が現れたか）
+            after = session.page.evaluate(
+                "() => [...document.querySelectorAll('li.option')].length"
+            )
+            print(f"[ABC] 開閉後の li.option 総数: {after}")
         targets = []
         for opt in options:
             code = opt["value"].lstrip("0")
