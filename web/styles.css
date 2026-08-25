@@ -331,6 +331,16 @@ tbody tr:last-child td{border-bottom:0;}
 .ceff .up{color:var(--good-ink);font-weight:600;} .ceff .down{color:var(--critical-ink);font-weight:600;}
 .ceff .sub,.ceff .muted{color:var(--ink-3);font-weight:400;}
 .ceff .sub{margin-left:4px;}
+
+/* 時間帯別 売上棒グラフ */
+.hbars{display:flex;align-items:flex-end;gap:4px;height:160px;padding:4px 2px 0;overflow-x:auto;}
+.hbar{flex:1 1 0;min-width:16px;display:flex;flex-direction:column;align-items:center;height:100%;}
+.hcol{flex:1;width:100%;display:flex;align-items:flex-end;}
+.hfill{width:100%;background:var(--accent);border-radius:3px 3px 0 0;opacity:.55;transition:opacity .15s;}
+.hbar:hover .hfill{opacity:.9;}
+.hbar.peak .hfill{background:var(--good-ink,var(--accent));opacity:.95;}
+.hlbl{margin-top:4px;font-size:10px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+.hbar.peak .hlbl{color:var(--ink);font-weight:700;}
 .cgtag{font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);
   border:1px solid var(--accent-line);border-radius:4px;padding:1px 7px;line-height:1.6;}
 .fbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:14px;}

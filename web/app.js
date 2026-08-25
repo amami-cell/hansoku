@@ -995,8 +995,40 @@ function renderStore(code) {
       <div class="bhead"><h2>売上推移</h2><span class="bnote">${METRIC_LABELS[METRIC]}</span></div>
       ${own}
     </section>
+    ${renderHourly(code)}
     ${neighBlock}
   `;
+}
+
+// 時間帯別 売上・集客（FW時間帯別売上）。棒＝売上、ピーク時間帯を強調。
+// 時間帯別販促（ランチ強化・アイドルタイム対策など）の検討材料。
+function renderHourly(code) {
+  const per = (DATA.hourly || {})[code];
+  if (!per) return "";
+  const hours = Object.keys(per).map(Number).sort((a, b) => a - b);
+  if (!hours.length) return "";
+  const salesAt = h => (per[String(h)] || {}).sales || 0;
+  const coversAt = h => (per[String(h)] || {}).covers || 0;
+  const max = Math.max(1, ...hours.map(salesAt));
+  const peak = hours.reduce((p, h) => (salesAt(h) > salesAt(p) ? h : p), hours[0]);
+  const totSales = hours.reduce((a, h) => a + salesAt(h), 0);
+  const bars = hours.map(h => {
+    const s = salesAt(h), c = coversAt(h);
+    const pct = Math.max(2, Math.round(s / max * 100));
+    return `<div class="hbar${h === peak ? " peak" : ""}" title="${h}時台　売上 ${yen(s)}・客数 ${c}人">
+      <div class="hcol"><div class="hfill" style="height:${pct}%"></div></div>
+      <div class="hlbl">${h}</div></div>`;
+  }).join("");
+  const monthLbl = DATA.hourly_month ? `（${DATA.hourly_month}）` : "";
+  return `
+    <section class="block">
+      <div class="bhead"><h2>時間帯別 売上・集客</h2>
+        <span class="bnote">1時間ごとの売上${monthLbl}　ピーク ${peak}時台　棒にカーソルで客数</span></div>
+      <div class="panel">
+        <div class="hbars">${bars}</div>
+        <figcaption>合計 ${man(totSales)}円／日中の山とアイドルタイムを見て、時間帯別の販促を検討できます。</figcaption>
+      </div>
+    </section>`;
 }
 
 // ── 集約ページ（実施中の施策サマリ ＋ エリア別売上表）─────────────────────

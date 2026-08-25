@@ -16,6 +16,7 @@ import yaml
 from ..analytics import RATIO_METRICS, ratio
 from ..db.warehouse import AggregateQuery, Warehouse
 from ..model import (
+    GRAIN_HOUR,
     GRAIN_MONTH,
     METRIC_COVERS,
     METRIC_DRINK_SALES,
@@ -256,6 +257,37 @@ def build(
         month = row["date"].strftime("%Y-%m")
         covers.setdefault(row["store_code"], {})[month] = round(row["value"])
 
+    # 時間帯別の売上・客数（FW時間帯別売上）。取り込んだ月ぶんを時間帯で束ねる。
+    # 時間帯別販促のピーク把握に使う。取り込み前は空。
+    hourly: dict[str, dict[str, dict[str, int]]] = {}
+    hourly_month: str | None = None
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_HOUR,
+            metrics=[METRIC_SALES, METRIC_COVERS],
+            store_codes=master.active_codes,
+            group_by=("store_code", "hour", "metric"),
+        )
+    ):
+        h = str(int(row["hour"]))
+        hourly.setdefault(row["store_code"], {}).setdefault(h, {})[row["metric"]] = round(
+            row["value"]
+        )
+    # 代表月（何月ぶんの時間帯プロファイルか）をラベル用に1つ拾う
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_HOUR,
+            metrics=[METRIC_SALES],
+            store_codes=master.active_codes,
+            group_by=("date",),
+        )
+    ):
+        hourly_month = row["date"].strftime("%Y-%m")
+
     # 原価率は行ごとに平均できないため、分子・分母を合計してから割る
     cost_rates: dict[str, dict[str, float]] = {}
     for month in sorted(months):
@@ -309,6 +341,9 @@ def build(
         "budget": budget,
         # 店舗の月次客数（FW月別日別売上推移）。集客の前年比・前月比に使う。空でも可。
         "covers": covers,
+        # 店舗の時間帯別 売上・客数（FW時間帯別売上）。時間帯別販促の検討に使う。
+        "hourly": hourly,
+        "hourly_month": hourly_month,
         # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
         "campaigns": campaigns or [],
         # 制作物ギャラリー（config/creatives.yaml 由来）。空でも画面は成立する。

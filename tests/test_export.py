@@ -66,6 +66,29 @@ def test_客数がcoversに焼かれる(loaded, master):
     assert payload["covers"].get(code, {}).get("2025-06") == 1234
 
 
+def test_時間帯別がhourlyに焼かれる(loaded, master):
+    """FW時間帯別売上で取り込む時間帯×売上・客数が hourly に出る。"""
+    from datetime import datetime, timezone
+
+    from hansoku.model import GRAIN_HOUR, KIND_FINAL, METRIC_COVERS, METRIC_SALES, ActualRow
+
+    code = master.active_codes[0]
+    now = datetime.now(timezone.utc)
+    loaded.replace_actuals(
+        [
+            ActualRow(store_code=code, date=date(2026, 7, 1), grain=GRAIN_HOUR,
+                      metric=METRIC_SALES, value=942288.0, hour=12, kind=KIND_FINAL,
+                      source="fw_hourly", ingested_at=now),
+            ActualRow(store_code=code, date=date(2026, 7, 1), grain=GRAIN_HOUR,
+                      metric=METRIC_COVERS, value=389.0, hour=12, kind=KIND_FINAL,
+                      source="fw_hourly", ingested_at=now),
+        ]
+    )
+    payload = build(loaded, master, date_from=date(2025, 1, 1), date_to=date(2026, 12, 31))
+    assert payload["hourly_month"] == "2026-07"
+    assert payload["hourly"].get(code, {}).get("12") == {"sales": 942288, "covers": 389}
+
+
 def test_生成時刻が入る(payload):
     assert payload["generated_at"]
 
