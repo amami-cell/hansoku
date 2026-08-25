@@ -202,7 +202,20 @@ function campEffect(code, c) {
     if (typeof b === "number") prev += b; else prevOk = false;
   }
   if (!months) return null;
-  return { months, cur, prev: prevOk ? prev : null, pct: (prevOk && prev) ? (cur / prev - 1) * 100 : null };
+  // 前月比：施策開始の直前・同じ月数ぶんの売上と比べる（季節性は前年比で見る前提の補助）
+  let momPrev = 0, momOk = true, m = sM;
+  for (let k = 0; k < months; k++) {
+    m = addMonth(m, -1);
+    const a = valueAt(code, m);
+    if (typeof a === "number") momPrev += a; else momOk = false;
+  }
+  return {
+    months, cur,
+    prev: prevOk ? prev : null,
+    pct: (prevOk && prev) ? (cur / prev - 1) * 100 : null,
+    momPrev: momOk ? momPrev : null,
+    momPct: (momOk && momPrev) ? (cur / momPrev - 1) * 100 : null,
+  };
 }
 
 // ── 起動 ─────────────────────────────────────────────────────────────────
@@ -616,6 +629,7 @@ function renderList() {
 // 1施策を、対象店それぞれの campEffect（確定月のみ）で合算する。
 function campaignSummary(c) {
   let cur = 0, prev = 0, prevOk = true, stores = 0, monthsMax = 0, tot = 0;
+  let mom = 0, momOk = true;
   for (const code of c.stores) {
     if (!hasData(code)) continue;
     tot += 1;
@@ -623,11 +637,13 @@ function campaignSummary(c) {
     if (!e) continue;
     stores += 1; cur += e.cur; monthsMax = Math.max(monthsMax, e.months);
     if (e.prev != null) prev += e.prev; else prevOk = false;
+    if (e.momPrev != null) mom += e.momPrev; else momOk = false;
   }
   return {
     total: tot, stores, cur, months: monthsMax,
     prev: prevOk ? prev : null,
     pct: (prevOk && prev) ? (cur / prev - 1) * 100 : null,
+    momPct: (momOk && mom) ? (cur / mom - 1) * 100 : null,
   };
 }
 
@@ -661,7 +677,9 @@ function renderCampaigns() {
       const yoy = sum.pct != null
         ? `<span class="${sum.pct >= 0 ? "up" : "down"}">前年比 ${signed(sum.pct)}%</span>`
         : `<span class="muted">前年比 ―</span>`;
-      effHtml = `<b>${man(sum.cur)}円</b>　${yoy}<span class="sub">（確定${sum.months}ヶ月・${sum.stores}店）</span>`;
+      const mom = sum.momPct != null
+        ? `　<span class="${sum.momPct >= 0 ? "up" : "down"}">前月比 ${signed(sum.momPct)}%</span>` : "";
+      effHtml = `<b>${man(sum.cur)}円</b>　${yoy}${mom}<span class="sub">（確定${sum.months}ヶ月・${sum.stores}店）</span>`;
     }
     const goalHtml = tgt != null
       ? `<span class="cgtag">目標 ${man(tgt)}円</span>` : "";
@@ -769,6 +787,14 @@ function renderStore(code) {
         <div class="big ${rate >= 100 ? "up" : "down"}">${rate.toFixed(0)}%</div>
         <div class="delta">予算 ${man(b)} → 実績 ${man(latest.v)}</div></div>`;
   })();
+  // 前月比（直近確定月とその前月を比べる）
+  const mom = (() => {
+    if (isRatio || !latest) return null;
+    const pm = addMonth(latest.m, -1);
+    const pv = valueAt(code, pm);
+    if (typeof pv !== "number" || !pv) return null;
+    return { pm, prev: pv, pct: (latest.v / pv - 1) * 100 };
+  })();
   const kpis = `
     <div class="kpis">
       <div class="kpi"><div class="lbl">期間合計（${METRIC_LABELS[METRIC]}）</div>
@@ -778,6 +804,9 @@ function renderStore(code) {
       <div class="kpi"><div class="lbl">前年同月比</div>
         <div class="big ${y ? (y.pct >= 0 ? "up" : "down") : ""}">${y ? signed(y.pct) + "%" : "―"}</div>
         <div class="delta">${y ? `${man(y.prev)} → ${man(y.cur)}` : "前年データなし"}</div></div>
+      <div class="kpi"><div class="lbl">前月比</div>
+        <div class="big ${mom ? (mom.pct >= 0 ? "up" : "down") : ""}">${mom ? signed(mom.pct) + "%" : "―"}</div>
+        <div class="delta">${mom ? `${man(mom.prev)} → ${man(latest.v)}` : "前月データなし"}</div></div>
       ${budKpi}
     </div>`;
 
@@ -840,7 +869,9 @@ function renderStore(code) {
           const cmp = eff.pct != null
             ? `<span class="${eff.pct >= 0 ? "up" : "down"}">前年比 ${signed(eff.pct)}%</span>（前年 ${man(eff.prev)}円）`
             : "前年データなし";
-          effHtml = `<div class="ceff">期間中の${METRIC_LABELS[METRIC]}（確定${eff.months}ヶ月）<b>${man(eff.cur)}円</b>・${cmp}</div>`;
+          const mom = eff.momPct != null
+            ? `・<span class="${eff.momPct >= 0 ? "up" : "down"}">前月比 ${signed(eff.momPct)}%</span>` : "";
+          effHtml = `<div class="ceff">期間中の${METRIC_LABELS[METRIC]}（確定${eff.months}ヶ月）<b>${man(eff.cur)}円</b>・${cmp}${mom}</div>`;
         } else if (st.k !== "soon" && METRIC !== "cost_rate") {
           effHtml = `<div class="ceff muted">確定した月の売上が出たら、前年同月比を表示します（月単位で集計）。</div>`;
         }
