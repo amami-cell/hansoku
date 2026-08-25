@@ -713,7 +713,32 @@ def ingest_abc(
             print("   ", " | ".join(cells[:14]))
         if not products:
             session.snapshot("noabc_group")
-            print("[ABC] 商品グリッドが読めませんでした")
+            print("[ABC] 全店ではデータなし。『店舗選択』トグルを試す。")
+            # 「店舗選択」を押すと店舗コンボが有効化されるはず。押して選択肢を読む。
+            session.click_text("店舗選択", wait=1.5)
+            opts2 = session.page.evaluate(
+                r"""() => {
+                const out = [];
+                for (const li of document.querySelectorAll('li.option')) {
+                    const v=(li.getAttribute('value')||'').trim();
+                    const t=(li.getAttribute('title')||li.textContent||'').trim();
+                    if (v) out.push([v, t.slice(0,14)]);
+                }
+                return out;
+            }"""
+            )
+            print(f"[ABC] 店舗選択後の li.option {len(opts2)}件: {opts2[:14]}")
+            # 店舗コンボ（store-combo-box / app-combobox）のドロップダウンを開いて再読
+            session.page.evaluate(
+                """() => {
+                for (const b of document.querySelectorAll('store-combo-box .dropdown-btn, .combobox .dropdown-btn')) b.click();
+            }"""
+            )
+            time.sleep(0.8)
+            opts3 = session.page.evaluate(
+                "() => [...document.querySelectorAll('li.option')].map(li=>[(li.getAttribute('value')||'').trim(),(li.getAttribute('title')||li.textContent||'').trim().slice(0,14)]).filter(x=>x[0])"
+            )
+            print(f"[ABC] 開後の li.option {len(opts3)}件: {opts3[:14]}")
         else:
             products.sort(
                 key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
