@@ -712,51 +712,13 @@ def ingest_abc(
         for cells in _visual_rows(session)[:14]:
             print("   ", " | ".join(cells[:14]))
         if not products:
-            # 天の確認: 「店舗選択」を押すと【別ウィンドウ】が開いて店を選ぶ。
-            # だから同一ページのDOMには店一覧が無かった。新ウィンドウを捕まえて中身を出す。
-            print("[ABC] 全店データなし。『店舗選択』で開く別ウィンドウを捕まえて調べる。")
-            ctx = session.page.context
-            popup = None
-            try:
-                with ctx.expect_page(timeout=9000) as pinfo:
-                    session.click_text("店舗選択", wait=0.5)
-                popup = pinfo.value
-                popup.wait_for_load_state("domcontentloaded")
-                time.sleep(1.2)
-            except Exception as exc:  # noqa: BLE001
-                print(f"[ABC] 別ウィンドウを捕まえられず: {exc}")
-            if popup is not None:
-                print(f"[ABC] 別ウィンドウ URL: {popup.url}")
-                try:
-                    popup.screenshot(path=str(artifacts / "abc_popup.png"), full_page=True)
-                except Exception:
-                    pass
-                dump = popup.evaluate(
-                    r"""() => {
-                    const clip=s=>(s||'').replace(/\s+/g,' ').trim();
-                    const opt=[...document.querySelectorAll('li.option')].map(
-                      li=>[(li.getAttribute('value')||'').trim(),(li.getAttribute('title')||li.textContent||'').trim().slice(0,16)]).filter(x=>x[0]);
-                    const trs=[...document.querySelectorAll('tr')].slice(0,10).map(
-                      tr=>clip(tr.innerText).slice(0,40)).filter(Boolean);
-                    const btns=[...document.querySelectorAll('button,input[type=button],input[type=submit],a')]
-                      .filter(b=>b.offsetParent).map(b=>clip(b.innerText)||clip(b.value)).filter(t=>t&&t.length<16).slice(0,16);
-                    const stores=[];
-                    for(const el of document.querySelectorAll('td,li,a,span,option,div')){
-                      if(!el.offsetParent||el.children.length>1) continue;
-                      const t=clip(el.innerText);
-                      if(t&&t.length<22&&/店|すさび|ぎふや|Largo|GOLD|たぬき|んだんだ|横綱|朝日|串|喰人|京橋|もんじゃ|酔々|八銭|味の/.test(t)) stores.push(t);
-                    }
-                    return {opt, trs, btns, stores:[...new Set(stores)].slice(0,24),
-                      tables:document.querySelectorAll('table').length,
-                      selects:document.querySelectorAll('select').length,
-                      title:clip(document.title)};
-                }"""
-                )
-                print(f"[ABC] 別窓 title={dump['title']} table={dump['tables']} select={dump['selects']}")
-                print(f"[ABC] 別窓 li.option {len(dump['opt'])}件: {dump['opt'][:16]}")
-                print(f"[ABC] 別窓 tr（先頭10）: {dump['trs']}")
-                print(f"[ABC] 別窓 ボタン: {dump['btns']}")
-                print(f"[ABC] 別窓 店名らしい要素: {dump['stores']}")
+            # FWのABC分析は「全店」だと商品行が出ない。商品ABCは「店舗選択」で特定店を
+            # 選ぶ必要があり、それは別ウィンドウ／オーバーレイで開く。他画面と全く別実装で、
+            # プログラム的クリックでは開けず（Playwrightのpageイベントも発火しない）、
+            # 画面を目視しないと選び方を確定できない。天のスクショ待ちで保留。0件で無害。
+            # ダウンストリーム（parser/export/UI）は実装済み。ピッカー攻略で即データが入る。
+            session.snapshot("noabc_group")
+            print("[ABC] 全店ではデータなし（商品ABCは店舗選択が要る）。ピッカー未攻略のため保留。")
         else:
             products.sort(
                 key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
