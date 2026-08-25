@@ -695,11 +695,33 @@ def ingest_abc(
             print(f"[ABC] app-combobox 群（開いて診断）:")
             for c in combos:
                 print(f"    label='{c['label']}' val='{c['val']}' opts={c['opts']} cls={c['cls']} sample={c['sample']}")
-            # 開いた後にもう一度 li.option を全部数える（店舗が現れたか）
-            after = session.page.evaluate(
-                "() => [...document.querySelectorAll('li.option')].length"
+            # 画面上の可視な入力欄を、近傍ラベル・プレースホルダつきで全部出す。
+            # 店舗の選択欄がどんな要素か（input/combobox/…）を特定するため。
+            fields = session.page.evaluate(
+                r"""() => {
+                const clip = s => (s || '').replace(/\s+/g,' ').trim();
+                const out = [];
+                for (const el of document.querySelectorAll('input, select, [class*="combo"], [class*="select"]')) {
+                    if (!el.offsetParent) continue;
+                    let node = el, label = '';
+                    for (let i=0;i<5 && node;i++){ node=node.parentElement; if(!node) break;
+                        const leaf=[...node.querySelectorAll('*')].find(e=>!e.children.length
+                            && clip(e.innerText) && e.tagName!=='INPUT' && e.tagName!=='BUTTON'
+                            && e.tagName!=='OPTION');
+                        if(leaf){label=clip(leaf.innerText).slice(0,18);break;} }
+                    out.push({ tag:el.tagName.toLowerCase(), label,
+                        ph: el.getAttribute && (el.getAttribute('placeholder')||''),
+                        val:(el.value||'').slice(0,18), cls:(el.className||'').toString().slice(0,36) });
+                }
+                // 重複を軽く畳む
+                const seen=new Set(), uniq=[];
+                for(const f of out){ const k=f.tag+'|'+f.label+'|'+f.cls; if(seen.has(k))continue; seen.add(k); uniq.push(f);}
+                return uniq.slice(0,24);
+            }"""
             )
-            print(f"[ABC] 開閉後の li.option 総数: {after}")
+            print(f"[ABC] 可視な入力欄/セレクタ（診断）:")
+            for f in fields:
+                print(f"    <{f['tag']}> label='{f['label']}' ph='{f['ph']}' val='{f['val']}' cls={f['cls']}")
         targets = []
         for opt in options:
             code = opt["value"].lstrip("0")
