@@ -246,7 +246,7 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
     if args.mode == "probe":
         return probe(Path(args.artifacts))
     if args.mode == "report":
-        return report_probe(Path(args.artifacts), args.menu or "年間損益計算書")
+        return report_probe(Path(args.artifacts), args.menu or "損益管理,実績管理業務,月別日別実績")
     raise SystemExit(f"未知のモード: {args.mode}")
 
 

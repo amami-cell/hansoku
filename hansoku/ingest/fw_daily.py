@@ -52,12 +52,15 @@ def _open_menu(session, labels) -> None:
         session.snapshot(f"opened_{label}")
 
 
-def report_probe(artifacts: Path, last_label: str) -> int:
-    """損益管理→実績管理業務→<last_label> を開き、店舗を選び検索してグリッド構造を
-    吸い出す。月次の客数・客単価がどの帳票にあるかを特定するための診断。"""
-    menu = ("損益管理", "実績管理業務", last_label)
+def report_probe(artifacts: Path, path_str: str) -> int:
+    """カンマ区切りのメニューパスを順にクリックして開き、店舗を選び検索して
+    グリッド構造を吸い出す。日別売上/客数がどの画面にあるかを特定する診断。
+    例: "損益管理,実績管理業務,月別日別実績"
+    """
+    labels = [s.strip() for s in path_str.split(",") if s.strip()]
+    last_label = labels[-1] if labels else path_str
     with fw_session(artifacts) as session:
-        _open_menu(session, menu)
+        _open_menu(session, labels)
         items = session.dump_clickables("report_screen")
         print(f"[report] 「{last_label}」の操作要素 {len(items)}件")
         options = _combo_options(session)
