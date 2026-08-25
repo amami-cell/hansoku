@@ -5,12 +5,15 @@
 """
 from hansoku.ingest import fw_daily
 from hansoku.ingest.fw_daily import (
+    _ABC_QTY,
+    _ABC_SALES,
     _HOUR_COVERS,
     _HOUR_SALES,
     _INT_COVERS,
     _INT_SALES,
     _extract_hour_grid,
     _extract_month_grid,
+    _extract_product_grid,
 )
 
 
@@ -59,3 +62,24 @@ def test_月次グリッドから売上と客数を拾う(monkeypatch):
     assert m["period"] == "2025-09"
     assert m["ints"][_INT_SALES] == 23209138      # 実績
     assert m["ints"][_INT_COVERS] == 12224         # 客数
+
+
+def test_ABC分析から商品名と売上とランクを拾う(monkeypatch):
+    # FW「ABC分析」の想定行（商品CD 商品名 販売単価 原価 原価率 販売数量 売上金額 …ランク）
+    rows = [
+        ["商品CD", "商品名", "販売単価", "原価", "原価率", "販売数量", "売上金額",
+         "原価金額", "粗利金額", "売上構成比", "累計構成比", "粗利貢献率", "ランク"],
+        ["1001", "生ビール中", "550", "180", "32.7%", "1,240", "682,000",
+         "223,200", "458,800", "5.20%", "5.20%", "6.10%", "A"],
+        ["2050", "本日のおすすめ刺盛", "1,280", "520", "40.6%", "310", "396,800",
+         "161,200", "235,600", "3.02%", "8.22%", "3.10%", "A"],
+        ["合計", "", "", "", "", "", "13,120,000"],
+    ]
+    monkeypatch.setattr(fw_daily, "_visual_rows", lambda _s: rows)
+    grid = _extract_product_grid(_FakeSession())
+
+    assert [p["name"] for p in grid] == ["生ビール中", "本日のおすすめ刺盛"]
+    p0 = grid[0]
+    assert p0["ints"][_ABC_QTY] == 1240       # 販売数量
+    assert p0["ints"][_ABC_SALES] == 682000   # 売上金額
+    assert p0["rank"] == "A"

@@ -241,7 +241,13 @@ def cmd_fw_budget(args: argparse.Namespace) -> int:
 
 
 def cmd_fw_daily(args: argparse.Namespace) -> int:
-    from .ingest.fw_daily import ingest_hourly, ingest_monthly, probe, report_probe
+    from .ingest.fw_daily import (
+        ingest_abc,
+        ingest_hourly,
+        ingest_monthly,
+        probe,
+        report_probe,
+    )
 
     if args.mode == "probe":
         return probe(Path(args.artifacts))
@@ -269,6 +275,18 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 month=args.month,
                 store_limit=args.limit,
                 dry_run=(args.mode == "hourly-dry" or args.dry_run),
+            )
+    if args.mode in ("abc", "abc-dry"):
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return ingest_abc(
+                warehouse,
+                master,
+                artifacts=Path(args.artifacts),
+                month=args.month,
+                store_limit=args.limit,
+                dry_run=(args.mode == "abc-dry" or args.dry_run),
             )
     raise SystemExit(f"未知のモード: {args.mode}")
 
@@ -499,8 +517,9 @@ def build_parser() -> argparse.ArgumentParser:
     fwdaily.add_argument(
         "--mode",
         default="probe",
-        choices=["probe", "ingest", "report", "monthly", "monthly-dry", "hourly", "hourly-dry"],
-        help="動作（monthly=月別日別売上推移、hourly=時間帯別売上から取り込む）",
+        choices=["probe", "ingest", "report", "monthly", "monthly-dry",
+                 "hourly", "hourly-dry", "abc", "abc-dry"],
+        help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument("--month", default=None, help="hourly の対象月（YYYY-MM、既定は前月）")
     fwdaily.add_argument("--menu", default=None, help="report モードで開く帳票名")

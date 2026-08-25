@@ -565,6 +565,177 @@ def ingest_hourly(
     return 0
 
 
+# ── ABC分析（販売管理→店舗業務）からの商品別売上取り込み ──────────────────
+#
+# 画面（URL 末尾 abc…）は EJS TreeGrid で、選んだ期間を商品別に集計する。
+# 列: 商品CD 商品名 販売単価 原価 原価率 販売数量 売上金額 原価金額 粗利金額
+#     売上構成比 累計構成比 粗利貢献率 ランク(A/B/C)。時間帯別と同じく日付レンジ駆動。
+# 商品名（最初の非数字セル）を起点に、続く整数列 [販売単価,原価,販売数量,売上金額,…]
+# から 販売数量=ints[2], 売上金額=ints[3] を拾う。行末の A/B/C をランクとする。
+# おすすめ料理・売れ筋の把握に使う。全商品は多いので売上上位だけ取り込む。
+ABC_MENU = ("販売管理", "店舗業務", "ABC分析")
+
+_ABC_QTY = 2  # 商品名の後ろの整数列での販売数量位置
+_ABC_SALES = 3  # 同・売上金額位置
+_ABC_TOP_N = 30  # 1店あたり取り込む売上上位の商品数
+
+
+def _open_abc(session) -> None:
+    _open_menu(session, ABC_MENU)
+
+
+def _extract_product_grid(session) -> list[dict]:
+    """ABC分析のグリッドを視覚行に復元し、商品行だけ返す。
+
+    各要素は {"name": 商品名, "rank": "A"/"B"/"C"/None, "ints": [名前より後ろの整数]}。
+    商品名（先頭の非数字・非ランクの文字セル）を起点にし、続く整数が4つ以上ある行を採る。
+    見出し・合計・データなしは自然に除外される。
+    """
+    rank_re = re.compile(r"^[ABC]$")
+    result: list[dict] = []
+    seen: set[str] = set()
+    for cells in _visual_rows(session):
+        name_idx = None
+        for i, c in enumerate(cells):
+            s = c.strip()
+            if not s:
+                continue
+            if _INT_RE.match(s):  # 数字（商品CD・値）はスキップ
+                continue
+            if rank_re.match(s):  # 単独の A/B/C はランク
+                continue
+            if len(s) >= 2:  # 商品名らしい文字列
+                name_idx = i
+                break
+        if name_idx is None:
+            continue
+        name = cells[name_idx].strip()
+        if name in seen or name in ("商品名",):
+            continue
+        ints = _row_ints(cells[name_idx + 1:])
+        if len(ints) < 4:
+            continue
+        rank = None
+        for c in reversed(cells):
+            if rank_re.match(c.strip()):
+                rank = c.strip()
+                break
+        seen.add(name)
+        result.append({"name": name, "rank": rank, "ints": ints})
+    return result
+
+
+def ingest_abc(
+    warehouse,
+    master,
+    *,
+    artifacts: Path,
+    month: str | None = None,
+    store_limit: int | None = None,
+    top_n: int = _ABC_TOP_N,
+    dry_run: bool = False,
+) -> int:
+    """ABC分析から各店の商品別売上（上位）を取り込む（対象月の集計）。
+
+    対象月（既定は前月）の1日〜末日を日付レンジに入れて検索し、売上上位の商品を
+    metric=product_sales / grain=month（その月の1日）で焼く。ランクは product_category に持つ。
+    """
+    from datetime import date as _date
+    from datetime import datetime, timezone
+
+    from ..model import (
+        GRAIN_MONTH,
+        KIND_FINAL,
+        METRIC_PRODUCT_SALES,
+        ActualRow,
+    )
+    from .fw_budget import _click_search, _combo_options, _select_combo
+
+    if not month:
+        today = datetime.now(timezone.utc)
+        y, m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+        month = f"{y}-{m:02d}"
+    d_from, d_to = _month_bounds(month)
+    rep_date = _date(int(month[:4]), int(month[5:7]), 1)
+
+    source = "fw_abc"
+    ingested_at = datetime.now(timezone.utc)
+    active_by_code = {s.store_code: s for s in master.active}
+    collected: list[ActualRow] = []
+
+    with fw_session(artifacts) as session:
+        _open_abc(session)
+        options = _combo_options(session)
+        print(f"[ABC] 店舗コンボボックス {len(options)}件 / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
+        targets = []
+        for opt in options:
+            code = opt["value"].lstrip("0")
+            store = active_by_code.get(code) or master.find_by_name(opt["name"])
+            if store and store.active:
+                targets.append((opt["value"], store))
+        print(f"[ABC] マスタと一致した稼働店 {len(targets)}件")
+        if store_limit:
+            targets = targets[:store_limit]
+
+        for ti, (value, store) in enumerate(targets):
+            name = store.store_name
+            if not _select_combo(session, value):
+                print(f"[ABC] 店舗選択に失敗: {name} ({value})")
+                continue
+            if not _set_date_range(session, d_from, d_to):
+                print(f"[ABC] 日付レンジ設定に失敗: {name}")
+            _click_search(session)
+            time.sleep(1.2)
+            products = _extract_product_grid(session)
+            if ti == 0:
+                print("[ABC] 先頭店の視覚行（先頭14行・診断用）:")
+                for cells in _visual_rows(session)[:14]:
+                    print("   ", " | ".join(cells[:14]))
+            if not products:
+                session.snapshot(f"noabc_{store.store_code}")
+                print(f"  {store.store_code} {name[:14]} 商品グリッドが読めませんでした")
+                continue
+            # 売上上位だけに絞る（画面はランク順だが念のため売上で並べ直す）
+            products.sort(key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0, reverse=True)
+            n_before = len(collected)
+            for prod in products[:top_n]:
+                ints = prod["ints"]
+                if len(ints) <= _ABC_SALES:
+                    continue
+                sales = ints[_ABC_SALES]
+                if sales <= 0:
+                    continue
+                collected.append(
+                    ActualRow(
+                        store_code=store.store_code,
+                        date=rep_date,
+                        grain=GRAIN_MONTH,
+                        metric=METRIC_PRODUCT_SALES,
+                        value=float(sales),
+                        product_name=prod["name"][:80],
+                        product_category=prod["rank"],
+                        kind=KIND_FINAL,
+                        source=source,
+                        ingested_at=ingested_at,
+                    )
+                )
+            top = products[0]
+            print(
+                f"  {store.store_code} {name[:14]} {len(products)}品 "
+                f"（1位 {top['name'][:16]} 売上 {top['ints'][_ABC_SALES]:,}）"
+                f" +{len(collected) - n_before}行"
+            )
+
+    print(f"[ABC] 収集 {len(collected)} 行")
+    if dry_run:
+        print("[ABC] dry-run のため書き込みはしません")
+        return 0
+    warehouse.ensure_schema()
+    loaded = warehouse.replace_actuals(collected)
+    print(f"[ABC] warehouse へ {loaded} 件 書き込みました")
+    return 0
+
+
 def probe(artifacts: Path) -> int:
     """日別実績入力に入り、店舗を選び検索して、グリッド構造を吸い出す。"""
     with fw_session(artifacts) as session:
