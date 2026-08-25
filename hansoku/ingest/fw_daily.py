@@ -421,25 +421,25 @@ def _set_date_range(session, d_from: str, d_to: str) -> bool:
 def _extract_hour_grid(session) -> list[dict]:
     """時間帯別売上のグリッドを視覚行に復元し、時間帯行だけ返す。
 
-    各要素は {"hour": 0-23, "ints": [整数のみ左→右]}。
-    時間帯ラベル（"11:00" や "11時" 等、先頭が時）を含む行だけを対象にする。
-    合計・構成比だけの行や見出しは自然に除外される。
+    各要素は {"hour": 0-23, "ints": [ラベルを除く整数を左→右]}。
+    時間帯ラベルは各行の先頭セルにある裸の数字（"10"=10時。"10:00"/"10時"も可）。
+    先頭セルが 0〜23 の数字で、続くセルに整数が3つ以上ある行だけを1帯として採る。
+    見出し（時間帯/組数…）・曜日選択・合計などは先頭セルが数字でないため除外される。
     """
-    hour_re = re.compile(r"^(\d{1,2})\s*[:：時]")
+    head_re = re.compile(r"^(\d{1,2})(?:\s*[:：時].*)?$")
     result: list[dict] = []
     seen: set[int] = set()
     for cells in _visual_rows(session):
-        hour = None
-        for c in cells:
-            m = hour_re.match(c.strip())
-            if m:
-                h = int(m.group(1))
-                if 0 <= h <= 23:
-                    hour = h
-                break
-        if hour is None or hour in seen:
+        if not cells:
             continue
-        ints = _row_ints(cells)
+        m = head_re.match(cells[0].strip())
+        if not m:
+            continue
+        hour = int(m.group(1))
+        if not (0 <= hour <= 23) or hour in seen:
+            continue
+        # ラベル（先頭セル）を除いた整数列。[組数, 客数, 売上, 組単価, 客単価, …]
+        ints = _row_ints(cells[1:])
         if len(ints) >= 3:
             seen.add(hour)
             result.append({"hour": hour, "ints": ints})
