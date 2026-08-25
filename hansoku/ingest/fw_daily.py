@@ -193,6 +193,49 @@ def _open_uriage_suii(session) -> None:
         session.snapshot(f"opened_{label}")
 
 
+# EJS TreeGrid は固定列とスクロール列を別テーブルに描くため、DOMの葉を
+# 「画面上の縦位置(top)」でまとめて1つの視覚行に復元する。月次・時間帯別で共用。
+_VISUAL_ROWS_JS = r"""() => {
+    const clip = s => (s || '').replace(/\s+/g, ' ').trim();
+    const leaves = [];
+    for (const el of document.querySelectorAll('td, th, div, span, input')) {
+        if (!el.offsetParent) continue;
+        if (el.children && el.children.length) continue;
+        const txt = clip(el.tagName === 'INPUT' ? el.value : el.innerText);
+        if (!txt) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        leaves.push({ top: Math.round(r.top / 4) * 4, left: Math.round(r.left), txt });
+    }
+    const byTop = new Map();
+    for (const lf of leaves) {
+        if (!byTop.has(lf.top)) byTop.set(lf.top, []);
+        byTop.get(lf.top).push(lf);
+    }
+    const out = [];
+    for (const top of [...byTop.keys()].sort((a, b) => a - b)) {
+        out.push(byTop.get(top).sort((a, b) => a.left - b.left).map(c => c.txt));
+    }
+    return out;
+}"""
+
+_INT_RE = re.compile(r"^-?[\d,]+$")
+
+
+def _visual_rows(session) -> list[list[str]]:
+    """グリッドを視覚行（セルの左→右配列）の並びに復元して返す。"""
+    return session.page.evaluate(_VISUAL_ROWS_JS)
+
+
+def _row_ints(cells: list[str]) -> list[int]:
+    """行のセルから整数（カンマ・符号可、％や小数は除く）だけを左→右で拾う。"""
+    out: list[int] = []
+    for c in cells:
+        if _INT_RE.match(c) and any(ch.isdigit() for ch in c):
+            out.append(int(c.replace(",", "")))
+    return out
+
+
 def _extract_month_grid(session) -> list[dict]:
     """月別日別売上推移のグリッドを視覚行に復元して返す。
 
@@ -200,37 +243,8 @@ def _extract_month_grid(session) -> list[dict]:
     期間セル（YYYY年MM月）を含む視覚行だけを対象にするので、
     ヘッダ・メニュー・合計行（期間を持たない）は自然に除外される。
     """
-    rows = session.page.evaluate(
-        r"""() => {
-        const clip = s => (s || '').replace(/\s+/g, ' ').trim();
-        // 葉（子を持たない要素）のうち、可視でテキストがあるものを集める。
-        // input は value を、それ以外は innerText を採る。
-        const leaves = [];
-        for (const el of document.querySelectorAll('td, th, div, span, input')) {
-            if (!el.offsetParent) continue;
-            if (el.children && el.children.length) continue;
-            const txt = clip(el.tagName === 'INPUT' ? el.value : el.innerText);
-            if (!txt) continue;
-            const r = el.getBoundingClientRect();
-            if (r.width === 0 || r.height === 0) continue;
-            leaves.push({ top: Math.round(r.top / 4) * 4, left: Math.round(r.left), txt });
-        }
-        // 縦位置でまとめて1視覚行に。行内は左→右に並べる。
-        const byTop = new Map();
-        for (const lf of leaves) {
-            if (!byTop.has(lf.top)) byTop.set(lf.top, []);
-            byTop.get(lf.top).push(lf);
-        }
-        const out = [];
-        for (const top of [...byTop.keys()].sort((a, b) => a - b)) {
-            const cells = byTop.get(top).sort((a, b) => a.left - b.left).map(c => c.txt);
-            out.push(cells);
-        }
-        return out;
-    }"""
-    )
+    rows = _visual_rows(session)
     period_re = re.compile(r"(20\d{2})年\s*(\d{1,2})月")
-    int_re = re.compile(r"^-?[\d,]+$")
     result: list[dict] = []
     seen: set[str] = set()
     for cells in rows:
@@ -242,11 +256,7 @@ def _extract_month_grid(session) -> list[dict]:
                 break
         if not period or period in seen:
             continue
-        ints: list[int] = []
-        for c in cells:
-            c2 = c.replace(",", "")
-            if int_re.match(c) and any(ch.isdigit() for ch in c2):
-                ints.append(int(c2))
+        ints = _row_ints(cells)
         # 期間＋整数が十分あるものだけを1ヶ月の行として採る
         if len(ints) >= 7:
             seen.add(period)
@@ -364,6 +374,194 @@ def ingest_monthly(
     warehouse.ensure_schema()
     loaded = warehouse.replace_actuals(collected)
     print(f"[売上推移] warehouse へ {loaded} 件 書き込みました")
+    return 0
+
+
+# ── 時間帯別売上（販売管理→店舗業務）からの時間帯プロファイル取り込み ──────
+#
+# 画面（URL 末尾 jknburpr）は EJS TreeGrid で、選んだ期間（日付 from〜to）を
+# 時間帯別に集計する。列: 時間帯 組数 客数 売上 構成比 組単価 客単価 坪売上
+#   回転率 人時売上 人時生産性。既定は当日（データなし）なので、対象月の
+# 1日〜末日を日付に入れて検索する。時間帯ラベルの後ろの整数を左→右で拾うと
+# [組数, 客数, 売上, 組単価, 客単価, 坪売上, 人時売上, 人時生産性]（％・小数は除く）。
+# 客数=ints[1], 売上=ints[2]。月の代表日（1日）に grain=hour で焼く。
+HOURLY_MENU = ("販売管理", "店舗業務", "時間帯別売上")
+
+_HOUR_SALES = 2  # 時間帯ラベル後の整数列での売上位置
+_HOUR_COVERS = 1  # 同・客数位置
+
+
+def _open_hourly(session) -> None:
+    _open_menu(session, HOURLY_MENU)
+
+
+def _set_date_range(session, d_from: str, d_to: str) -> bool:
+    """画面の日付レンジ（from|to、YYYY/MM/DD）を設定する。best-effort。"""
+    return bool(
+        session.page.evaluate(
+            r"""([f, t]) => {
+        const set = (el, v) => {
+            el.focus(); el.value = v;
+            el.dispatchEvent(new Event('input', {bubbles: true}));
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+            el.dispatchEvent(new KeyboardEvent('keyup', {key: ' ', bubbles: true}));
+        };
+        const re = /^\d{4}\/\d{1,2}\/\d{1,2}$/;
+        const ins = [...document.querySelectorAll('input')]
+            .filter(i => i.offsetParent && re.test((i.value || '').trim()));
+        if (ins.length >= 2) { set(ins[0], f); set(ins[1], t); return true; }
+        if (ins.length === 1) { set(ins[0], f); return true; }
+        return false;
+    }""",
+            [d_from, d_to],
+        )
+    )
+
+
+def _extract_hour_grid(session) -> list[dict]:
+    """時間帯別売上のグリッドを視覚行に復元し、時間帯行だけ返す。
+
+    各要素は {"hour": 0-23, "ints": [整数のみ左→右]}。
+    時間帯ラベル（"11:00" や "11時" 等、先頭が時）を含む行だけを対象にする。
+    合計・構成比だけの行や見出しは自然に除外される。
+    """
+    hour_re = re.compile(r"^(\d{1,2})\s*[:：時]")
+    result: list[dict] = []
+    seen: set[int] = set()
+    for cells in _visual_rows(session):
+        hour = None
+        for c in cells:
+            m = hour_re.match(c.strip())
+            if m:
+                h = int(m.group(1))
+                if 0 <= h <= 23:
+                    hour = h
+                break
+        if hour is None or hour in seen:
+            continue
+        ints = _row_ints(cells)
+        if len(ints) >= 3:
+            seen.add(hour)
+            result.append({"hour": hour, "ints": ints})
+    return result
+
+
+def _month_bounds(period: str) -> tuple[str, str]:
+    """"YYYY-MM" → ("YYYY/MM/01", "YYYY/MM/末日")。"""
+    import calendar
+
+    y, m = int(period[:4]), int(period[5:7])
+    last = calendar.monthrange(y, m)[1]
+    return f"{y}/{m:02d}/01", f"{y}/{m:02d}/{last:02d}"
+
+
+def ingest_hourly(
+    warehouse,
+    master,
+    *,
+    artifacts: Path,
+    month: str | None = None,
+    store_limit: int | None = None,
+    dry_run: bool = False,
+) -> int:
+    """時間帯別売上から各店の「時間帯×売上・客数」を取り込む（対象月の集計）。
+
+    対象月（既定は前月）の1日〜末日を日付レンジに入れて検索し、時間帯別の
+    売上・客数を grain=hour で、その月の1日を代表日として焼く。
+    """
+    from datetime import date as _date
+    from datetime import datetime, timezone
+
+    from ..model import (
+        GRAIN_HOUR,
+        KIND_FINAL,
+        METRIC_COVERS,
+        METRIC_SALES,
+        ActualRow,
+    )
+    from .fw_budget import _click_search, _combo_options, _select_combo
+
+    # 対象月（既定は前月）。今月は締め前で時間帯データが薄いため。
+    if not month:
+        today = datetime.now(timezone.utc)
+        y, m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+        month = f"{y}-{m:02d}"
+    d_from, d_to = _month_bounds(month)
+    rep_date = _date(int(month[:4]), int(month[5:7]), 1)
+
+    source = "fw_hourly"
+    ingested_at = datetime.now(timezone.utc)
+    active_by_code = {s.store_code: s for s in master.active}
+    collected: list[ActualRow] = []
+
+    with fw_session(artifacts) as session:
+        _open_hourly(session)
+        options = _combo_options(session)
+        print(f"[時間帯別] 店舗コンボボックス {len(options)}件 / 対象月 {month}（{d_from}〜{d_to}）")
+        targets = []
+        for opt in options:
+            code = opt["value"].lstrip("0")
+            store = active_by_code.get(code) or master.find_by_name(opt["name"])
+            if store and store.active:
+                targets.append((opt["value"], store))
+        print(f"[時間帯別] マスタと一致した稼働店 {len(targets)}件")
+        if store_limit:
+            targets = targets[:store_limit]
+
+        for ti, (value, store) in enumerate(targets):
+            name = store.store_name
+            if not _select_combo(session, value):
+                print(f"[時間帯別] 店舗選択に失敗: {name} ({value})")
+                continue
+            if not _set_date_range(session, d_from, d_to):
+                print(f"[時間帯別] 日付レンジ設定に失敗: {name}")
+            _click_search(session)
+            time.sleep(1.2)
+            grid = _extract_hour_grid(session)
+            if ti == 0:
+                # 最初の1店は生の視覚行も出して、ラベル・列の並びを確認できるようにする
+                print("[時間帯別] 先頭店の視覚行（先頭12行・診断用）:")
+                for cells in _visual_rows(session)[:12]:
+                    print("   ", " | ".join(cells[:14]))
+            if not grid:
+                session.snapshot(f"nohour_{store.store_code}")
+                print(f"  {store.store_code} {name[:14]} 時間帯グリッドが読めませんでした")
+                continue
+            n_before = len(collected)
+            for band in grid:
+                ints = band["ints"]
+                if len(ints) <= _HOUR_SALES:
+                    continue
+                sales = ints[_HOUR_SALES]
+                covers = ints[_HOUR_COVERS]
+                for metric, val in ((METRIC_SALES, sales), (METRIC_COVERS, covers)):
+                    if val > 0:
+                        collected.append(
+                            ActualRow(
+                                store_code=store.store_code,
+                                date=rep_date,
+                                grain=GRAIN_HOUR,
+                                metric=metric,
+                                value=float(val),
+                                hour=band["hour"],
+                                kind=KIND_FINAL,
+                                source=source,
+                                ingested_at=ingested_at,
+                            )
+                        )
+            hours = sorted({b["hour"] for b in grid})
+            hspan = f"{hours[0]}〜{hours[-1]}時" if hours else "-"
+            print(
+                f"  {store.store_code} {name[:14]} {len(grid)}帯 {hspan} +{len(collected) - n_before}行"
+            )
+
+    print(f"[時間帯別] 収集 {len(collected)} 行")
+    if dry_run:
+        print("[時間帯別] dry-run のため書き込みはしません")
+        return 0
+    warehouse.ensure_schema()
+    loaded = warehouse.replace_actuals(collected)
+    print(f"[時間帯別] warehouse へ {loaded} 件 書き込みました")
     return 0
 
 

@@ -40,6 +40,32 @@ def test_施策は空でも成立する(payload):
     assert payload["campaigns"] == []
 
 
+def test_客数がcoversに焼かれる(loaded, master):
+    """月別日別売上推移で取り込む客数（集客）が dashboard.json の covers に出る。"""
+    from datetime import datetime, timezone
+
+    from hansoku.model import GRAIN_MONTH, KIND_FINAL, METRIC_COVERS, ActualRow
+
+    code = master.active_codes[0]
+    loaded.replace_actuals(
+        [
+            ActualRow(
+                store_code=code,
+                date=date(2025, 6, 1),
+                grain=GRAIN_MONTH,
+                metric=METRIC_COVERS,
+                value=1234.0,
+                kind=KIND_FINAL,
+                source="fw_uriage_suii",
+                ingested_at=datetime.now(timezone.utc),
+            )
+        ]
+    )
+    payload = build(loaded, master, date_from=date(2025, 1, 1), date_to=date(2026, 12, 31))
+    assert "covers" in payload
+    assert payload["covers"].get(code, {}).get("2025-06") == 1234
+
+
 def test_生成時刻が入る(payload):
     assert payload["generated_at"]
 
