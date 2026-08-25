@@ -113,6 +113,30 @@ def test_売れ筋商品がproductsに焼かれる(loaded, master):
     assert got and got[0] == {"name": "生ビール中", "sales": 682000, "rank": "A"}
 
 
+def test_全店の売れ筋がproducts_groupに焼かれる(loaded, master):
+    """ABC分析の全店集計（擬似店舗 _group）が products_group に売上順で出る。"""
+    from datetime import datetime, timezone
+
+    from hansoku.model import GRAIN_MONTH, KIND_FINAL, METRIC_PRODUCT_SALES, ActualRow
+
+    now = datetime.now(timezone.utc)
+    loaded.replace_actuals(
+        [
+            ActualRow(store_code="_group", date=date(2026, 7, 1), grain=GRAIN_MONTH,
+                      metric=METRIC_PRODUCT_SALES, value=3100000.0, product_name="生ビール",
+                      product_category="A", kind=KIND_FINAL, source="fw_abc", ingested_at=now),
+            ActualRow(store_code="_group", date=date(2026, 7, 1), grain=GRAIN_MONTH,
+                      metric=METRIC_PRODUCT_SALES, value=5200000.0, product_name="名物もつ鍋",
+                      product_category="A", kind=KIND_FINAL, source="fw_abc", ingested_at=now),
+        ]
+    )
+    payload = build(loaded, master, date_from=date(2025, 1, 1), date_to=date(2026, 12, 31))
+    group = payload["products_group"]
+    assert group[0] == {"name": "名物もつ鍋", "sales": 5200000, "rank": "A"}
+    # 全店の擬似店舗は店舗別 products には混ざらない
+    assert "_group" not in payload["products"]
+
+
 def test_生成時刻が入る(payload):
     assert payload["generated_at"]
 

@@ -527,6 +527,7 @@ function renderSchedule() {
         ${rowsHtml}
       </div></div>
     </section>
+    ${renderGroupProducts()}
     <div class="ovrlink">
       <button class="linkbtn" data-view="campaigns">施策の効果 →</button>
       <span class="sep">／</span>
@@ -536,6 +537,31 @@ function renderSchedule() {
       <span class="sep">／</span>
       <button class="linkbtn" data-view="gallery">制作物ギャラリー →</button>
     </div>`;
+}
+
+// グループ全体の売れ筋商品（FW ABC分析・全店）。おすすめ料理候補。
+function renderGroupProducts() {
+  const items = DATA.products_group || [];
+  if (!items.length) return "";
+  const max = Math.max(1, ...items.map(p => p.sales));
+  const rankColor = r => r === "A" ? "var(--good-ink)" : r === "B" ? "var(--accent)" : "var(--ink-3)";
+  const rows = items.map((p, i) => {
+    const pct = Math.max(3, Math.round(p.sales / max * 100));
+    const rank = p.rank
+      ? `<span class="prank" style="--pc:${rankColor(p.rank)}">${esc(p.rank)}</span>` : "";
+    return `<li class="prow">
+      <span class="pno">${i + 1}</span>
+      <span class="pname">${esc(p.name)}</span>${rank}
+      <span class="pbar"><span class="pfill" style="width:${pct}%"></span></span>
+      <span class="psales">${yen(p.sales)}</span></li>`;
+  }).join("");
+  const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
+  return `
+    <section class="block">
+      <div class="bhead"><h2>売れ筋商品（グループ全店・ABC）</h2>
+        <span class="bnote">売上上位${items.length}品${monthLbl}　ランクはFWのABC　おすすめ料理の検討に</span></div>
+      <div class="panel"><ul class="plist">${rows}</ul></div>
+    </section>`;
 }
 
 function legendHtml() {

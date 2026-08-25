@@ -577,7 +577,9 @@ ABC_MENU = ("販売管理", "店舗業務", "ABC分析")
 
 _ABC_QTY = 2  # 商品名の後ろの整数列での販売数量位置
 _ABC_SALES = 3  # 同・売上金額位置
-_ABC_TOP_N = 30  # 1店あたり取り込む売上上位の商品数
+_ABC_TOP_N = 40  # 取り込む売上上位の商品数
+# 全店（グループ全体）の売れ筋を入れる擬似店舗コード。実店舗と混ざらない。
+ABC_GROUP_CODE = "_group"
 
 
 def _open_abc(session) -> None:
@@ -649,7 +651,7 @@ def ingest_abc(
         METRIC_PRODUCT_SALES,
         ActualRow,
     )
-    from .fw_budget import _click_search, _combo_options, _select_combo
+    from .fw_budget import _click_search
 
     if not month:
         today = datetime.now(timezone.utc)
@@ -660,99 +662,30 @@ def ingest_abc(
 
     source = "fw_abc"
     ingested_at = datetime.now(timezone.utc)
-    active_by_code = {s.store_code: s for s in master.active}
     collected: list[ActualRow] = []
 
+    # ABC分析の店舗欄は既定で「全店」（グループ全体の集計）。店舗コンボは選択肢を
+    # 先読みしない（開いても0件）ため、無理に1店ずつ回さず、全店ぶんの売れ筋商品を
+    # 1回で取り込む。おすすめ料理・売れ筋（グループ全体）の把握にはこれで十分。
+    # 店舗別が要るようになったら、店舗コンボの遅延ロードを別途攻略する。
     with fw_session(artifacts) as session:
         _open_abc(session)
-        options = _combo_options(session)
-        print(f"[ABC] 店舗コンボボックス {len(options)}件 / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
-        if len(options) < 20:
-            # 店舗コンボが少ない＝別セレクタ。app-combobox 群を、近傍ラベルつきで、
-            # dropdown-btn を開いてから option 数を数えて診断する。店舗コンボを特定する。
-            combos = session.page.evaluate(
-                r"""() => {
-                const clip = s => (s || '').replace(/\s+/g,' ').trim();
-                const out = [];
-                for (const w of document.querySelectorAll('app-combobox, store-combo-box')) {
-                    // 近傍ラベル（親を数階層さかのぼって最初のテキスト葉）
-                    let node = w, label = '';
-                    for (let i=0;i<5 && node;i++){ node = node.parentElement; if(!node) break;
-                        const leaf=[...node.querySelectorAll('*')].find(e=>!e.children.length
-                            && clip(e.innerText) && e.tagName!=='INPUT' && e.tagName!=='BUTTON');
-                        if(leaf){label=clip(leaf.innerText).slice(0,16);break;} }
-                    const btn = w.querySelector('.dropdown-btn');
-                    if (btn) btn.click();
-                    const opts = w.querySelectorAll('li.option');
-                    out.push({ cls:(w.className||'').toString().slice(0,44), label,
-                        opts:opts.length,
-                        sample:[...opts].slice(0,3).map(o=>(o.getAttribute('title')||o.textContent||'').trim().slice(0,12)),
-                        val: (w.querySelector('input.form-control')||{}).value || '' });
-                }
-                return out;
-            }"""
+        print(f"[ABC] 全店ぶんを取り込む / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
+        _set_date_range(session, d_from, d_to)
+        _click_search(session)
+        time.sleep(1.5)
+        products = _extract_product_grid(session)
+        print("[ABC] 視覚行（先頭14行・診断用）:")
+        for cells in _visual_rows(session)[:14]:
+            print("   ", " | ".join(cells[:14]))
+        if not products:
+            session.snapshot("noabc_group")
+            print("[ABC] 商品グリッドが読めませんでした")
+        else:
+            products.sort(
+                key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
+                reverse=True,
             )
-            print(f"[ABC] app-combobox 群（開いて診断）:")
-            for c in combos:
-                print(f"    label='{c['label']}' val='{c['val']}' opts={c['opts']} cls={c['cls']} sample={c['sample']}")
-            # 画面上の可視な入力欄を、近傍ラベル・プレースホルダつきで全部出す。
-            # 店舗の選択欄がどんな要素か（input/combobox/…）を特定するため。
-            fields = session.page.evaluate(
-                r"""() => {
-                const clip = s => (s || '').replace(/\s+/g,' ').trim();
-                const out = [];
-                for (const el of document.querySelectorAll('input, select, [class*="combo"], [class*="select"]')) {
-                    if (!el.offsetParent) continue;
-                    let node = el, label = '';
-                    for (let i=0;i<5 && node;i++){ node=node.parentElement; if(!node) break;
-                        const leaf=[...node.querySelectorAll('*')].find(e=>!e.children.length
-                            && clip(e.innerText) && e.tagName!=='INPUT' && e.tagName!=='BUTTON'
-                            && e.tagName!=='OPTION');
-                        if(leaf){label=clip(leaf.innerText).slice(0,18);break;} }
-                    out.push({ tag:el.tagName.toLowerCase(), label,
-                        ph: el.getAttribute && (el.getAttribute('placeholder')||''),
-                        val:(el.value||'').slice(0,18), cls:(el.className||'').toString().slice(0,36) });
-                }
-                // 重複を軽く畳む
-                const seen=new Set(), uniq=[];
-                for(const f of out){ const k=f.tag+'|'+f.label+'|'+f.cls; if(seen.has(k))continue; seen.add(k); uniq.push(f);}
-                return uniq.slice(0,24);
-            }"""
-            )
-            print(f"[ABC] 可視な入力欄/セレクタ（診断）:")
-            for f in fields:
-                print(f"    <{f['tag']}> label='{f['label']}' ph='{f['ph']}' val='{f['val']}' cls={f['cls']}")
-        targets = []
-        for opt in options:
-            code = opt["value"].lstrip("0")
-            store = active_by_code.get(code) or master.find_by_name(opt["name"])
-            if store and store.active:
-                targets.append((opt["value"], store))
-        print(f"[ABC] マスタと一致した稼働店 {len(targets)}件")
-        if store_limit:
-            targets = targets[:store_limit]
-
-        for ti, (value, store) in enumerate(targets):
-            name = store.store_name
-            if not _select_combo(session, value):
-                print(f"[ABC] 店舗選択に失敗: {name} ({value})")
-                continue
-            if not _set_date_range(session, d_from, d_to):
-                print(f"[ABC] 日付レンジ設定に失敗: {name}")
-            _click_search(session)
-            time.sleep(1.2)
-            products = _extract_product_grid(session)
-            if ti == 0:
-                print("[ABC] 先頭店の視覚行（先頭14行・診断用）:")
-                for cells in _visual_rows(session)[:14]:
-                    print("   ", " | ".join(cells[:14]))
-            if not products:
-                session.snapshot(f"noabc_{store.store_code}")
-                print(f"  {store.store_code} {name[:14]} 商品グリッドが読めませんでした")
-                continue
-            # 売上上位だけに絞る（画面はランク順だが念のため売上で並べ直す）
-            products.sort(key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0, reverse=True)
-            n_before = len(collected)
             for prod in products[:top_n]:
                 ints = prod["ints"]
                 if len(ints) <= _ABC_SALES:
@@ -762,7 +695,7 @@ def ingest_abc(
                     continue
                 collected.append(
                     ActualRow(
-                        store_code=store.store_code,
+                        store_code=ABC_GROUP_CODE,
                         date=rep_date,
                         grain=GRAIN_MONTH,
                         metric=METRIC_PRODUCT_SALES,
@@ -776,9 +709,9 @@ def ingest_abc(
                 )
             top = products[0]
             print(
-                f"  {store.store_code} {name[:14]} {len(products)}品 "
-                f"（1位 {top['name'][:16]} 売上 {top['ints'][_ABC_SALES]:,}）"
-                f" +{len(collected) - n_before}行"
+                f"[ABC] 全店 {len(products)}品 "
+                f"（1位 {top['name'][:20]} 売上 {top['ints'][_ABC_SALES]:,}）"
+                f" → {len(collected)}行"
             )
 
     print(f"[ABC] 収集 {len(collected)} 行")

@@ -317,13 +317,37 @@ def build(
     for code, items in prod_by_store.items():
         items.sort(key=lambda p: p["sales"], reverse=True)
         products[code] = items[:PRODUCTS_TOP_N]
+
+    # 全店（グループ全体）の売れ筋。ABC分析は既定で「全店」集計なので、擬似店舗
+    # コード "_group" に入れてある。おすすめ料理候補としてTOPページに出す。
+    products_group: list[dict] = []
     for row in warehouse.aggregate(
         AggregateQuery(
             date_from=date_from,
             date_to=date_to,
             grain=GRAIN_MONTH,
             metrics=[METRIC_PRODUCT_SALES],
-            store_codes=master.active_codes,
+            store_codes=["_group"],
+            group_by=("product_name", "product_category"),
+        )
+    ):
+        products_group.append(
+            {
+                "name": row["product_name"],
+                "sales": round(row["value"]),
+                "rank": row["product_category"],
+            }
+        )
+    products_group.sort(key=lambda p: p["sales"], reverse=True)
+    products_group = products_group[:PRODUCTS_TOP_N]
+
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_PRODUCT_SALES],
+            store_codes=[*master.active_codes, "_group"],
             group_by=("date",),
         )
     ):
@@ -385,8 +409,10 @@ def build(
         # 店舗の時間帯別 売上・客数（FW時間帯別売上）。時間帯別販促の検討に使う。
         "hourly": hourly,
         "hourly_month": hourly_month,
-        # 店舗の売れ筋商品 上位（FW ABC分析）。おすすめ料理の検討に使う。
+        # 店舗の売れ筋商品 上位（FW ABC分析・店舗別）。今は空でも可（全店を使う）。
         "products": products,
+        # 全店（グループ全体）の売れ筋商品 上位。おすすめ料理候補としてTOPに出す。
+        "products_group": products_group,
         "products_month": prod_month,
         # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
         "campaigns": campaigns or [],
