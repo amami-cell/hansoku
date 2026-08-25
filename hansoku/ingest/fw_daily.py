@@ -712,11 +712,39 @@ def ingest_abc(
         for cells in _visual_rows(session)[:14]:
             print("   ", " | ".join(cells[:14]))
         if not products:
-            # FWのABC分析は「全店」だと商品行が出ない（店舗選択モード＋特定店が要る）。
-            # その店舗ピッカーは他画面と別実装で、li.option を出さず遅延生成される。
-            # ここは保留（0件で無害）。取り込むには店舗ピッカーの攻略が別途必要。
-            session.snapshot("noabc_group")
-            print("[ABC] 全店ではデータなし（商品ABCは店舗選択が要る）。保留。")
+            # 天の確認: ABCは「店舗選択」を押すとポップアップ/別画面で店を選ぶ。
+            # そのポップアップの中身を調べて、店の選び方（モーダルの行/セレクト）を特定する。
+            print("[ABC] 全店データなし。『店舗選択』ポップアップを調べる。")
+            session.click_text("店舗選択", wait=1.8)
+            session.snapshot("abc_store_popup")
+            info = session.page.evaluate(
+                r"""() => {
+              const clip=s=>(s||'').replace(/\s+/g,' ').trim();
+              const mods=[];
+              for(const m of document.querySelectorAll(
+                  '.modal,[role="dialog"],[class*="modal"],[class*="popup"],[class*="dialog"],[class*="overlay"]')){
+                if(!m.offsetParent) continue;
+                const rows=m.querySelectorAll('tr,li,.option,[class*="row"]');
+                mods.push({cls:(m.className||'').toString().slice(0,50), rows:rows.length,
+                  sample:[...rows].slice(0,8).map(r=>clip(r.innerText).slice(0,18)).filter(Boolean),
+                  html:(m.outerHTML||'').replace(/\s+/g,' ').slice(0,600)});
+              }
+              const stores=[];
+              for(const el of document.querySelectorAll('td,li,a,div,span,option')){
+                if(!el.offsetParent||el.children.length>1) continue;
+                const t=clip(el.innerText);
+                if(t && t.length<22 && /店|すさび|ぎふや|Largo|GOLD|たぬき|んだんだ|横綱|朝日|串|喰人|京橋|もんじゃ|酔々|八銭|味の/.test(t)) stores.push(t);
+              }
+              return {mods, stores:[...new Set(stores)].slice(0,24),
+                selects:[...document.querySelectorAll('select')].filter(s=>s.offsetParent).map(s=>({opts:s.options.length, sample:[...s.options].slice(0,5).map(o=>(o.text||'').slice(0,12))}))};
+            }"""
+            )
+            print(f"[ABC] モーダル系 {len(info['mods'])}件")
+            for md in info["mods"]:
+                print(f"    cls={md['cls']} rows={md['rows']} sample={md['sample']}")
+                print(f"    html={md['html']}")
+            print(f"[ABC] 店名らしい可視要素: {info['stores']}")
+            print(f"[ABC] 可視select群: {info['selects']}")
         else:
             products.sort(
                 key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
