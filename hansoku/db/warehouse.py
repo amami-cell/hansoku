@@ -74,7 +74,14 @@ class AggregateQuery:
     # 出力の束ね方。store_code / date / hour / metric から選ぶ。
     group_by: Sequence[str] = ("store_code", "metric")
 
-    ALLOWED_GROUP_BY = ("store_code", "date", "hour", "metric")
+    ALLOWED_GROUP_BY = (
+        "store_code",
+        "date",
+        "hour",
+        "metric",
+        "product_name",
+        "product_category",
+    )
 
     def validate(self) -> None:
         if self.grain not in GRAINS:

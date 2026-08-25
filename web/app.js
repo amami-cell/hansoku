@@ -996,8 +996,35 @@ function renderStore(code) {
       ${own}
     </section>
     ${renderHourly(code)}
+    ${renderProducts(code)}
     ${neighBlock}
   `;
+}
+
+// 売れ筋商品（FW ABC分析）。売上上位を棒つきで並べ、FWのABCランクを添える。
+// おすすめ料理の検討材料（何が出ているか・ランクA/B/C）。
+function renderProducts(code) {
+  const items = (DATA.products || {})[code];
+  if (!items || !items.length) return "";
+  const max = Math.max(1, ...items.map(p => p.sales));
+  const rankColor = r => r === "A" ? "var(--good-ink)" : r === "B" ? "var(--accent)" : "var(--ink-3)";
+  const rows = items.map((p, i) => {
+    const pct = Math.max(3, Math.round(p.sales / max * 100));
+    const rank = p.rank
+      ? `<span class="prank" style="--pc:${rankColor(p.rank)}">${esc(p.rank)}</span>` : "";
+    return `<li class="prow">
+      <span class="pno">${i + 1}</span>
+      <span class="pname">${esc(p.name)}</span>${rank}
+      <span class="pbar"><span class="pfill" style="width:${pct}%"></span></span>
+      <span class="psales">${yen(p.sales)}</span></li>`;
+  }).join("");
+  const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
+  return `
+    <section class="block">
+      <div class="bhead"><h2>売れ筋商品（ABC）</h2>
+        <span class="bnote">売上上位${items.length}品${monthLbl}　ランクはFWのABC</span></div>
+      <div class="panel"><ul class="plist">${rows}</ul></div>
+    </section>`;
 }
 
 // 時間帯別 売上・集客（FW時間帯別売上）。棒＝売上、ピーク時間帯を強調。

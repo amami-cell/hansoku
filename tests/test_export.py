@@ -89,6 +89,30 @@ def test_時間帯別がhourlyに焼かれる(loaded, master):
     assert payload["hourly"].get(code, {}).get("12") == {"sales": 942288, "covers": 389}
 
 
+def test_売れ筋商品がproductsに焼かれる(loaded, master):
+    """FW ABC分析で取り込む商品別売上が products に売上順で出る。"""
+    from datetime import datetime, timezone
+
+    from hansoku.model import GRAIN_MONTH, KIND_FINAL, METRIC_PRODUCT_SALES, ActualRow
+
+    code = master.active_codes[0]
+    now = datetime.now(timezone.utc)
+    loaded.replace_actuals(
+        [
+            ActualRow(store_code=code, date=date(2026, 7, 1), grain=GRAIN_MONTH,
+                      metric=METRIC_PRODUCT_SALES, value=396800.0, product_name="おすすめ刺盛",
+                      product_category="A", kind=KIND_FINAL, source="fw_abc", ingested_at=now),
+            ActualRow(store_code=code, date=date(2026, 7, 1), grain=GRAIN_MONTH,
+                      metric=METRIC_PRODUCT_SALES, value=682000.0, product_name="生ビール中",
+                      product_category="A", kind=KIND_FINAL, source="fw_abc", ingested_at=now),
+        ]
+    )
+    payload = build(loaded, master, date_from=date(2025, 1, 1), date_to=date(2026, 12, 31))
+    assert payload["products_month"] == "2026-07"
+    got = payload["products"].get(code)
+    assert got and got[0] == {"name": "生ビール中", "sales": 682000, "rank": "A"}
+
+
 def test_生成時刻が入る(payload):
     assert payload["generated_at"]
 

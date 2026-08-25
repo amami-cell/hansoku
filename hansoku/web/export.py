@@ -23,9 +23,13 @@ from ..model import (
     METRIC_DRINK_THEORY_COST,
     METRIC_FOOD_SALES,
     METRIC_FOOD_THEORY_COST,
+    METRIC_PRODUCT_SALES,
     METRIC_SALES,
     METRIC_SALES_BUDGET,
 )
+
+# 店舗詳細に出す売れ筋商品の件数
+PRODUCTS_TOP_N = 12
 from ..settings import ROOT
 from ..stores import StoreMaster
 
@@ -288,6 +292,43 @@ def build(
     ):
         hourly_month = row["date"].strftime("%Y-%m")
 
+    # 売れ筋商品（FW ABC分析）。商品別売上の上位を店ごとに持つ。product_category は
+    # FWのABCランク（A/B/C）。おすすめ料理・売れ筋の把握に使う。取り込み前は空。
+    prod_by_store: dict[str, list[dict]] = {}
+    prod_month: str | None = None
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_PRODUCT_SALES],
+            store_codes=master.active_codes,
+            group_by=("store_code", "product_name", "product_category"),
+        )
+    ):
+        prod_by_store.setdefault(row["store_code"], []).append(
+            {
+                "name": row["product_name"],
+                "sales": round(row["value"]),
+                "rank": row["product_category"],
+            }
+        )
+    products: dict[str, list[dict]] = {}
+    for code, items in prod_by_store.items():
+        items.sort(key=lambda p: p["sales"], reverse=True)
+        products[code] = items[:PRODUCTS_TOP_N]
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_PRODUCT_SALES],
+            store_codes=master.active_codes,
+            group_by=("date",),
+        )
+    ):
+        prod_month = row["date"].strftime("%Y-%m")
+
     # 原価率は行ごとに平均できないため、分子・分母を合計してから割る
     cost_rates: dict[str, dict[str, float]] = {}
     for month in sorted(months):
@@ -344,6 +385,9 @@ def build(
         # 店舗の時間帯別 売上・客数（FW時間帯別売上）。時間帯別販促の検討に使う。
         "hourly": hourly,
         "hourly_month": hourly_month,
+        # 店舗の売れ筋商品 上位（FW ABC分析）。おすすめ料理の検討に使う。
+        "products": products,
+        "products_month": prod_month,
         # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
         "campaigns": campaigns or [],
         # 制作物ギャラリー（config/creatives.yaml 由来）。空でも画面は成立する。
