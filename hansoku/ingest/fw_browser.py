@@ -104,8 +104,23 @@ class FWSession:
                 " GitHub Secrets に登録してください。"
             )
 
-        self.page.goto(LOGIN_URL, timeout=TIMEOUT_MS)
-        self.page.wait_for_load_state("networkidle", timeout=TIMEOUT_MS)
+        # FWのログイン画面は時々重く、goto が30秒で切れることがある。
+        # domcontentloaded で早めに抜け、数回リトライして粘る（本処理は落とさない）。
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                self.page.goto(LOGIN_URL, timeout=60000, wait_until="domcontentloaded")
+                last_err = None
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                time.sleep(3 * (attempt + 1))
+        if last_err is not None:
+            raise FWError(f"ログイン画面を開けませんでした（{last_err}）")
+        try:
+            self.page.wait_for_load_state("networkidle", timeout=TIMEOUT_MS)
+        except Exception:
+            pass
         self.snapshot("login_form")
 
         # オーバーレイに阻まれるため、JS で値を入れて Angular の変更検知を起こす
