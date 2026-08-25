@@ -662,31 +662,9 @@ def _abc_open_store_modal_and_select_all(session) -> bool:
     if not _abc_modal_open(session):
         session.click_text("店舗選択", wait=1.5)
     if not _abc_modal_open(session):
-        # 開けない。トリガの正体を掴むため「店舗選択」を含む要素のHTMLを出し、
-        # その中のラジオ/ラベル/ボタンを順に押してみる。
-        info = session.page.evaluate(
-            r"""() => {
-            const clip=s=>(s||'').replace(/\s+/g,' ').trim();
-            const hit=[...document.querySelectorAll('*')].find(
-              el=>el.offsetParent && el.children.length<=3 && /店舗選択/.test(clip(el.innerText)) && !/全選択/.test(clip(el.innerText)));
-            if(!hit) return {found:false};
-            let box=hit; for(let i=0;i<3&&box.parentElement;i++) box=box.parentElement;
-            // 中のラジオ/ラベル/クリック候補を順に押す
-            const tried=[];
-            for(const el of box.querySelectorAll('input[type=radio],label,button,a,span,div')){
-              const t=clip(el.innerText||el.value||'');
-              if(el.tagName==='INPUT' || /店舗選択/.test(t)){
-                el.click(); el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                tried.push(el.tagName+':'+(t||el.type||'').slice(0,10));
-              }
-            }
-            return {found:true, html:(box.outerHTML||'').replace(/\s+/g,' ').slice(0,700), tried};
-        }"""
-        )
-        print(f"[ABC] トリガ診断: {info}")
-        time.sleep(1.5)
-    if not _abc_modal_open(session):
-        print("[ABC] 店舗選択モーダルを開けませんでした")
+        # モーダルを確実に開くトリガが未特定。副作用（システムエラー等）を避けるため
+        # ここで止める。開けたとき用に全選択→追加→決定の手順だけ用意してある。
+        print("[ABC] 店舗選択モーダルを開けませんでした（トリガ未特定・保留）")
         return False
     # 左パネルの全選択 → 追加 → 決定する
     print(f"[ABC] 全選択: {_abc_button_click(session, '全選択')}")
