@@ -43,6 +43,53 @@ def _open_daily(session) -> None:
         session.snapshot(f"opened_{label}")
 
 
+def _open_menu(session, labels) -> None:
+    for label in labels:
+        if not session.click_text(label):
+            session.snapshot(f"missing_{label}")
+            session.dump_clickables(f"failed_{label}")
+            raise FWError(f"「{label}」に進めませんでした")
+        session.snapshot(f"opened_{label}")
+
+
+def report_probe(artifacts: Path, last_label: str) -> int:
+    """損益管理→実績管理業務→<last_label> を開き、店舗を選び検索してグリッド構造を
+    吸い出す。月次の客数・客単価がどの帳票にあるかを特定するための診断。"""
+    menu = ("損益管理", "実績管理業務", last_label)
+    with fw_session(artifacts) as session:
+        _open_menu(session, menu)
+        items = session.dump_clickables("report_screen")
+        print(f"[report] 「{last_label}」の操作要素 {len(items)}件")
+        options = _combo_options(session)
+        print(f"[report] 店舗コンボボックス {len(options)}件")
+        if options:
+            print(f"[report] 先頭店舗を選ぶ: {options[0]['value']} {options[0]['name']}")
+            _select_combo(session, options[0]["value"])
+        _click_search(session)
+        time.sleep(1.2)
+        session.snapshot("after_search")
+        print(f"[report] 表示中の月: {_read_month(session)}")
+        info = session.page.evaluate(
+            """() => ({
+            url: location.href,
+            tables: document.querySelectorAll('table').length,
+            inputs: [...document.querySelectorAll('input')].filter(
+                i => i.offsetParent && !['button','checkbox','radio','submit'].includes(i.type)).length,
+            hits: [...document.querySelectorAll('*')].filter(
+                el => el.children.length === 0 && /客数|客単価|売上高|来店|人数/.test(el.innerText || ''))
+                .slice(0, 24).map(el => (el.innerText || '').replace(/\\s+/g,' ').trim().slice(0, 16)),
+        })"""
+        )
+        print(f"[report]   url={info['url']}")
+        print(f"[report]   table={info['tables']} input={info['inputs']}")
+        print(f"[report]   客数/客単価/売上のラベル: {info['hits']}")
+        _dump_grid_tables(session)
+        _dump_report_rows(session)
+        _dump_inputs_grouped(session)
+    print(f"\n成果物: {artifacts}")
+    return 0
+
+
 def _dump_grid_tables(session) -> None:
     """表（table）を2次元で吸い出す。日別は縦31行の表のことが多い。"""
     tables = session.page.evaluate(

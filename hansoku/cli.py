@@ -241,10 +241,12 @@ def cmd_fw_budget(args: argparse.Namespace) -> int:
 
 
 def cmd_fw_daily(args: argparse.Namespace) -> int:
-    from .ingest.fw_daily import probe
+    from .ingest.fw_daily import probe, report_probe
 
     if args.mode == "probe":
         return probe(Path(args.artifacts))
+    if args.mode == "report":
+        return report_probe(Path(args.artifacts), args.menu or "年間損益計算書")
     raise SystemExit(f"未知のモード: {args.mode}")
 
 
@@ -471,7 +473,8 @@ def build_parser() -> argparse.ArgumentParser:
     fwdaily = sub.add_parser(
         "fw-daily", help="FW日別実績入力から日別の実績を取り込む（まずprobe）"
     )
-    fwdaily.add_argument("--mode", default="probe", choices=["probe", "ingest"], help="動作")
+    fwdaily.add_argument("--mode", default="probe", choices=["probe", "ingest", "report"], help="動作")
+    fwdaily.add_argument("--menu", default=None, help="report モードで開く帳票名")
     fwdaily.add_argument("--months", type=int, default=2, help="遡る月数")
     fwdaily.add_argument("--limit", type=int, default=None, help="先頭N店だけ（試走用）")
     fwdaily.add_argument("--dry-run", action="store_true", help="書き込まず印字のみ")
