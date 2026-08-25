@@ -712,33 +712,11 @@ def ingest_abc(
         for cells in _visual_rows(session)[:14]:
             print("   ", " | ".join(cells[:14]))
         if not products:
+            # FWのABC分析は「全店」だと商品行が出ない（店舗選択モード＋特定店が要る）。
+            # その店舗ピッカーは他画面と別実装で、li.option を出さず遅延生成される。
+            # ここは保留（0件で無害）。取り込むには店舗ピッカーの攻略が別途必要。
             session.snapshot("noabc_group")
-            print("[ABC] 全店ではデータなし。『店舗選択』トグルを試す。")
-            # 「店舗選択」を押すと店舗コンボが有効化されるはず。押して選択肢を読む。
-            session.click_text("店舗選択", wait=1.5)
-            opts2 = session.page.evaluate(
-                r"""() => {
-                const out = [];
-                for (const li of document.querySelectorAll('li.option')) {
-                    const v=(li.getAttribute('value')||'').trim();
-                    const t=(li.getAttribute('title')||li.textContent||'').trim();
-                    if (v) out.push([v, t.slice(0,14)]);
-                }
-                return out;
-            }"""
-            )
-            print(f"[ABC] 店舗選択後の li.option {len(opts2)}件: {opts2[:14]}")
-            # 店舗コンボ（store-combo-box / app-combobox）のドロップダウンを開いて再読
-            session.page.evaluate(
-                """() => {
-                for (const b of document.querySelectorAll('store-combo-box .dropdown-btn, .combobox .dropdown-btn')) b.click();
-            }"""
-            )
-            time.sleep(0.8)
-            opts3 = session.page.evaluate(
-                "() => [...document.querySelectorAll('li.option')].map(li=>[(li.getAttribute('value')||'').trim(),(li.getAttribute('title')||li.textContent||'').trim().slice(0,14)]).filter(x=>x[0])"
-            )
-            print(f"[ABC] 開後の li.option {len(opts3)}件: {opts3[:14]}")
+            print("[ABC] 全店ではデータなし（商品ABCは店舗選択が要る）。保留。")
         else:
             products.sort(
                 key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
