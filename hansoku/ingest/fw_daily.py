@@ -615,6 +615,65 @@ def _select_date_preset(session, value: str) -> bool:
     return bool(ok)
 
 
+def _abc_button_click(session, *labels: str) -> str | None:
+    """可視ボタン/リンクのうち、labels のどれかを含む最初の要素を押す。押したラベルを返す。"""
+    return session.page.evaluate(
+        r"""(labels) => {
+        const norm=s=>(s||'').replace(/\s+/g,'');
+        const els=[...document.querySelectorAll('button,a,input[type=button],input[type=submit],div[role=button]')]
+          .filter(b=>b.offsetParent);
+        for(const lab of labels){
+          const t=els.find(b=>norm(b.innerText||b.value||'').includes(lab));
+          if(t){ t.click(); t.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true})); return lab; }
+        }
+        return null;
+    }""",
+        list(labels),
+    )
+
+
+def _abc_modal_open(session) -> bool:
+    """店舗選択モーダルが開いているか（「決定する」ボタンの有無で判定）。"""
+    return bool(
+        session.page.evaluate(
+            r"""() => [...document.querySelectorAll('button,a,input[type=button]')]
+          .some(b=>b.offsetParent && /決定する/.test((b.innerText||b.value||'')))"""
+        )
+    )
+
+
+def _abc_open_store_modal_and_select_all(session) -> bool:
+    """ABCの店舗選択モーダルを開き、全店を選択→追加→決定する。
+
+    モーダルは同一ページ内オーバーレイ。左パネル（表示数：N）で全選択→追加で
+    右（選択側）へ移し、決定するで確定する。全店ぶんの売れ筋を1回で取る。
+    """
+    page = session.page
+    # トリガ: 店舗表示欄（値=全店）をクリック → 駄目なら「店舗選択」テキスト
+    page.evaluate(
+        r"""() => {
+        const clip=s=>(s||'').replace(/\s+/g,' ').trim();
+        const inp=[...document.querySelectorAll('input')].find(
+          i=>i.offsetParent && (clip(i.value)==='全店' || clip(i.value)==='店舗選択'));
+        if(inp){ inp.focus(); inp.click(); inp.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true})); }
+    }"""
+    )
+    time.sleep(1.2)
+    if not _abc_modal_open(session):
+        session.click_text("店舗選択", wait=1.5)
+    if not _abc_modal_open(session):
+        print("[ABC] 店舗選択モーダルを開けませんでした")
+        return False
+    # 左パネルの全選択 → 追加 → 決定する
+    print(f"[ABC] 全選択: {_abc_button_click(session, '全選択')}")
+    time.sleep(0.6)
+    print(f"[ABC] 追加: {_abc_button_click(session, '追加')}")
+    time.sleep(0.9)
+    print(f"[ABC] 決定する: {_abc_button_click(session, '決定する')}")
+    time.sleep(1.5)
+    return True
+
+
 def _extract_product_grid(session) -> list[dict]:
     """ABC分析のグリッドを視覚行に復元し、商品行だけ返す。
 
@@ -700,8 +759,9 @@ def ingest_abc(
     with fw_session(artifacts) as session:
         _open_abc(session)
         print(f"[ABC] 全店ぶんを取り込む / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
+        # 商品ABCは店舗を選ばないと出ない。店舗選択モーダルで全店を選ぶ。
+        _abc_open_store_modal_and_select_all(session)
         # ABCは日付プリセットが駆動する。「先月」を選ぶ（既定の対象月＝前月と一致）。
-        # 併せて from/to も入れておく（プリセットが効かない環境の保険）。
         preset_ok = _select_date_preset(session, _ABC_PRESET_LASTMONTH)
         _set_date_range(session, d_from, d_to)
         print(f"[ABC] 日付プリセット『先月』選択: {preset_ok}")
