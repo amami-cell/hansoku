@@ -17,6 +17,7 @@ probe の結論（2026-08 時点）: FW の日別実績はまとめ取りに向�
 """
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 
@@ -154,6 +155,216 @@ def _dump_report_rows(session) -> None:
     print(f"---- 帳票の日別行らしきもの {len(rows)}件 ----")
     for r in rows:
         print("   ", " | ".join(r))
+
+
+# ── 月別日別売上推移（販売管理→店舗業務）からの月次取り込み ──────────────
+#
+# この画面（URL 末尾 month_or_day_transition）は EJS TreeGrid で、1店ぶんの
+# 直近12ヶ月を縦に並べ、各月について次の列を持つ:
+#   予算 実績 達成率 予実差異 前年実績 前年比 前年差異
+#   客数 客数予算比 客数前年実績 客数前年比 客数前年差異
+#   客単価 前年客単価 客単価差異
+# ここから 売上(実績)・売上前年(前年実績)・客数・客数前年 を取り、
+#   * 当月ぶん   → その月の1日
+#   * 前年ぶん   → 1年前の同月の1日
+# として書く。1回のスクレイプで約24ヶ月ぶんの売上・客数が揃い、前年比・前月比を
+# アプリ側で正確に出せるようになる（集客＝客数もこれで入る）。
+#
+# TreeGrid は固定列（期間）とスクロール列（数値）が別テーブルに分かれて描画される
+# ことがあるため、セルを「画面上の縦位置(top)」でまとめて1つの視覚行に復元する。
+URIAGE_SUII_MENU = ("販売管理", "店舗業務", "月別日別売上推移")
+
+# パーセント列を除いた「整数セルだけ」の並び（左→右）と、そこでの位置:
+#   0予算 1実績 2予実差異 3前年実績 4前年差異 5客数 6客数前年実績
+#   7客数前年差異 8客単価 9前年客単価 10客単価差異
+_INT_SALES = 1
+_INT_SALES_PRIOR = 3
+_INT_COVERS = 5
+_INT_COVERS_PRIOR = 6
+
+
+def _open_uriage_suii(session) -> None:
+    """月別日別売上推移の画面まで遷移する。"""
+    for label in URIAGE_SUII_MENU:
+        if not session.click_text(label):
+            session.snapshot(f"missing_{label}")
+            session.dump_clickables(f"failed_{label}")
+            raise FWError(f"「{label}」に進めませんでした")
+        session.snapshot(f"opened_{label}")
+
+
+def _extract_month_grid(session) -> list[dict]:
+    """月別日別売上推移のグリッドを視覚行に復元して返す。
+
+    各要素は {"period": "YYYY-MM", "ints": [整数のみ左→右]}。
+    期間セル（YYYY年MM月）を含む視覚行だけを対象にするので、
+    ヘッダ・メニュー・合計行（期間を持たない）は自然に除外される。
+    """
+    rows = session.page.evaluate(
+        r"""() => {
+        const clip = s => (s || '').replace(/\s+/g, ' ').trim();
+        // 葉（子を持たない要素）のうち、可視でテキストがあるものを集める。
+        // input は value を、それ以外は innerText を採る。
+        const leaves = [];
+        for (const el of document.querySelectorAll('td, th, div, span, input')) {
+            if (!el.offsetParent) continue;
+            if (el.children && el.children.length) continue;
+            const txt = clip(el.tagName === 'INPUT' ? el.value : el.innerText);
+            if (!txt) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) continue;
+            leaves.push({ top: Math.round(r.top / 4) * 4, left: Math.round(r.left), txt });
+        }
+        // 縦位置でまとめて1視覚行に。行内は左→右に並べる。
+        const byTop = new Map();
+        for (const lf of leaves) {
+            if (!byTop.has(lf.top)) byTop.set(lf.top, []);
+            byTop.get(lf.top).push(lf);
+        }
+        const out = [];
+        for (const top of [...byTop.keys()].sort((a, b) => a - b)) {
+            const cells = byTop.get(top).sort((a, b) => a.left - b.left).map(c => c.txt);
+            out.push(cells);
+        }
+        return out;
+    }"""
+    )
+    period_re = re.compile(r"(20\d{2})年\s*(\d{1,2})月")
+    int_re = re.compile(r"^-?[\d,]+$")
+    result: list[dict] = []
+    seen: set[str] = set()
+    for cells in rows:
+        period = None
+        for c in cells:
+            m = period_re.search(c)
+            if m:
+                period = f"{m.group(1)}-{int(m.group(2)):02d}"
+                break
+        if not period or period in seen:
+            continue
+        ints: list[int] = []
+        for c in cells:
+            c2 = c.replace(",", "")
+            if int_re.match(c) and any(ch.isdigit() for ch in c2):
+                ints.append(int(c2))
+        # 期間＋整数が十分あるものだけを1ヶ月の行として採る
+        if len(ints) >= 7:
+            seen.add(period)
+            result.append({"period": period, "ints": ints})
+    return result
+
+
+def _prior_year(period: str) -> str:
+    """"YYYY-MM" の1年前を返す。"""
+    y, m = int(period[:4]), int(period[5:7])
+    return f"{y - 1}-{m:02d}"
+
+
+def ingest_monthly(
+    warehouse,
+    master,
+    *,
+    artifacts: Path,
+    store_limit: int | None = None,
+    dry_run: bool = False,
+) -> int:
+    """月別日別売上推移から各店の月次「売上・客数」を（前年ぶんも含めて）取り込む。
+
+    画面は1店ずつ直近12ヶ月を表示。前年実績・客数前年実績の列を使い、
+    前年の同月ぶんも同時に書くので、1スクレイプで約24ヶ月が揃う。
+    """
+    from datetime import date as _date
+    from datetime import datetime, timezone
+
+    from ..model import (
+        GRAIN_MONTH,
+        KIND_FINAL,
+        METRIC_COVERS,
+        METRIC_SALES,
+        ActualRow,
+    )
+    from .fw_budget import _click_search, _combo_options, _select_combo
+
+    source = "fw_uriage_suii"
+    ingested_at = datetime.now(timezone.utc)
+    active_by_code = {s.store_code: s for s in master.active}
+    collected: list[ActualRow] = []
+
+    def _month_date(period: str) -> _date:
+        return _date(int(period[:4]), int(period[5:7]), 1)
+
+    with fw_session(artifacts) as session:
+        _open_uriage_suii(session)
+        options = _combo_options(session)
+        print(f"[売上推移] 店舗コンボボックス {len(options)}件")
+        targets = []
+        for opt in options:
+            code = opt["value"].lstrip("0")
+            store = active_by_code.get(code) or master.find_by_name(opt["name"])
+            if store and store.active:
+                targets.append((opt["value"], store))
+        print(f"[売上推移] マスタと一致した稼働店 {len(targets)}件")
+        if store_limit:
+            targets = targets[:store_limit]
+
+        for value, store in targets:
+            name = store.store_name
+            if not _select_combo(session, value):
+                print(f"[売上推移] 店舗選択に失敗: {name} ({value})")
+                continue
+            _click_search(session)
+            time.sleep(1.2)
+            grid = _extract_month_grid(session)
+            if not grid:
+                session.snapshot(f"nogrid_{store.store_code}")
+                print(f"  {store.store_code} {name[:14]} グリッドが読めませんでした")
+                continue
+            n_before = len(collected)
+            for month in grid:
+                ints = month["ints"]
+                period = month["period"]
+                if len(ints) <= _INT_COVERS_PRIOR:
+                    continue
+
+                def _add(metric: str, period_str: str, val: int) -> None:
+                    if val <= 0:
+                        return
+                    collected.append(
+                        ActualRow(
+                            store_code=store.store_code,
+                            date=_month_date(period_str),
+                            grain=GRAIN_MONTH,
+                            metric=metric,
+                            value=float(val),
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
+                    )
+
+                _add(METRIC_SALES, period, ints[_INT_SALES])
+                _add(METRIC_COVERS, period, ints[_INT_COVERS])
+                prior = _prior_year(period)
+                _add(METRIC_SALES, prior, ints[_INT_SALES_PRIOR])
+                _add(METRIC_COVERS, prior, ints[_INT_COVERS_PRIOR])
+
+            months = [m["period"] for m in grid]
+            span = f"{months[-1]}〜{months[0]}" if months else "-"
+            sample = grid[0]
+            print(
+                f"  {store.store_code} {name[:14]} {len(grid)}ヶ月 {span} "
+                f"（例 {sample['period']}: 売上 {sample['ints'][_INT_SALES]:,} / "
+                f"客数 {sample['ints'][_INT_COVERS]:,}） +{len(collected) - n_before}行"
+            )
+
+    print(f"[売上推移] 収集 {len(collected)} 行")
+    if dry_run:
+        print("[売上推移] dry-run のため書き込みはしません")
+        return 0
+    warehouse.ensure_schema()
+    loaded = warehouse.replace_actuals(collected)
+    print(f"[売上推移] warehouse へ {loaded} 件 書き込みました")
+    return 0
 
 
 def probe(artifacts: Path) -> int:

@@ -241,12 +241,23 @@ def cmd_fw_budget(args: argparse.Namespace) -> int:
 
 
 def cmd_fw_daily(args: argparse.Namespace) -> int:
-    from .ingest.fw_daily import probe, report_probe
+    from .ingest.fw_daily import ingest_monthly, probe, report_probe
 
     if args.mode == "probe":
         return probe(Path(args.artifacts))
     if args.mode == "report":
         return report_probe(Path(args.artifacts), args.menu or "損益管理,実績管理業務,月別日別実績")
+    if args.mode in ("monthly", "monthly-dry"):
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return ingest_monthly(
+                warehouse,
+                master,
+                artifacts=Path(args.artifacts),
+                store_limit=args.limit,
+                dry_run=(args.mode == "monthly-dry" or args.dry_run),
+            )
     raise SystemExit(f"未知のモード: {args.mode}")
 
 
@@ -473,7 +484,12 @@ def build_parser() -> argparse.ArgumentParser:
     fwdaily = sub.add_parser(
         "fw-daily", help="FW日別実績入力から日別の実績を取り込む（まずprobe）"
     )
-    fwdaily.add_argument("--mode", default="probe", choices=["probe", "ingest", "report"], help="動作")
+    fwdaily.add_argument(
+        "--mode",
+        default="probe",
+        choices=["probe", "ingest", "report", "monthly", "monthly-dry"],
+        help="動作（monthly=月別日別売上推移から売上・客数を取り込む）",
+    )
     fwdaily.add_argument("--menu", default=None, help="report モードで開く帳票名")
     fwdaily.add_argument("--months", type=int, default=2, help="遡る月数")
     fwdaily.add_argument("--limit", type=int, default=None, help="先頭N店だけ（試走用）")
