@@ -667,6 +667,29 @@ def ingest_abc(
         _open_abc(session)
         options = _combo_options(session)
         print(f"[ABC] 店舗コンボボックス {len(options)}件 / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
+        if len(options) < 20:
+            # 店舗コンボが少ない＝別セレクタの可能性。実体を診断出力する。
+            print(f"[ABC] 候補（診断）: {[(o['value'], o['name'][:14]) for o in options[:12]]}")
+            combos = session.page.evaluate(
+                r"""() => {
+                const out = [];
+                for (const w of document.querySelectorAll(
+                        'store-combo-box, app-combobox, .combobox, ng-select, select')) {
+                    if (!w.offsetParent && w.tagName !== 'SELECT') continue;
+                    const opts = w.querySelectorAll('li.option, option, .ng-option');
+                    out.push({
+                        tag: w.tagName.toLowerCase(),
+                        cls: (w.className || '').toString().slice(0, 40),
+                        opts: opts.length,
+                        sample: [...opts].slice(0, 3).map(o =>
+                            (o.getAttribute && o.getAttribute('title')) || o.textContent.trim().slice(0, 12)),
+                    });
+                }
+                return out;
+            }"""
+            )
+            print(f"[ABC] コンボ系要素（診断）: {combos}")
+            session.dump_clickables("abc_selector")
         targets = []
         for opt in options:
             code = opt["value"].lstrip("0")
