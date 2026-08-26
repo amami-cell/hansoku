@@ -818,8 +818,20 @@ def ingest_abc(
             session.page, "検索", "検 索", "実行", "表示する", "表示", "再表示", "更新", "集計"
         )
         print(f"[ABC] 実行ボタン: {pressed}")
-        time.sleep(1.8)
-        products = _extract_product_grid(session)
+        # 選択が本体に効いたか（店舗表示）を確認
+        store_disp = session.page.evaluate(
+            r"""() => { const clip=s=>(s||'').replace(/\s+/g,' ').trim();
+            const i=[...document.querySelectorAll('input')].find(x=>x.offsetParent && /全店|店/.test(clip(x.value)));
+            return i ? clip(i.value).slice(0,24) : ''; }"""
+        )
+        print(f"[ABC] 店舗表示: '{store_disp}'")
+        # 127店の集計は重く、グリッドが埋まるまで数秒かかる。出るまで粘る。
+        products: list[dict] = []
+        for _ in range(10):
+            time.sleep(2)
+            products = _extract_product_grid(session)
+            if products:
+                break
         print("[ABC] 視覚行（先頭14行・診断用）:")
         for cells in _visual_rows(session)[:14]:
             print("   ", " | ".join(cells[:14]))
