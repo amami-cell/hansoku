@@ -963,14 +963,17 @@ def ingest_abc(
         pressed = _abc_button_click(
             session.page, "検索", "検 索", "実行", "表示する", "表示", "再表示", "更新", "集計"
         )
-        print(f"[ABC] 実行ボタン: {pressed}")
-        # 集計はグリッドが埋まるまで数秒かかる。出るまで粘る。
+        print(f"[ABC] 実行ボタン: {pressed} (+{time.time() - t0:.0f}s)")
+        # 多数店の集計はグリッドが埋まるまで時間がかかる。最大60秒まで粘る。
         products: list[dict] = []
-        for _ in range(10):
+        for i in range(30):
             time.sleep(2)
             products = _extract_product_grid(session)
             if products:
+                print(f"[ABC] グリッド充填を検出（検索から約{(i + 1) * 2}秒）")
                 break
+            if (i + 1) % 5 == 0:
+                print(f"[ABC] …グリッド待ち {(i + 1) * 2}秒")
         print("[ABC] 視覚行（先頭14行・診断用）:")
         for cells in _visual_rows(session)[:14]:
             print("   ", " | ".join(cells[:14]))
