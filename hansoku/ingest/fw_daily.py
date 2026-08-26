@@ -802,14 +802,23 @@ def ingest_abc(
     with fw_session(artifacts) as session:
         _open_abc(session)
         print(f"[ABC] 全店ぶんを取り込む / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
-        # 商品ABCは店舗を選ばないと出ない。店舗選択モーダルで全店を選ぶ。
-        _abc_open_store_modal_and_select_all(session)
-        # ABCは日付プリセットが駆動する。「先月」を選ぶ（既定の対象月＝前月と一致）。
+        # 日付プリセット『先月』を先に。次に店舗選択モーダルで全店を選ぶ（127店→追加→決定）。
         preset_ok = _select_date_preset(session, _ABC_PRESET_LASTMONTH)
         _set_date_range(session, d_from, d_to)
         print(f"[ABC] 日付プリセット『先月』選択: {preset_ok}")
-        _click_search(session)
-        time.sleep(1.5)
+        _abc_open_store_modal_and_select_all(session)
+        # 実行ボタンの正体を掴むため、可視ボタンを出してから検索/実行/表示系を押す。
+        btns = session.page.evaluate(
+            r"""() => [...document.querySelectorAll('button,a,input[type=button],input[type=submit],div[role=button]')]
+              .filter(b=>b.offsetParent).map(b=>((b.innerText||b.value||'').replace(/\s+/g,' ').trim()))
+              .filter(t=>t && t.length<12).slice(0,24)"""
+        )
+        print(f"[ABC] 実行前の可視ボタン: {btns}")
+        pressed = _abc_button_click(
+            session.page, "検索", "検 索", "実行", "表示する", "表示", "再表示", "更新", "集計"
+        )
+        print(f"[ABC] 実行ボタン: {pressed}")
+        time.sleep(1.8)
         products = _extract_product_grid(session)
         print("[ABC] 視覚行（先頭14行・診断用）:")
         for cells in _visual_rows(session)[:14]:
