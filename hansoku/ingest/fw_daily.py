@@ -959,21 +959,26 @@ def ingest_abc(
         if page_ret is None:
             print("[ABC] 店舗選択に失敗。0件で無害終了。")
             picked_codes = []
-        # 実行ボタン（検 索）を押して集計を走らせる。
-        pressed = _abc_button_click(
-            session.page, "検索", "検 索", "実行", "表示する", "表示", "再表示", "更新", "集計"
-        )
-        print(f"[ABC] 実行ボタン: {pressed} (+{time.time() - t0:.0f}s)")
-        # 多数店の集計はグリッドが埋まるまで時間がかかる。最大60秒まで粘る。
+        # 多数店の集計はFW側がぶれる（同条件でも出る時と『データなし』の時がある）。
+        # 検索→最大40秒ポーリングを最大3回まで繰り返し、出るまで粘る。
         products: list[dict] = []
-        for i in range(30):
-            time.sleep(2)
-            products = _extract_product_grid(session)
+        for attempt in range(3):
+            pressed = _abc_button_click(
+                session.page, "検索", "検 索", "実行", "表示する", "表示", "再表示", "更新", "集計"
+            )
+            print(f"[ABC] 検索{attempt + 1}回目: {pressed} (+{time.time() - t0:.0f}s)")
+            for i in range(20):  # 1回につき最大40秒
+                time.sleep(2)
+                products = _extract_product_grid(session)
+                if products:
+                    print(f"[ABC] グリッド充填を検出（{attempt + 1}回目・検索から約{(i + 1) * 2}秒）")
+                    break
+                if (i + 1) % 5 == 0:
+                    print(f"[ABC] …グリッド待ち {(i + 1) * 2}秒（{attempt + 1}回目）")
             if products:
-                print(f"[ABC] グリッド充填を検出（検索から約{(i + 1) * 2}秒）")
                 break
-            if (i + 1) % 5 == 0:
-                print(f"[ABC] …グリッド待ち {(i + 1) * 2}秒")
+            print(f"[ABC] {attempt + 1}回目はデータなし。再検索する。")
+            time.sleep(3)
         print("[ABC] 視覚行（先頭14行・診断用）:")
         for cells in _visual_rows(session)[:14]:
             print("   ", " | ".join(cells[:14]))
