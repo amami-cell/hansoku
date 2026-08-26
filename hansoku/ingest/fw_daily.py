@@ -701,53 +701,57 @@ def _abc_modal_dump(page) -> None:
         print(f"[ABC][dump] 失敗: {str(exc)[:80]}")
 
 
-def _abc_select_one_store(page) -> int:
-    """左リストの先頭の店舗行を1件だけ選ぶ（全店＝全選択を避けるため）。
-
-    dual-list の左リストが <select multiple> でも、<li>/<div> のクリック式でも
-    効くよう両対応で試す。選択できた件数（0/1）を返す。
-    """
+def _abc_left_option_names(page, limit: int = 3) -> list[str]:
+    """左リスト（127店）の可視オプション名を先頭から limit 件返す。"""
     try:
-        return int(
-            page.evaluate(
-                r"""() => {
+        return page.evaluate(
+            r"""(lim) => {
             const clip=s=>(s||'').replace(/\s+/g,' ').trim();
             const vis=e=>e && e.offsetParent!==null;
-            // 1) <select multiple> パターン：先頭 option を selected にして change 発火
-            const sels=[...document.querySelectorAll('select[multiple]')].filter(vis);
-            for(const s of sels){
-              if(s.options.length){
-                s.selectedIndex=-1;
-                s.options[0].selected=true;
-                s.dispatchEvent(new Event('input',{bubbles:true}));
-                s.dispatchEvent(new Event('change',{bubbles:true}));
-                return 1;
-              }
-            }
-            // 2) 「表示数」コンテナ内のクリック式行：先頭行をクリック
-            const anchor=[...document.querySelectorAll('*')].find(e=>e.children.length===0 && /表示数/.test(clip(e.innerText)) && vis(e));
-            if(anchor){
-              let n=anchor;
-              for(let k=0;k<6&&n;k++){ n=n.parentElement; if(!n)break;
-                const leaves=[...n.querySelectorAll('li,tr,div[role=option],div[class*=row],div[class*=item],option')].filter(vis)
-                  .filter(r=>clip(r.innerText).length>=2 && !/表示数|選択数/.test(clip(r.innerText)));
-                if(leaves.length>=5){
-                  const r=leaves[0];
-                  r.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true}));
-                  r.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true}));
-                  r.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                  r.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,cancelable:true}));
-                  return 1;
-                }
-              }
-            }
-            return 0;
-        }"""
-            )
+            const opts=[...document.querySelectorAll('option')].filter(vis)
+                .map(o=>clip(o.textContent)).filter(t=>t.length>=2 && !/表示数|選択数/.test(t));
+            return [...new Set(opts)].slice(0,lim);
+        }""",
+            limit,
         )
-    except Exception as exc:  # noqa: BLE001
-        print(f"[ABC] 単一店舗選択 失敗: {str(exc)[:80]}")
-        return 0
+    except Exception:
+        return []
+
+
+def _abc_pick_stores_trusted(page, counts, want: int = 1) -> int:
+    """左リストの店舗を「信頼された」クリックで選ぶ（dispatchEvent は非信頼で効かない）。
+
+    まずオプション要素をテキストで掴んで Playwright 実クリック。効かなければ
+    ネイティブ select.select_option にフォールバック。選択できた件数を返す。
+    """
+    names = _abc_left_option_names(page, max(want, 3))
+    print(f"[ABC] 左リスト先頭: {names}")
+    picked = 0
+    for nm in names[:want]:
+        loc = page.get_by_text(nm, exact=True)
+        clicked = False
+        for i in range(min(loc.count(), 12)):
+            try:
+                el = loc.nth(i)
+                if el.is_visible():
+                    el.click(timeout=3000)
+                    clicked = True
+                    break
+            except Exception:
+                continue
+        print(f"[ABC] 『{nm}』実クリック={clicked} → counts={counts()}")
+        if clicked:
+            picked += 1
+    if picked == 0:
+        # フォールバック：ネイティブ select を Playwright の select_option で選ぶ（信頼イベント）
+        try:
+            sel = page.locator("select").first
+            sel.select_option(index=0, timeout=3000)
+            picked = 1
+            print(f"[ABC] select_option(index=0) → counts={counts()}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[ABC] select_option 失敗: {str(exc)[:70]}")
+    return picked
 
 
 def _abc_modal_keyword_filter(page, keyword: str) -> None:
@@ -835,12 +839,10 @@ def _abc_open_store_modal_and_select_all(session, keyword: str | None = None):
     print("[ABC] 店舗選択の画面が出た。")
     print(f"[ABC] 開いた直後 counts={counts()}")
     _abc_modal_dump(target)  # モーダル内部（入力/セレクト/左リスト行）を診断出力
-    # 全店（＝全選択）はデータなしになる。左リストから1店だけ選んで 追加→決定 する。
-    picked = _abc_select_one_store(target)
-    print(f"[ABC] 単一店舗を選択: {picked} → counts={(_pause(0.7) or counts())}")
-    if not picked:
-        # 単一選択が効かないときの保険：全選択（従来動作）に落とす
-        print(f"[ABC] 全選択(保険): {_abc_button_click(target, '全選択')} → counts={(_pause(0.7) or counts())}")
+    # 全店＝データなし。左リストから店舗を「信頼された実クリック」で選ぶ
+    # （dispatchEvent は非信頼で Angular に届かない＝これまで選択数0のままだった）。
+    picked = _abc_pick_stores_trusted(target, counts, want=1)
+    print(f"[ABC] 店舗選択: {picked}店 → counts={(_pause(0.7) or counts())}")
     print(f"[ABC] 追加: {_abc_button_click(target, '追加')} → counts={(_pause(1.0) or counts())}")
     print(f"[ABC] 決定する: {_abc_button_click(target, '決定する')}")
     time.sleep(1.5)
@@ -953,8 +955,10 @@ def ingest_abc(
         # 選択が本体に効いたか（店舗表示）を確認
         store_disp = session.page.evaluate(
             r"""() => { const clip=s=>(s||'').replace(/\s+/g,' ').trim();
-            const i=[...document.querySelectorAll('input')].find(x=>x.offsetParent && /全店|店/.test(clip(x.value)));
-            return i ? clip(i.value).slice(0,24) : ''; }"""
+            // ラジオ（値=全店/店舗選択）は除外し、選択店を映す text input を読む
+            const i=[...document.querySelectorAll('input[type=text]')]
+              .find(x=>x.offsetParent && /店|選択/.test(clip(x.value)));
+            return i ? clip(i.value).slice(0,40) : '(店舗表示のtext inputなし)'; }"""
         )
         print(f"[ABC] 店舗表示: '{store_disp}'")
         # 127店の集計は重く、グリッドが埋まるまで数秒かかる。出るまで粘る。
