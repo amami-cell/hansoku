@@ -583,6 +583,9 @@ _ABC_SALES = 2  # 同・売上金額位置
 # 合計・総計・小計は商品ではないので商品グリッドから除外する
 _ABC_TOTAL_NAMES = {"合計", "総計", "小計", "合 計", "総 計", "小 計", "総合計"}
 _ABC_TOP_N = 40  # 取り込む売上上位の商品数
+# 店舗選択で追加する上限。多数選ぶとFWのモーダル再描画が重く1回が長引くため、
+# まずは主要店で確実にデータを流す。挙動と所要が読めたら増やす。
+_ABC_MAX_STORES = 4
 # 全店（グループ全体）の売れ筋を入れる擬似店舗コード。実店舗と混ざらない。
 ABC_GROUP_CODE = "_group"
 
@@ -793,16 +796,23 @@ def _abc_open_store_modal_and_select_all(session, master=None):
             continue
         seen_codes.add(store.store_code)
         matches.append((nm, store.store_code))
-    print(f"[ABC] 左リスト {len(names)}店 / 稼働解決 {len(matches)}店。実クリックで追加する。")
+    max_add = _ABC_MAX_STORES
+    print(
+        f"[ABC] 左リスト {len(names)}店 / 稼働解決 {len(matches)}店。"
+        f"先頭{max_add}店まで実クリックで追加する。"
+    )
     added_codes: list[str] = []
     added_names: list[str] = []
     skipped_active: list[str] = []
-    budget_s = 150.0  # 選択全体の上限（超えたら打ち切って集計に進む）
+    budget_s = 60.0  # 選択全体の上限（超えたら打ち切って集計に進む）
     start = time.time()
-    for idx, (nm, code) in enumerate(matches):
+    for nm, code in matches:
+        if len(added_codes) >= max_add:
+            break
         if time.time() - start > budget_s:
             print(f"[ABC] 選択が上限{budget_s:.0f}秒に達したので打ち切り（{len(added_codes)}店で集計へ）。")
             break
+        t_i = time.time()
         loc = target.get_by_text(nm, exact=True)
         clicked = False
         try:
@@ -825,8 +835,7 @@ def _abc_open_store_modal_and_select_all(session, master=None):
         time.sleep(0.15)
         added_codes.append(code)
         added_names.append(nm)
-        if (idx + 1) % 6 == 0:
-            print(f"[ABC] …選択中 {len(added_codes)}店 ({time.time() - start:.0f}s)")
+        print(f"[ABC] +{nm}（{time.time() - t_i:.1f}s / 累計{time.time() - start:.0f}s）")
     print(f"[ABC] 稼働店 追加: {len(added_codes)}店 {added_names[:8]}{'…' if len(added_names) > 8 else ''}")
     if skipped_active:
         print(f"[ABC] 追加できなかった稼働候補: {skipped_active[:8]}")
