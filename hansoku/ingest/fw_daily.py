@@ -910,6 +910,15 @@ def ingest_abc(
     d_from, d_to = _month_bounds(month)
     rep_date = _date(int(month[:4]), int(month[5:7]), 1)
 
+    # stdout を行バッファにして、各 print が実時刻でログに出るようにする
+    # （既定のブロックバッファだと全部終了時にまとめて出て、どこで詰まったか分からない）。
+    import sys as _sys
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
     source = "fw_abc"
     ingested_at = datetime.now(timezone.utc)
     collected: list[ActualRow] = []
@@ -918,14 +927,18 @@ def ingest_abc(
     # マスタ上「稼働中」の店を実クリックで選び 追加→決定 すると、その集合の売れ筋商品が
     # 1グリッドに集計される。これをグループ全体の売れ筋（おすすめ料理の検討材料）として
     # 擬似店舗コード _group に焼く。1回の検索で済み、店舗別に回すより堅い。
+    t0 = time.time()
+    print("[ABC] fw_session を開く…")
     with fw_session(artifacts) as session:
+        print(f"[ABC] ログイン完了 (+{time.time() - t0:.0f}s)。ABC分析メニューへ。")
         _open_abc(session)
-        print(f"[ABC] 稼働店ぶんを取り込む / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
+        print(f"[ABC] 稼働店ぶんを取り込む / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品 (+{time.time() - t0:.0f}s)")
         # 日付プリセット『先月』を先に。次に店舗選択モーダルで稼働店を選ぶ。
         preset_ok = _select_date_preset(session, _ABC_PRESET_LASTMONTH)
         _set_date_range(session, d_from, d_to)
-        print(f"[ABC] 日付プリセット『先月』選択: {preset_ok}")
+        print(f"[ABC] 日付プリセット『先月』選択: {preset_ok} (+{time.time() - t0:.0f}s)")
         page_ret, picked_codes = _abc_open_store_modal_and_select_all(session, master)
+        print(f"[ABC] 店舗選択おわり (+{time.time() - t0:.0f}s)")
         if page_ret is None:
             print("[ABC] 店舗選択に失敗。0件で無害終了。")
             picked_codes = []
