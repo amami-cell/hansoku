@@ -650,6 +650,106 @@ def _abc_modal_present(page) -> bool:
         return False
 
 
+def _abc_modal_dump(page) -> None:
+    """店舗選択モーダルの内部構造（入力・セレクト・左リストの行）を吸い出す診断。"""
+    try:
+        info = page.evaluate(
+            r"""() => {
+            const clip=s=>(s||'').replace(/\s+/g,' ').trim();
+            const vis=e=>e && e.offsetParent!==null;
+            const out={inputs:[],selects:[],lists:[],rows:[]};
+            // 可視の input（type/value/placeholder/近傍ラベル）
+            for(const i of document.querySelectorAll('input')){
+              if(!vis(i)) continue;
+              let lab='';
+              let n=i;
+              for(let k=0;k<4&&n;k++){ n=n.parentElement; if(!n)break;
+                const t=clip(n.innerText); if(t){lab=t.slice(0,30);break;} }
+              out.inputs.push([i.type||'', clip(i.value).slice(0,20), i.placeholder||'', lab]);
+              if(out.inputs.length>=20) break;
+            }
+            // 可視の select（options 数と先頭のいくつか）
+            for(const s of document.querySelectorAll('select')){
+              if(!vis(s)) continue;
+              const opts=[...s.options].map(o=>clip(o.text).slice(0,14)).slice(0,6);
+              out.selects.push([s.options.length, opts]);
+              if(out.selects.length>=12) break;
+            }
+            // 「表示数」を含む要素を起点に、左リストのコンテナ構造を探す
+            const anchor=[...document.querySelectorAll('*')].find(e=>e.children.length===0 && /表示数/.test(clip(e.innerText)) && vis(e));
+            if(anchor){
+              let n=anchor;
+              for(let k=0;k<6&&n;k++){ n=n.parentElement; if(!n)break;
+                // このコンテナ内で「行っぽい」子（クリック可能な葉）を数える
+                const leaves=[...n.querySelectorAll('li,tr,div[role=option],div[class*=row],div[class*=item],option')].filter(vis);
+                if(leaves.length>=5){
+                  out.lists.push([n.tagName+'.'+(n.className||'').slice(0,30), leaves.length,
+                    leaves[0].tagName+'.'+(leaves[0].className||'').slice(0,40)]);
+                  for(const r of leaves.slice(0,8)) out.rows.push(clip(r.innerText).slice(0,24));
+                  break;
+                }
+              }
+            }
+            return out;
+        }"""
+        )
+        print(f"[ABC][dump] inputs={info.get('inputs')}")
+        print(f"[ABC][dump] selects={info.get('selects')}")
+        print(f"[ABC][dump] lists={info.get('lists')}")
+        print(f"[ABC][dump] rows={info.get('rows')}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ABC][dump] 失敗: {str(exc)[:80]}")
+
+
+def _abc_select_one_store(page) -> int:
+    """左リストの先頭の店舗行を1件だけ選ぶ（全店＝全選択を避けるため）。
+
+    dual-list の左リストが <select multiple> でも、<li>/<div> のクリック式でも
+    効くよう両対応で試す。選択できた件数（0/1）を返す。
+    """
+    try:
+        return int(
+            page.evaluate(
+                r"""() => {
+            const clip=s=>(s||'').replace(/\s+/g,' ').trim();
+            const vis=e=>e && e.offsetParent!==null;
+            // 1) <select multiple> パターン：先頭 option を selected にして change 発火
+            const sels=[...document.querySelectorAll('select[multiple]')].filter(vis);
+            for(const s of sels){
+              if(s.options.length){
+                s.selectedIndex=-1;
+                s.options[0].selected=true;
+                s.dispatchEvent(new Event('input',{bubbles:true}));
+                s.dispatchEvent(new Event('change',{bubbles:true}));
+                return 1;
+              }
+            }
+            // 2) 「表示数」コンテナ内のクリック式行：先頭行をクリック
+            const anchor=[...document.querySelectorAll('*')].find(e=>e.children.length===0 && /表示数/.test(clip(e.innerText)) && vis(e));
+            if(anchor){
+              let n=anchor;
+              for(let k=0;k<6&&n;k++){ n=n.parentElement; if(!n)break;
+                const leaves=[...n.querySelectorAll('li,tr,div[role=option],div[class*=row],div[class*=item],option')].filter(vis)
+                  .filter(r=>clip(r.innerText).length>=2 && !/表示数|選択数/.test(clip(r.innerText)));
+                if(leaves.length>=5){
+                  const r=leaves[0];
+                  r.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true}));
+                  r.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true}));
+                  r.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                  r.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,cancelable:true}));
+                  return 1;
+                }
+              }
+            }
+            return 0;
+        }"""
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[ABC] 単一店舗選択 失敗: {str(exc)[:80]}")
+        return 0
+
+
 def _abc_modal_keyword_filter(page, keyword: str) -> None:
     """店舗選択モーダルの『キーワード検索』に keyword を入れて絞り込む。"""
     filled = page.evaluate(
@@ -734,13 +834,17 @@ def _abc_open_store_modal_and_select_all(session, keyword: str | None = None):
 
     print("[ABC] 店舗選択の画面が出た。")
     print(f"[ABC] 開いた直後 counts={counts()}")
-    if keyword:
-        _abc_modal_keyword_filter(target, keyword)
-        print(f"[ABC] キーワード『{keyword}』で絞り込み → counts={counts()}")
-    print(f"[ABC] 全選択: {_abc_button_click(target, '全選択')} → counts={(_pause(0.7) or counts())}")
+    _abc_modal_dump(target)  # モーダル内部（入力/セレクト/左リスト行）を診断出力
+    # 全店（＝全選択）はデータなしになる。左リストから1店だけ選んで 追加→決定 する。
+    picked = _abc_select_one_store(target)
+    print(f"[ABC] 単一店舗を選択: {picked} → counts={(_pause(0.7) or counts())}")
+    if not picked:
+        # 単一選択が効かないときの保険：全選択（従来動作）に落とす
+        print(f"[ABC] 全選択(保険): {_abc_button_click(target, '全選択')} → counts={(_pause(0.7) or counts())}")
     print(f"[ABC] 追加: {_abc_button_click(target, '追加')} → counts={(_pause(1.0) or counts())}")
     print(f"[ABC] 決定する: {_abc_button_click(target, '決定する')}")
     time.sleep(1.5)
+    _ = keyword  # 予備（キーワード絞り込みは _abc_modal_keyword_filter に温存）
     return page
 
 
