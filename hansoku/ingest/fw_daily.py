@@ -583,9 +583,9 @@ _ABC_SALES = 2  # 同・売上金額位置
 # 合計・総計・小計は商品ではないので商品グリッドから除外する
 _ABC_TOTAL_NAMES = {"合計", "総計", "小計", "合 計", "総 計", "小 計", "総合計"}
 _ABC_TOP_N = 40  # 取り込む売上上位の商品数
-# 店舗選択で追加する上限。多数選ぶとFWのモーダル再描画が重く1回が長引くため、
-# まずは主要店で確実にデータを流す。挙動と所要が読めたら増やす。
-_ABC_MAX_STORES = 4
+# 店舗選択で追加する上限（稼働店は約24）。全体は 60 秒の予算と 9 秒の既定タイムアウトで
+# 抑えるので、重い日は途中まででも打ち切って集計に進む。
+_ABC_MAX_STORES = 24
 # 全店（グループ全体）の売れ筋を入れる擬似店舗コード。実店舗と混ざらない。
 ABC_GROUP_CODE = "_group"
 
@@ -940,6 +940,14 @@ def ingest_abc(
     print("[ABC] fw_session を開く…")
     with fw_session(artifacts) as session:
         print(f"[ABC] ログイン完了 (+{time.time() - t0:.0f}s)。ABC分析メニューへ。")
+        # FWが重い日でも各Playwright操作が既定30秒×多数で長引かないよう、既定の
+        # 操作/ナビゲーションのタイムアウトを短めに固定する（明示timeout付きの
+        # クリックはそのまま）。重い日は速く失敗させ、runを安く保つ。
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
         _open_abc(session)
         print(f"[ABC] 稼働店ぶんを取り込む / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品 (+{time.time() - t0:.0f}s)")
         # 日付プリセット『先月』を先に。次に店舗選択モーダルで稼働店を選ぶ。
