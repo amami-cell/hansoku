@@ -615,65 +615,72 @@ def _select_date_preset(session, value: str) -> bool:
     return bool(ok)
 
 
-def _abc_button_click(session, *labels: str) -> str | None:
-    """可視ボタン/リンクのうち、labels のどれかを含む最初の要素を押す。押したラベルを返す。"""
-    return session.page.evaluate(
-        r"""(labels) => {
-        const norm=s=>(s||'').replace(/\s+/g,'');
-        const els=[...document.querySelectorAll('button,a,input[type=button],input[type=submit],div[role=button]')]
-          .filter(b=>b.offsetParent);
-        for(const lab of labels){
-          const t=els.find(b=>norm(b.innerText||b.value||'').includes(lab));
-          if(t){ t.click(); t.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true})); return lab; }
-        }
-        return null;
-    }""",
-        list(labels),
-    )
+def _abc_button_click(page, *labels: str) -> str | None:
+    """page 上の可視ボタン/リンクのうち labels を含む最初を、Playwrightの実クリックで押す。"""
+    for lab in labels:
+        try:
+            loc = page.get_by_role("button", name=re.compile(lab))
+            if loc.count() == 0:
+                loc = page.locator(
+                    f"button:has-text('{lab}'), a:has-text('{lab}'), "
+                    f"input[type=button][value*='{lab}'], input[type=submit][value*='{lab}']"
+                )
+            if loc.count() > 0:
+                loc.first.click(timeout=3000, force=True)
+                return lab
+        except Exception:
+            continue
+    return None
 
 
-def _abc_modal_open(session) -> bool:
-    """店舗選択モーダルが開いているか（「決定する」ボタンの有無で判定）。"""
-    return bool(
-        session.page.evaluate(
-            r"""() => [...document.querySelectorAll('button,a,input[type=button]')]
-          .some(b=>b.offsetParent && /決定する/.test((b.innerText||b.value||'')))"""
+def _abc_modal_present(page) -> bool:
+    """店舗選択の画面が出ているか（「決定する」ボタンの有無で判定）。"""
+    try:
+        return bool(
+            page.evaluate(
+                r"""() => [...document.querySelectorAll('button,a,input[type=button],input[type=submit]')]
+              .some(b=>b.offsetParent && /決定する/.test((b.innerText||b.value||'')))"""
+            )
         )
-    )
+    except Exception:
+        return False
 
 
-def _abc_open_store_modal_and_select_all(session) -> bool:
-    """ABCの店舗選択モーダルを開き、全店を選択→追加→決定する。
+def _abc_open_store_modal_and_select_all(session):
+    """ABCの店舗選択（別ウィンドウ or 同一ページのモーダル）を開き、全店を選ぶ。
 
-    モーダルは同一ページ内オーバーレイ。左パネル（表示数：N）で全選択→追加で
-    右（選択側）へ移し、決定するで確定する。全店ぶんの売れ筋を1回で取る。
+    window.open は「信頼されたユーザー操作」でしか開かないため、JSのdispatchでは
+    駄目でPlaywrightの実クリックで押す。開いた先（別窓 or 本体）で全選択→追加→
+    決定する。選択が確定した本体ページを返す（失敗時 None）。
     """
     page = session.page
-    # トリガ: 店舗表示欄（値=全店）をクリック → 駄目なら「店舗選択」テキスト
-    page.evaluate(
-        r"""() => {
-        const clip=s=>(s||'').replace(/\s+/g,' ').trim();
-        const inp=[...document.querySelectorAll('input')].find(
-          i=>i.offsetParent && (clip(i.value)==='全店' || clip(i.value)==='店舗選択'));
-        if(inp){ inp.focus(); inp.click(); inp.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true})); }
-    }"""
-    )
-    time.sleep(1.2)
-    if not _abc_modal_open(session):
-        session.click_text("店舗選択", wait=1.5)
-    if not _abc_modal_open(session):
-        # モーダルを確実に開くトリガが未特定。副作用（システムエラー等）を避けるため
-        # ここで止める。開けたとき用に全選択→追加→決定の手順だけ用意してある。
-        print("[ABC] 店舗選択モーダルを開けませんでした（トリガ未特定・保留）")
-        return False
-    # 左パネルの全選択 → 追加 → 決定する
-    print(f"[ABC] 全選択: {_abc_button_click(session, '全選択')}")
-    time.sleep(0.6)
-    print(f"[ABC] 追加: {_abc_button_click(session, '追加')}")
-    time.sleep(0.9)
-    print(f"[ABC] 決定する: {_abc_button_click(session, '決定する')}")
+    ctx = page.context
+    popup = None
+    # 「店舗選択」を実クリック（別窓が開くならそれを捕まえる）
+    loc = page.get_by_text("店舗選択", exact=True)
+    if loc.count() == 0:
+        loc = page.locator("*:text-is('店舗選択')")
+    try:
+        with ctx.expect_page(timeout=6000) as pinfo:
+            loc.first.click(timeout=4000, force=True)
+        popup = pinfo.value
+        popup.wait_for_load_state("domcontentloaded")
+        print(f"[ABC] 別ウィンドウ捕捉: {popup.url}")
+    except Exception as exc:  # noqa: BLE001 — 別窓でなく同一ページのモーダルかもしれない
+        print(f"[ABC] 別窓は開かず（同一ページのモーダルを見る）: {str(exc)[:60]}")
+    target = popup or page
     time.sleep(1.5)
-    return True
+    if not _abc_modal_present(target):
+        print("[ABC] 店舗選択の画面（決定する）が出ませんでした。保留。")
+        return None
+    print("[ABC] 店舗選択の画面が出た。全選択→追加→決定する。")
+    print(f"[ABC] 全選択: {_abc_button_click(target, '全選択')}")
+    time.sleep(0.6)
+    print(f"[ABC] 追加: {_abc_button_click(target, '追加')}")
+    time.sleep(0.9)
+    print(f"[ABC] 決定する: {_abc_button_click(target, '決定する')}")
+    time.sleep(1.5)
+    return page
 
 
 def _extract_product_grid(session) -> list[dict]:
