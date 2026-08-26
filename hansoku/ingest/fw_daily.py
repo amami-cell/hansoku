@@ -650,12 +650,40 @@ def _abc_modal_present(page) -> bool:
         return False
 
 
-def _abc_open_store_modal_and_select_all(session):
-    """ABCの店舗選択（別ウィンドウ or 同一ページのモーダル）を開き、全店を選ぶ。
+def _abc_modal_keyword_filter(page, keyword: str) -> None:
+    """店舗選択モーダルの『キーワード検索』に keyword を入れて絞り込む。"""
+    filled = page.evaluate(
+        r"""(kw) => {
+        const clip=s=>(s||'').replace(/\s+/g,' ').trim();
+        // 「キーワード検索」ラベル近傍の text input を探して値を入れる
+        let inp=null;
+        const lab=[...document.querySelectorAll('*')].find(e=>e.children.length===0 && clip(e.innerText)==='キーワード検索' && e.offsetParent);
+        if(lab){ let n=lab; for(let i=0;i<4&&n;i++){ n=n.parentElement; if(!n)break;
+            const c=n.querySelector('input[type=text],input:not([type])'); if(c){inp=c;break;} } }
+        if(!inp) inp=[...document.querySelectorAll('input[type=text],input:not([type])')].find(i=>i.offsetParent);
+        if(!inp) return false;
+        inp.focus(); inp.value=kw;
+        inp.dispatchEvent(new Event('input',{bubbles:true}));
+        inp.dispatchEvent(new Event('change',{bubbles:true}));
+        inp.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true}));
+        inp.dispatchEvent(new KeyboardEvent('keyup',{key:'Enter',keyCode:13,bubbles:true}));
+        return true;
+    }""",
+        keyword,
+    )
+    # ラベル横の緑ボタン（虫眼鏡/↩）も押す
+    _abc_button_click(page, "検索", "絞", "▶")
+    time.sleep(1.0)
+    _ = filled
+
+
+def _abc_open_store_modal_and_select_all(session, keyword: str | None = None):
+    """ABCの店舗選択（同一ページのモーダル）を開き、店舗を選ぶ。
 
     window.open は「信頼されたユーザー操作」でしか開かないため、JSのdispatchでは
-    駄目でPlaywrightの実クリックで押す。開いた先（別窓 or 本体）で全選択→追加→
-    決定する。選択が確定した本体ページを返す（失敗時 None）。
+    駄目でPlaywrightの実クリックで押す。keyword があればモーダルで絞り込んでから
+    全選択→追加→決定（全店＝全選択はFWでデータなしになるため、部分選択が要る）。
+    選択が確定した本体ページを返す（失敗時 None）。
     """
     page = session.page
     ctx = page.context
@@ -705,11 +733,10 @@ def _abc_open_store_modal_and_select_all(session):
             return []
 
     print("[ABC] 店舗選択の画面が出た。")
-    try:
-        target.screenshot(path=str(artifacts / "abc_modal.png"), full_page=True)
-    except Exception:
-        pass
     print(f"[ABC] 開いた直後 counts={counts()}")
+    if keyword:
+        _abc_modal_keyword_filter(target, keyword)
+        print(f"[ABC] キーワード『{keyword}』で絞り込み → counts={counts()}")
     print(f"[ABC] 全選択: {_abc_button_click(target, '全選択')} → counts={(_pause(0.7) or counts())}")
     print(f"[ABC] 追加: {_abc_button_click(target, '追加')} → counts={(_pause(1.0) or counts())}")
     print(f"[ABC] 決定する: {_abc_button_click(target, '決定する')}")
@@ -806,7 +833,8 @@ def ingest_abc(
         preset_ok = _select_date_preset(session, _ABC_PRESET_LASTMONTH)
         _set_date_range(session, d_from, d_to)
         print(f"[ABC] 日付プリセット『先月』選択: {preset_ok}")
-        _abc_open_store_modal_and_select_all(session)
+        # 全店（＝全選択）はFWでデータなしになるため、部分選択が要る。まず1店で検証。
+        _abc_open_store_modal_and_select_all(session, keyword="八銭")
         # 実行ボタンの正体を掴むため、可視ボタンを出してから検索/実行/表示系を押す。
         btns = session.page.evaluate(
             r"""() => [...document.querySelectorAll('button,a,input[type=button],input[type=submit],div[role=button]')]
