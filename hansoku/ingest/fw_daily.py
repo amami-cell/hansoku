@@ -782,21 +782,38 @@ def _abc_open_store_modal_and_select_all(session, master=None):
     print(f"[ABC] 開いた直後 counts={counts()}")
     # 左リスト（127店）から、マスタ上「稼働中」の店だけを実クリックで選び 追加。
     names = _abc_left_option_names(target, 300)
-    print(f"[ABC] 左リスト {len(names)}店。稼働店だけ選ぶ。")
-    added_codes: list[str] = []
-    added_names: list[str] = []
-    skipped_active: list[str] = []
+    # 稼働中に解決できる店だけを先に確定（重複コードは1回だけ）。
+    matches: list[tuple[str, str]] = []
+    seen_codes: set[str] = set()
     for nm in names:
         store = master.find_by_name(nm) if master is not None else None
         if store is None or not getattr(store, "active", False):
             continue
+        if store.store_code in seen_codes:
+            continue
+        seen_codes.add(store.store_code)
+        matches.append((nm, store.store_code))
+    print(f"[ABC] 左リスト {len(names)}店 / 稼働解決 {len(matches)}店。実クリックで追加する。")
+    added_codes: list[str] = []
+    added_names: list[str] = []
+    skipped_active: list[str] = []
+    budget_s = 150.0  # 選択全体の上限（超えたら打ち切って集計に進む）
+    start = time.time()
+    for idx, (nm, code) in enumerate(matches):
+        if time.time() - start > budget_s:
+            print(f"[ABC] 選択が上限{budget_s:.0f}秒に達したので打ち切り（{len(added_codes)}店で集計へ）。")
+            break
         loc = target.get_by_text(nm, exact=True)
         clicked = False
-        for i in range(min(loc.count(), 12)):
+        try:
+            n = min(loc.count(), 8)
+        except Exception:
+            n = 0
+        for i in range(n):
             try:
                 el = loc.nth(i)
                 if el.is_visible():
-                    el.click(timeout=3000)
+                    el.click(timeout=1200)
                     clicked = True
                     break
             except Exception:
@@ -805,9 +822,11 @@ def _abc_open_store_modal_and_select_all(session, master=None):
             skipped_active.append(nm)
             continue
         _abc_button_click(target, "追加")  # ハイライトを右へ移す
-        time.sleep(0.25)
-        added_codes.append(store.store_code)
+        time.sleep(0.15)
+        added_codes.append(code)
         added_names.append(nm)
+        if (idx + 1) % 6 == 0:
+            print(f"[ABC] …選択中 {len(added_codes)}店 ({time.time() - start:.0f}s)")
     print(f"[ABC] 稼働店 追加: {len(added_codes)}店 {added_names[:8]}{'…' if len(added_names) > 8 else ''}")
     if skipped_active:
         print(f"[ABC] 追加できなかった稼働候補: {skipped_active[:8]}")
