@@ -1028,6 +1028,142 @@ def ingest_abc(
     return 0
 
 
+def _abc_click_radio(page, label: str) -> bool:
+    """条件パネルのラジオ/ラベル（全商品・部門・グループ・メニュー等）を実クリックする。"""
+    loc = page.get_by_text(label, exact=True)
+    for i in range(min(loc.count(), 12)):
+        try:
+            el = loc.nth(i)
+            if el.is_visible():
+                el.click(timeout=2000)
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _abc_open_store_modal_and_select_one(session, store_name: str):
+    """ABCの店舗選択モーダルを開き、store_name を含む1店だけを信頼クリックで選ぶ。"""
+    page = session.page
+    ctx = page.context
+    cand = page.get_by_text("店舗選択", exact=True)
+    trigger = None
+    for i in range(min(cand.count(), 10)):
+        try:
+            if cand.nth(i).is_visible():
+                trigger = cand.nth(i)
+                break
+        except Exception:
+            continue
+    if trigger is None:
+        print("[ABCprobe] 可視の『店舗選択』が見つかりません")
+        return None
+    popup = None
+    try:
+        with ctx.expect_page(timeout=5000) as pinfo:
+            trigger.click(timeout=4000)
+        popup = pinfo.value
+        popup.wait_for_load_state("domcontentloaded")
+    except Exception:
+        popup = None
+    target = popup or page
+    time.sleep(1.2)
+    if not _abc_modal_present(target):
+        print("[ABCprobe] 店舗選択モーダルが出ませんでした")
+        return None
+    names = _abc_left_option_names(target, 400)
+    hit = next((n for n in names if store_name in n), None)
+    if hit is None:
+        print(f"[ABCprobe] 左リストに『{store_name}』一致なし。候補先頭: {names[:8]}")
+        return None
+    loc = target.get_by_text(hit, exact=True)
+    clicked = False
+    for i in range(min(loc.count(), 12)):
+        try:
+            el = loc.nth(i)
+            if el.is_visible():
+                el.click(timeout=2000)
+                clicked = True
+                break
+        except Exception:
+            continue
+    _abc_button_click(target, "追加")
+    time.sleep(0.4)
+    _abc_button_click(target, "決定する")
+    time.sleep(1.2)
+    print(f"[ABCprobe] 選択店: {hit}（clicked={clicked}）")
+    return hit
+
+
+def _abc_search_and_rows(session, tries: int = 2, waits: int = 20) -> list[list[str]]:
+    """検索を押してグリッドが埋まるまで粘り、視覚行を返す（ぶれ対策のリトライ付き）。"""
+    for _ in range(tries):
+        _abc_button_click(session.page, "検索", "検 索", "実行", "表示する", "表示", "再表示", "更新")
+        for _i in range(waits):
+            time.sleep(2)
+            if _extract_product_grid(session):
+                return _visual_rows(session)
+        # まだなら次のトライで再検索
+    return _visual_rows(session)
+
+
+def probe_abc_store(
+    artifacts: Path,
+    *,
+    store: str,
+    d_from: str,
+    d_to: str,
+    levels: tuple[str, ...] = ("全商品", "部門", "グループ", "メニュー"),
+) -> int:
+    """1店舗・任意期間で ABC を引き、各『分類』レベルの視覚行を吸い出す診断。
+
+    d_from/d_to は YYYY/MM/DD。ランチ/日替わりランチが FW のどの分類・どの商品名で
+    見えるかを1回で把握するために、分類ラジオを順に切り替えてグリッドを出す。
+    """
+    import sys as _sys
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+        _open_abc(session)
+        print(f"[ABCprobe] 店舗={store} 期間={d_from}〜{d_to}")
+        # 日付欄を確実に2つ出すため先月プリセット→任意レンジで上書き
+        _select_date_preset(session, _ABC_PRESET_LASTMONTH)
+        _set_date_range(session, d_from, d_to)
+        hit = _abc_open_store_modal_and_select_one(session, store)
+        if hit is None:
+            print("[ABCprobe] 店舗選択に失敗。終了。")
+            session.snapshot("abc_store_probe_nostore")
+            return 0
+        # 条件パネルの可視ラジオを列挙（分類の実体を掴む）
+        radios = session.page.evaluate(
+            r"""() => { const clip=s=>(s||'').replace(/\s+/g,' ').trim();
+            const out=[]; for(const i of document.querySelectorAll('input[type=radio]')){
+              if(!i.offsetParent) continue; let lab='';
+              let n=i; for(let k=0;k<3&&n;k++){ n=n.parentElement; if(!n)break;
+                const t=clip(n.innerText); if(t){lab=t.slice(0,24);break;} }
+              out.push(clip(i.value)||lab); }
+            return [...new Set(out)].slice(0,30); }"""
+        )
+        print(f"[ABCprobe] 条件ラジオ: {radios}")
+        for level in levels:
+            ok = _abc_click_radio(session.page, level)
+            print(f"[ABCprobe] 分類ラジオ『{level}』クリック={ok}")
+            rows = _abc_search_and_rows(session)
+            print(f"[ABCprobe] === 分類={level} 視覚行（先頭60） ===")
+            for cells in rows[:60]:
+                print("   ", " | ".join(cells[:14]))
+        session.snapshot("abc_store_probe")
+    return 0
+
+
 def probe(artifacts: Path) -> int:
     """日別実績入力に入り、店舗を選び検索して、グリッド構造を吸い出す。"""
     with fw_session(artifacts) as session:

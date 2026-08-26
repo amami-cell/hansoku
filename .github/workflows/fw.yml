@@ -26,11 +26,24 @@ on:
           - hourly-ingest
           - abc-dry
           - abc-ingest
+          - abc-store-probe
         default: explore
       path:
         description: '探索するメニュー名（カンマ区切り）'
         required: false
         default: '販売管理'
+      abc_store:
+        description: 'abc-store-probe: 対象店名（部分一致）'
+        required: false
+        default: 'ぎふや 天満橋店'
+      abc_from:
+        description: 'abc-store-probe: 開始日 YYYY-MM-DD'
+        required: false
+        default: '2026-08-01'
+      abc_to:
+        description: 'abc-store-probe: 終了日 YYYY-MM-DD'
+        required: false
+        default: '2026-08-25'
 
 env:
   TZ: Asia/Tokyo
@@ -109,6 +122,12 @@ jobs:
               xvfb-run -a python -m hansoku.cli fw-daily --mode abc-dry --limit 1 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "abc-ingest" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode abc --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "abc-store-probe" ]; then
+              xvfb-run -a python -m hansoku.cli fw-daily --mode abc-store-probe \
+                --abc-store "${{ inputs.abc_store }}" \
+                --abc-from "${{ inputs.abc_from }}" \
+                --abc-to "${{ inputs.abc_to }}" \
+                --artifacts fw-artifacts
             else
               xvfb-run -a python -m hansoku.cli fw-explore $args --artifacts fw-artifacts
             fi

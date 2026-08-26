@@ -251,6 +251,18 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
 
     if args.mode == "probe":
         return probe(Path(args.artifacts))
+    if args.mode == "abc-store-probe":
+        from .ingest.fw_daily import probe_abc_store
+
+        def _slash(d: str | None) -> str:
+            return (d or "").replace("-", "/")
+
+        return probe_abc_store(
+            Path(args.artifacts),
+            store=args.abc_store or "ぎふや 天満橋店",
+            d_from=_slash(args.abc_from),
+            d_to=_slash(args.abc_to),
+        )
     if args.mode == "report":
         return report_probe(Path(args.artifacts), args.menu or "損益管理,実績管理業務,月別日別実績")
     if args.mode in ("monthly", "monthly-dry"):
@@ -518,10 +530,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         default="probe",
         choices=["probe", "ingest", "report", "monthly", "monthly-dry",
-                 "hourly", "hourly-dry", "abc", "abc-dry"],
+                 "hourly", "hourly-dry", "abc", "abc-dry", "abc-store-probe"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument("--month", default=None, help="hourly の対象月（YYYY-MM、既定は前月）")
+    fwdaily.add_argument("--abc-store", default=None, dest="abc_store",
+                         help="abc-store-probe の対象店名（部分一致）")
+    fwdaily.add_argument("--abc-from", default=None, dest="abc_from",
+                         help="abc-store-probe の開始日 YYYY-MM-DD")
+    fwdaily.add_argument("--abc-to", default=None, dest="abc_to",
+                         help="abc-store-probe の終了日 YYYY-MM-DD")
     fwdaily.add_argument("--menu", default=None, help="report モードで開く帳票名")
     fwdaily.add_argument("--months", type=int, default=2, help="遡る月数")
     fwdaily.add_argument("--limit", type=int, default=None, help="先頭N店だけ（試走用）")
