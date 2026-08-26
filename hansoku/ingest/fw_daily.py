@@ -615,6 +615,10 @@ def _select_date_preset(session, value: str) -> bool:
     return bool(ok)
 
 
+def _pause(seconds: float) -> None:
+    time.sleep(seconds)
+
+
 def _abc_button_click(page, *labels: str) -> str | None:
     """page 上の可視ボタン/リンクのうち labels を含む最初を、Playwrightの実クリックで押す。"""
     for lab in labels:
@@ -687,11 +691,27 @@ def _abc_open_store_modal_and_select_all(session):
     if not _abc_modal_present(target):
         print("[ABC] 店舗選択の画面（決定する）が出ませんでした。保留。")
         return None
-    print("[ABC] 店舗選択の画面が出た。全選択→追加→決定する。")
-    print(f"[ABC] 全選択: {_abc_button_click(target, '全選択')}")
-    time.sleep(0.6)
-    print(f"[ABC] 追加: {_abc_button_click(target, '追加')}")
-    time.sleep(0.9)
+
+    def counts():
+        try:
+            return target.evaluate(
+                r"""() => { const clip=s=>(s||'').replace(/\s+/g,' ').trim();
+                const out=[]; for(const el of document.querySelectorAll('*')){
+                  if(el.children.length) continue; const t=clip(el.innerText);
+                  if(/表示数|選択数|項目/.test(t)) out.push(t.slice(0,18)); }
+                return [...new Set(out)].slice(0,10); }"""
+            )
+        except Exception:
+            return []
+
+    print("[ABC] 店舗選択の画面が出た。")
+    try:
+        target.screenshot(path=str(artifacts / "abc_modal.png"), full_page=True)
+    except Exception:
+        pass
+    print(f"[ABC] 開いた直後 counts={counts()}")
+    print(f"[ABC] 全選択: {_abc_button_click(target, '全選択')} → counts={(_pause(0.7) or counts())}")
+    print(f"[ABC] 追加: {_abc_button_click(target, '追加')} → counts={(_pause(1.0) or counts())}")
     print(f"[ABC] 決定する: {_abc_button_click(target, '決定する')}")
     time.sleep(1.5)
     return page
