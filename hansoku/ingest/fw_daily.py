@@ -575,8 +575,13 @@ def ingest_hourly(
 # おすすめ料理・売れ筋の把握に使う。全商品は多いので売上上位だけ取り込む。
 ABC_MENU = ("販売管理", "店舗業務", "ABC分析")
 
-_ABC_QTY = 2  # 商品名の後ろの整数列での販売数量位置
-_ABC_SALES = 3  # 同・売上金額位置
+# 実グリッド（商品CD|商品名|販売単価|原価|原価率|販売数量|売上金額|原価金額|…|ランク）で
+# 確認: 商品名の後ろの「整数のみ」列は [単価0, 数量1, 売上2, 原価金額3, 粗利4]。
+# 原価は 100.00・原価率は 25.25% で整数判定から外れるため、この並びで安定する。
+_ABC_QTY = 1  # 商品名の後ろの整数列での販売数量位置
+_ABC_SALES = 2  # 同・売上金額位置
+# 合計・総計・小計は商品ではないので商品グリッドから除外する
+_ABC_TOTAL_NAMES = {"合計", "総計", "小計", "合 計", "総 計", "小 計", "総合計"}
 _ABC_TOP_N = 40  # 取り込む売上上位の商品数
 # 全店（グループ全体）の売れ筋を入れる擬似店舗コード。実店舗と混ざらない。
 ABC_GROUP_CODE = "_group"
@@ -718,76 +723,13 @@ def _abc_left_option_names(page, limit: int = 3) -> list[str]:
         return []
 
 
-def _abc_pick_stores_trusted(page, counts, want: int = 1) -> int:
-    """左リストの店舗を「信頼された」クリックで選ぶ（dispatchEvent は非信頼で効かない）。
-
-    まずオプション要素をテキストで掴んで Playwright 実クリック。効かなければ
-    ネイティブ select.select_option にフォールバック。選択できた件数を返す。
-    """
-    names = _abc_left_option_names(page, max(want, 3))
-    print(f"[ABC] 左リスト先頭: {names}")
-    picked = 0
-    for nm in names[:want]:
-        loc = page.get_by_text(nm, exact=True)
-        clicked = False
-        for i in range(min(loc.count(), 12)):
-            try:
-                el = loc.nth(i)
-                if el.is_visible():
-                    el.click(timeout=3000)
-                    clicked = True
-                    break
-            except Exception:
-                continue
-        print(f"[ABC] 『{nm}』実クリック={clicked} → counts={counts()}")
-        if clicked:
-            picked += 1
-    if picked == 0:
-        # フォールバック：ネイティブ select を Playwright の select_option で選ぶ（信頼イベント）
-        try:
-            sel = page.locator("select").first
-            sel.select_option(index=0, timeout=3000)
-            picked = 1
-            print(f"[ABC] select_option(index=0) → counts={counts()}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[ABC] select_option 失敗: {str(exc)[:70]}")
-    return picked
-
-
-def _abc_modal_keyword_filter(page, keyword: str) -> None:
-    """店舗選択モーダルの『キーワード検索』に keyword を入れて絞り込む。"""
-    filled = page.evaluate(
-        r"""(kw) => {
-        const clip=s=>(s||'').replace(/\s+/g,' ').trim();
-        // 「キーワード検索」ラベル近傍の text input を探して値を入れる
-        let inp=null;
-        const lab=[...document.querySelectorAll('*')].find(e=>e.children.length===0 && clip(e.innerText)==='キーワード検索' && e.offsetParent);
-        if(lab){ let n=lab; for(let i=0;i<4&&n;i++){ n=n.parentElement; if(!n)break;
-            const c=n.querySelector('input[type=text],input:not([type])'); if(c){inp=c;break;} } }
-        if(!inp) inp=[...document.querySelectorAll('input[type=text],input:not([type])')].find(i=>i.offsetParent);
-        if(!inp) return false;
-        inp.focus(); inp.value=kw;
-        inp.dispatchEvent(new Event('input',{bubbles:true}));
-        inp.dispatchEvent(new Event('change',{bubbles:true}));
-        inp.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',keyCode:13,bubbles:true}));
-        inp.dispatchEvent(new KeyboardEvent('keyup',{key:'Enter',keyCode:13,bubbles:true}));
-        return true;
-    }""",
-        keyword,
-    )
-    # ラベル横の緑ボタン（虫眼鏡/↩）も押す
-    _abc_button_click(page, "検索", "絞", "▶")
-    time.sleep(1.0)
-    _ = filled
-
-
-def _abc_open_store_modal_and_select_all(session, keyword: str | None = None):
-    """ABCの店舗選択（同一ページのモーダル）を開き、店舗を選ぶ。
+def _abc_open_store_modal_and_select_all(session, master=None):
+    """ABCの店舗選択（同一ページのモーダル）を開き、稼働店を選ぶ。
 
     window.open は「信頼されたユーザー操作」でしか開かないため、JSのdispatchでは
-    駄目でPlaywrightの実クリックで押す。keyword があればモーダルで絞り込んでから
-    全選択→追加→決定（全店＝全選択はFWでデータなしになるため、部分選択が要る）。
-    選択が確定した本体ページを返す（失敗時 None）。
+    駄目でPlaywrightの実クリックで押す。全店（＝127店ぜんぶ）はFWのABCでデータなしに
+    なるので、左リストからマスタ上「稼働中」の店だけを実クリックで選び 追加、最後に
+    決定する。選んだ店舗コードの一覧と、確定した本体ページを返す（失敗時 (None, [])）。
     """
     page = session.page
     ctx = page.context
@@ -808,7 +750,7 @@ def _abc_open_store_modal_and_select_all(session, keyword: str | None = None):
             trigger = vis.first
     if trigger is None:
         print("[ABC] 可視の『店舗選択』が見つかりませんでした。保留。")
-        return None
+        return None, []
     # 実クリック（別窓が開くならそれを捕まえる）
     try:
         with ctx.expect_page(timeout=5000) as pinfo:
@@ -822,7 +764,7 @@ def _abc_open_store_modal_and_select_all(session, keyword: str | None = None):
     time.sleep(1.5)
     if not _abc_modal_present(target):
         print("[ABC] 店舗選択の画面（決定する）が出ませんでした。保留。")
-        return None
+        return None, []
 
     def counts():
         try:
@@ -838,16 +780,41 @@ def _abc_open_store_modal_and_select_all(session, keyword: str | None = None):
 
     print("[ABC] 店舗選択の画面が出た。")
     print(f"[ABC] 開いた直後 counts={counts()}")
-    _abc_modal_dump(target)  # モーダル内部（入力/セレクト/左リスト行）を診断出力
-    # 全店＝データなし。左リストから店舗を「信頼された実クリック」で選ぶ
-    # （dispatchEvent は非信頼で Angular に届かない＝これまで選択数0のままだった）。
-    picked = _abc_pick_stores_trusted(target, counts, want=1)
-    print(f"[ABC] 店舗選択: {picked}店 → counts={(_pause(0.7) or counts())}")
-    print(f"[ABC] 追加: {_abc_button_click(target, '追加')} → counts={(_pause(1.0) or counts())}")
+    # 左リスト（127店）から、マスタ上「稼働中」の店だけを実クリックで選び 追加。
+    names = _abc_left_option_names(target, 300)
+    print(f"[ABC] 左リスト {len(names)}店。稼働店だけ選ぶ。")
+    added_codes: list[str] = []
+    added_names: list[str] = []
+    skipped_active: list[str] = []
+    for nm in names:
+        store = master.find_by_name(nm) if master is not None else None
+        if store is None or not getattr(store, "active", False):
+            continue
+        loc = target.get_by_text(nm, exact=True)
+        clicked = False
+        for i in range(min(loc.count(), 12)):
+            try:
+                el = loc.nth(i)
+                if el.is_visible():
+                    el.click(timeout=3000)
+                    clicked = True
+                    break
+            except Exception:
+                continue
+        if not clicked:
+            skipped_active.append(nm)
+            continue
+        _abc_button_click(target, "追加")  # ハイライトを右へ移す
+        time.sleep(0.25)
+        added_codes.append(store.store_code)
+        added_names.append(nm)
+    print(f"[ABC] 稼働店 追加: {len(added_codes)}店 {added_names[:8]}{'…' if len(added_names) > 8 else ''}")
+    if skipped_active:
+        print(f"[ABC] 追加できなかった稼働候補: {skipped_active[:8]}")
+    print(f"[ABC] 追加後 counts={counts()}")
     print(f"[ABC] 決定する: {_abc_button_click(target, '決定する')}")
     time.sleep(1.5)
-    _ = keyword  # 予備（キーワード絞り込みは _abc_modal_keyword_filter に温存）
-    return page
+    return page, added_codes
 
 
 def _extract_product_grid(session) -> list[dict]:
@@ -876,10 +843,10 @@ def _extract_product_grid(session) -> list[dict]:
         if name_idx is None:
             continue
         name = cells[name_idx].strip()
-        if name in seen or name in ("商品名",):
+        if name in seen or name in ("商品名",) or name in _ABC_TOTAL_NAMES:
             continue
         ints = _row_ints(cells[name_idx + 1:])
-        if len(ints) < 4:
+        if len(ints) < 3:  # 少なくとも [単価,数量,売上] は要る
             continue
         rank = None
         for c in reversed(cells):
@@ -928,40 +895,27 @@ def ingest_abc(
     ingested_at = datetime.now(timezone.utc)
     collected: list[ActualRow] = []
 
-    # ABC分析の店舗欄は既定で「全店」（グループ全体の集計）。店舗コンボは選択肢を
-    # 先読みしない（開いても0件）ため、無理に1店ずつ回さず、全店ぶんの売れ筋商品を
-    # 1回で取り込む。おすすめ料理・売れ筋（グループ全体）の把握にはこれで十分。
-    # 店舗別が要るようになったら、店舗コンボの遅延ロードを別途攻略する。
+    # FWのABC分析は「全店」だと商品行が出ない（＝店舗選択が必須）。店舗選択モーダルで
+    # マスタ上「稼働中」の店を実クリックで選び 追加→決定 すると、その集合の売れ筋商品が
+    # 1グリッドに集計される。これをグループ全体の売れ筋（おすすめ料理の検討材料）として
+    # 擬似店舗コード _group に焼く。1回の検索で済み、店舗別に回すより堅い。
     with fw_session(artifacts) as session:
         _open_abc(session)
-        print(f"[ABC] 全店ぶんを取り込む / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
-        # 日付プリセット『先月』を先に。次に店舗選択モーダルで全店を選ぶ（127店→追加→決定）。
+        print(f"[ABC] 稼働店ぶんを取り込む / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
+        # 日付プリセット『先月』を先に。次に店舗選択モーダルで稼働店を選ぶ。
         preset_ok = _select_date_preset(session, _ABC_PRESET_LASTMONTH)
         _set_date_range(session, d_from, d_to)
         print(f"[ABC] 日付プリセット『先月』選択: {preset_ok}")
-        # 全店（＝全選択）はFWでデータなしになるため、部分選択が要る。まず1店で検証。
-        _abc_open_store_modal_and_select_all(session, keyword="八銭")
-        # 実行ボタンの正体を掴むため、可視ボタンを出してから検索/実行/表示系を押す。
-        btns = session.page.evaluate(
-            r"""() => [...document.querySelectorAll('button,a,input[type=button],input[type=submit],div[role=button]')]
-              .filter(b=>b.offsetParent).map(b=>((b.innerText||b.value||'').replace(/\s+/g,' ').trim()))
-              .filter(t=>t && t.length<12).slice(0,24)"""
-        )
-        print(f"[ABC] 実行前の可視ボタン: {btns}")
+        page_ret, picked_codes = _abc_open_store_modal_and_select_all(session, master)
+        if page_ret is None:
+            print("[ABC] 店舗選択に失敗。0件で無害終了。")
+            picked_codes = []
+        # 実行ボタン（検 索）を押して集計を走らせる。
         pressed = _abc_button_click(
             session.page, "検索", "検 索", "実行", "表示する", "表示", "再表示", "更新", "集計"
         )
         print(f"[ABC] 実行ボタン: {pressed}")
-        # 選択が本体に効いたか（店舗表示）を確認
-        store_disp = session.page.evaluate(
-            r"""() => { const clip=s=>(s||'').replace(/\s+/g,' ').trim();
-            // ラジオ（値=全店/店舗選択）は除外し、選択店を映す text input を読む
-            const i=[...document.querySelectorAll('input[type=text]')]
-              .find(x=>x.offsetParent && /店|選択/.test(clip(x.value)));
-            return i ? clip(i.value).slice(0,40) : '(店舗表示のtext inputなし)'; }"""
-        )
-        print(f"[ABC] 店舗表示: '{store_disp}'")
-        # 127店の集計は重く、グリッドが埋まるまで数秒かかる。出るまで粘る。
+        # 集計はグリッドが埋まるまで数秒かかる。出るまで粘る。
         products: list[dict] = []
         for _ in range(10):
             time.sleep(2)
@@ -972,13 +926,8 @@ def ingest_abc(
         for cells in _visual_rows(session)[:14]:
             print("   ", " | ".join(cells[:14]))
         if not products:
-            # FWのABC分析は「全店」だと商品行が出ない。商品ABCは「店舗選択」で特定店を
-            # 選ぶ必要があり、それは別ウィンドウ／オーバーレイで開く。他画面と全く別実装で、
-            # プログラム的クリックでは開けず（Playwrightのpageイベントも発火しない）、
-            # 画面を目視しないと選び方を確定できない。天のスクショ待ちで保留。0件で無害。
-            # ダウンストリーム（parser/export/UI）は実装済み。ピッカー攻略で即データが入る。
             session.snapshot("noabc_group")
-            print("[ABC] 全店ではデータなし（商品ABCは店舗選択が要る）。ピッカー未攻略のため保留。")
+            print(f"[ABC] データなし（選択 {len(picked_codes)}店）。スナップショットを保存。")
         else:
             products.sort(
                 key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
@@ -1007,7 +956,7 @@ def ingest_abc(
                 )
             top = products[0]
             print(
-                f"[ABC] 全店 {len(products)}品 "
+                f"[ABC] 稼働{len(picked_codes)}店 {len(products)}品 "
                 f"（1位 {top['name'][:20]} 売上 {top['ints'][_ABC_SALES]:,}）"
                 f" → {len(collected)}行"
             )
