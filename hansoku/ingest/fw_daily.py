@@ -656,18 +656,32 @@ def _abc_open_store_modal_and_select_all(session):
     page = session.page
     ctx = page.context
     popup = None
-    # 「店舗選択」を実クリック（別窓が開くならそれを捕まえる）
-    loc = page.get_by_text("店舗選択", exact=True)
-    if loc.count() == 0:
-        loc = page.locator("*:text-is('店舗選択')")
+    # 可視の「店舗選択」を探す（Angularは非表示のテンプレ複製も持つので可視のみ狙う）
+    cand = page.get_by_text("店舗選択", exact=True)
+    trigger = None
+    for i in range(min(cand.count(), 10)):
+        try:
+            if cand.nth(i).is_visible():
+                trigger = cand.nth(i)
+                break
+        except Exception:
+            continue
+    if trigger is None:
+        vis = page.locator("*:text-is('店舗選択') >> visible=true")
+        if vis.count() > 0:
+            trigger = vis.first
+    if trigger is None:
+        print("[ABC] 可視の『店舗選択』が見つかりませんでした。保留。")
+        return None
+    # 実クリック（別窓が開くならそれを捕まえる）
     try:
-        with ctx.expect_page(timeout=6000) as pinfo:
-            loc.first.click(timeout=4000, force=True)
+        with ctx.expect_page(timeout=5000) as pinfo:
+            trigger.click(timeout=4000)
         popup = pinfo.value
         popup.wait_for_load_state("domcontentloaded")
         print(f"[ABC] 別ウィンドウ捕捉: {popup.url}")
     except Exception as exc:  # noqa: BLE001 — 別窓でなく同一ページのモーダルかもしれない
-        print(f"[ABC] 別窓は開かず（同一ページのモーダルを見る）: {str(exc)[:60]}")
+        print(f"[ABC] 別窓は開かず（同一ページのモーダルを見る）: {str(exc)[:70]}")
     target = popup or page
     time.sleep(1.5)
     if not _abc_modal_present(target):
