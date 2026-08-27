@@ -367,6 +367,7 @@ function buildStoreJump() {
 function render() {
   const app = document.getElementById("app");
   if (VIEW.kind === "store") app.innerHTML = renderStore(VIEW.code);
+  else if (VIEW.kind === "lunch") app.innerHTML = renderLunch(VIEW.code);
   else if (VIEW.kind === "overview") app.innerHTML = renderOverview();
   else if (VIEW.kind === "list") app.innerHTML = renderList();
   else if (VIEW.kind === "campaigns") app.innerHTML = renderCampaigns();
@@ -376,6 +377,8 @@ function render() {
 
   app.querySelectorAll("[data-store]").forEach(el =>
     el.addEventListener("click", () => go({ kind: "store", code: el.dataset.store })));
+  app.querySelectorAll("[data-lunch]").forEach(el =>
+    el.addEventListener("click", () => go({ kind: "lunch", code: el.dataset.lunch })));
   app.querySelectorAll("[data-view]").forEach(el =>
     el.addEventListener("click", () => go({ kind: el.dataset.view })));
   app.querySelectorAll("[data-cal]").forEach(el =>
@@ -1022,6 +1025,7 @@ function renderStore(code) {
       ${own}
     </section>
     ${renderHourly(code)}
+    ${renderLunchCard(code)}
     ${renderProducts(code)}
     ${neighBlock}
   `;
@@ -1051,6 +1055,159 @@ function renderProducts(code) {
         <span class="bnote">売上上位${items.length}品${monthLbl}　ランクはFWのABC</span></div>
       <div class="panel"><ul class="plist">${rows}</ul></div>
     </section>`;
+}
+
+// ── 新ランチ効果（FW ABC・部門ランチ）──────────────────────────────────────
+// config/lunch_analysis.json（店舗別）。出品数＝本体(定食)のみ。
+// トッピングは「付帯率（一人当たり出品数）」と「1食あたり売上」で見る。
+function lunchFor(code) {
+  return (DATA.lunch || []).find(x => x.store_code === code) || null;
+}
+function lunchMetrics(e) {
+  const sum = (arr, f) => (arr || []).reduce((a, x) => a + f(x), 0);
+  const dm = e.daily_meals || [], tp = e.toppings || [];
+  const dailyQty = sum(dm, x => x.qty), dailySales = sum(dm, x => x.sales);
+  const dailyCost = dailySales ? sum(dm, x => x.sales * x.cost_rate) / dailySales : 0;
+  const to = e.period ? e.period.to : null;
+  const days = to ? Math.max(1, daysBetween(e.start_date || e.period.from, to) + 1) : 1;
+  const topQty = sum(tp, x => x.qty), topSales = sum(tp, x => x.sales);
+  const lunchSales = (e.lunch && e.lunch.sales) || 0;
+  return {
+    days, dailyQty, dailySales, dailyCost,
+    dailyPerDay: dailyQty / days, dailyPerDaySales: dailySales / days,
+    avgCheck: dailyQty ? dailySales / dailyQty : 0,
+    topQty, topSales,
+    topAttach: dailyQty ? topQty / dailyQty : 0,
+    topPerMeal: dailyQty ? topSales / dailyQty : 0,
+    lunchSales, lunchCost: (e.lunch && e.lunch.cost_rate) || 0,
+    lunchShare: e.store_sales ? lunchSales / e.store_sales : 0,
+  };
+}
+const per1 = n => (Math.round(n * 10) / 10).toLocaleString("ja-JP");
+
+// 店舗詳細に出す小カード（見出し＋主要KPI＋「詳細（一覧）→」）
+function renderLunchCard(code) {
+  const e = lunchFor(code);
+  if (!e) return "";
+  const m = lunchMetrics(e);
+  return `
+    <section class="block">
+      <div class="bhead"><h2>新ランチ効果</h2>
+        <span class="bnote">${esc(e.menu_title || "日替わりランチ")}・${esc(e.start_date || "")}〜</span></div>
+      <div class="panel lsum">
+        <div class="lkpi"><div class="lkv">${per1(m.dailyPerDay)}<small>食/日</small></div>
+          <div class="lkl">日替わり出品数<span>計${m.dailyQty}食</span></div></div>
+        <div class="lkpi"><div class="lkv">${yen(m.dailyPerDaySales)}<small>/日</small></div>
+          <div class="lkl">日替わり売上<span>計${man(m.dailySales)}</span></div></div>
+        <div class="lkpi"><div class="lkv">${pct(m.dailyCost)}</div>
+          <div class="lkl">本体 原価率</div></div>
+        <div class="lkpi"><div class="lkv">${pct(m.topAttach)}</div>
+          <div class="lkl">トッピング付帯<span>+${yen(m.topPerMeal)}/食</span></div></div>
+        <button class="linkbtn lmore" data-lunch="${esc(code)}">詳細（一覧）→</button>
+      </div>
+    </section>`;
+}
+
+// 詳細＝一覧画面。日替わり本体・トッピング・ランチ全品を見やすく並べる。
+function renderLunch(code) {
+  const e = lunchFor(code);
+  if (!e) return `<div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
+    <div class="empty">ランチ分析データがありません。</div>`;
+  const m = lunchMetrics(e);
+  const store = (DATA.stores || []).find(s => s.store_code === code);
+  const nm = (store && store.store_name) || e.store_name || code;
+  const pr = e.period || {};
+
+  // 日替わり本体2品（強調）
+  const dm = (e.daily_meals || []).slice().sort((a, b) => b.sales - a.sales);
+  const maxM = Math.max(1, ...dm.map(p => p.qty));
+  const dailyRows = dm.map(p => `
+    <li class="lrow">
+      <span class="lname">${esc(p.name)}<span class="lnew">NEW</span></span>
+      <span class="lbar"><span class="lfill" style="width:${Math.max(4, Math.round(p.qty / maxM * 100))}%"></span></span>
+      <span class="lqty">${p.qty}<small>食</small></span>
+      <span class="lval">${yen(p.sales)}</span>
+      <span class="lcr">原${pct(p.cost_rate)}</span>
+    </li>`).join("");
+
+  // トッピング（付帯率・1食あたり売上）
+  const tp = (e.toppings || []).slice().sort((a, b) => b.qty - a.qty);
+  const topRows = tp.map(p => `
+    <li class="lrow toprow">
+      <span class="lname">${esc(p.name)}</span>
+      <span class="lqty">${p.qty}<small>個</small></span>
+      <span class="lattach">${pct(m.dailyQty ? p.qty / m.dailyQty : 0)}<small>付帯</small></span>
+      <span class="lval">${yen(p.sales)}</span>
+    </li>`).join("");
+
+  // ランチ全品（定食）の一覧＝人気順。新メニューにバッジ。
+  const meals = (e.menu || []).filter(x => x.type === "meal").slice().sort((a, b) => b.qty - a.qty);
+  const maxAll = Math.max(1, ...meals.map(p => p.qty));
+  const rankColor = r => r === "A" ? "var(--good-ink)" : r === "B" ? "var(--accent)" : "var(--ink-3)";
+  const mealRows = meals.map((p, i) => `
+    <li class="lrow${p.new ? " isnew" : ""}">
+      <span class="lno">${i + 1}</span>
+      <span class="lname">${esc(p.name)}${p.new ? '<span class="lnew">NEW</span>' : ""}
+        ${p.rank ? `<span class="lrank" style="--pc:${rankColor(p.rank)}">${esc(p.rank)}</span>` : ""}</span>
+      <span class="lbar"><span class="lfill" style="width:${Math.max(4, Math.round(p.qty / maxAll * 100))}%"></span></span>
+      <span class="lqty">${p.qty}<small>食</small></span>
+      <span class="lval">${yen(p.sales)}</span>
+      <span class="lcr">原${pct(p.cost_rate)}</span>
+    </li>`).join("");
+  const rice = (e.menu || []).filter(x => x.type === "rice");
+  const riceNote = rice.length
+    ? `<div class="lnote">ご飯：${rice.map(r => `${esc(r.name)} ${r.qty}回`).join("・")}（無料・売上0）</div>` : "";
+
+  // 前年・直前の対比（取れていれば）
+  const cmp = e.compare || {};
+  const cmpNote = (cmp.prev_year || cmp.prev_month)
+    ? ""  // TODO: 数値が入ったら対比表を出す
+    : `<div class="lnote muted">前年・直前（旧ランチ）の対比は取得中です。反映され次第ここに出ます。</div>`;
+
+  return `
+    <div class="crumbs">
+      <button class="linkbtn" data-store="${esc(code)}">← ${esc(nm)}の詳細</button>
+      <button class="linkbtn" data-view="schedule">全店スケジュール</button>
+    </div>
+    <header class="lhead">
+      <h1>${esc(nm)}　新ランチ効果</h1>
+      <div class="lsub">${esc(e.menu_title || "日替わりランチ")}　開始 ${esc(e.start_date || "?")}
+        期間 ${esc(pr.from || "")}〜${esc(pr.to || "")}（${m.days}日）</div>
+    </header>
+
+    <section class="block">
+      <div class="bhead"><h2>日替わりランチ（本体）</h2>
+        <span class="bnote">出品数＝本体のみ・トッピングは別集計</span></div>
+      <div class="panel">
+        <div class="lstat">
+          <div><b>${per1(m.dailyPerDay)}</b><span>食/日（計${m.dailyQty}食）</span></div>
+          <div><b>${yen(m.dailyPerDaySales)}</b><span>/日（計${man(m.dailySales)}）</span></div>
+          <div><b>${yen(m.avgCheck)}</b><span>1食A/V（客単価）</span></div>
+          <div><b>${pct(m.dailyCost)}</b><span>原価率</span></div>
+        </div>
+        <ul class="llist">${dailyRows}</ul>
+      </div>
+    </section>
+
+    <section class="block">
+      <div class="bhead"><h2>トッピング（売上底上げ）</h2>
+        <span class="bnote">出品数には含めない。付帯率＝一人（1食）当たり</span></div>
+      <div class="panel">
+        <div class="lstat">
+          <div><b>${pct(m.topAttach)}</b><span>付帯率（${m.topQty}個/${m.dailyQty}食）</span></div>
+          <div><b>+${yen(m.topPerMeal)}</b><span>1食あたり売上</span></div>
+          <div><b>${man(m.topSales)}</b><span>トッピング売上計</span></div>
+        </div>
+        <ul class="llist">${topRows || '<li class="lnote">トッピングなし</li>'}</ul>
+      </div>
+    </section>
+
+    <section class="block">
+      <div class="bhead"><h2>ランチ全品 一覧（人気順）</h2>
+        <span class="bnote">ランチ部門 ${man(m.lunchSales)}・原価${pct(m.lunchCost)}・店内構成比 ${pct(m.lunchShare)}</span></div>
+      <div class="panel"><ul class="llist">${mealRows}</ul>${riceNote}</div>
+    </section>
+    ${cmpNote}`;
 }
 
 // 時間帯別 売上・集客（FW時間帯別売上）。棒＝売上、ピーク時間帯を強調。

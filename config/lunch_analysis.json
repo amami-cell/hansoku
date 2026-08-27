@@ -1,0 +1,46 @@
+{
+  "note": "ランチ効果分析（FW ABC・部門06757）。数値は fw-daily --mode lunch-analyze の結果を手で貼る。出品数＝本体(定食)のみ。トッピングは付帯率(一人当たり)＋1食あたり売上で見る。前年・直前が取れたら compare に入れる。",
+  "stores": [
+    {
+      "store_code": "1739",
+      "store_name": "ぎふや 天満橋店",
+      "menu_title": "新・日替わりランチ",
+      "start_date": "2026-08-04",
+      "period": { "from": "2026-08-01", "to": "2026-08-25", "days": 25 },
+      "store_sales": 6137765,
+      "lunch": { "sales": 1041540, "cost_rate": 0.2929 },
+      "daily_meals": [
+        { "name": "ミックスフライ定食", "qty": 92, "sales": 117760, "cost_rate": 0.3078, "rank": "A", "new": true },
+        { "name": "冷やし鶏蕎麦とミニ海鮮丼", "qty": 11, "sales": 15180, "cost_rate": 0.3623, "rank": "C", "new": true }
+      ],
+      "toppings": [
+        { "name": "カニクリームコロッケ", "qty": 12, "sales": 2040, "cost_rate": 0.3823, "new": true },
+        { "name": "もつ煮込み変更", "qty": 7, "sales": 1260, "cost_rate": 0.1722, "new": true },
+        { "name": "ニンニク", "qty": 4, "sales": 400, "cost_rate": 0.2000, "new": true }
+      ],
+      "menu": [
+        { "name": "チキンカツ定食", "qty": 287, "sales": 281260, "cost_rate": 0.2734, "rank": "A", "type": "meal" },
+        { "name": "トンタマ定食", "qty": 235, "sales": 235000, "cost_rate": 0.2750, "rank": "A", "type": "meal" },
+        { "name": "ミックスフライ定食", "qty": 92, "sales": 117760, "cost_rate": 0.3078, "rank": "A", "type": "meal", "new": true },
+        { "name": "トンテキ定食100g", "qty": 55, "sales": 53900, "cost_rate": 0.3336, "rank": "A", "type": "meal" },
+        { "name": "トンタマ1.5定食", "qty": 41, "sales": 53300, "cost_rate": 0.2707, "rank": "A", "type": "meal" },
+        { "name": "唐カツ定食", "qty": 41, "sales": 53300, "cost_rate": 0.2823, "rank": "A", "type": "meal" },
+        { "name": "唐トン定食", "qty": 38, "sales": 49400, "cost_rate": 0.2653, "rank": "B", "type": "meal" },
+        { "name": "ライスカレー", "qty": 48, "sales": 47040, "cost_rate": 0.2530, "rank": "B", "type": "meal" },
+        { "name": "トンテキ定食150g", "qty": 32, "sales": 38400, "cost_rate": 0.3191, "rank": "B", "type": "meal" },
+        { "name": "唐揚げ定食", "qty": 32, "sales": 35200, "cost_rate": 0.2881, "rank": "B", "type": "meal" },
+        { "name": "チキンカツカレー", "qty": 24, "sales": 28800, "cost_rate": 0.2824, "rank": "B", "type": "meal" },
+        { "name": "トンタマダブル定食", "qty": 13, "sales": 19500, "cost_rate": 0.2839, "rank": "C", "type": "meal" },
+        { "name": "冷やし鶏蕎麦とミニ海鮮丼", "qty": 11, "sales": 15180, "cost_rate": 0.3623, "rank": "C", "type": "meal", "new": true },
+        { "name": "トンテキ定食300g", "qty": 4, "sales": 7200, "cost_rate": 0.3227, "rank": "C", "type": "meal" },
+        { "name": "豚串カツカレー", "qty": 2, "sales": 2600, "cost_rate": 0.3138, "rank": "C", "type": "meal" },
+        { "name": "カニクリームコロッケ", "qty": 12, "sales": 2040, "cost_rate": 0.3823, "rank": "C", "type": "topping", "new": true },
+        { "name": "もつ煮込み変更", "qty": 7, "sales": 1260, "cost_rate": 0.1722, "rank": "C", "type": "topping", "new": true },
+        { "name": "ニンニク", "qty": 4, "sales": 400, "cost_rate": 0.2000, "rank": "C", "type": "topping", "new": true },
+        { "name": "ご飯大盛り", "qty": 35, "sales": 0, "cost_rate": 0, "rank": "C", "type": "rice" },
+        { "name": "ご飯おかわり(無料)", "qty": 98, "sales": 0, "cost_rate": 0, "rank": "C", "type": "rice" }
+      ],
+      "compare": { "prev_year": null, "prev_month": null }
+    }
+  ]
+}

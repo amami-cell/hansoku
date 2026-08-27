@@ -37,6 +37,20 @@ from ..stores import StoreMaster
 VALID_KINDS = {"gm", "lunch", "osusume", "bounenkai", "dev", "closure"}
 DEFAULT_SCHEDULE_PATH = ROOT / "config" / "schedule.yaml"
 DEFAULT_CREATIVES_PATH = ROOT / "config" / "creatives.yaml"
+DEFAULT_LUNCH_PATH = ROOT / "config" / "lunch_analysis.json"
+
+
+def load_lunch(path: Path | None = None) -> list[dict]:
+    """人が貼る config/lunch_analysis.json（ランチ効果分析）を読む。無ければ空。"""
+    p = Path(path) if path else DEFAULT_LUNCH_PATH
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    stores = data.get("stores", []) if isinstance(data, dict) else []
+    return stores if isinstance(stores, list) else []
 
 
 def _resolve_stores(master: StoreMaster, stores_field) -> tuple[list[str], bool]:
@@ -418,6 +432,8 @@ def build(
         "campaigns": campaigns or [],
         # 制作物ギャラリー（config/creatives.yaml 由来）。空でも画面は成立する。
         "creatives": creatives or [],
+        # ランチ効果分析（config/lunch_analysis.json 由来・店舗別）。空でも画面は成立する。
+        "lunch": load_lunch(),
     }
 
 
