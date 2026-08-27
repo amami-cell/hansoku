@@ -28,6 +28,7 @@ on:
           - abc-ingest
           - abc-store-probe
           - lunch-analyze
+          - hourly-store-probe
         default: explore
       path:
         description: '探索するメニュー名（カンマ区切り）'
@@ -57,6 +58,14 @@ on:
         description: 'lunch-analyze: 期間の終了日'
         required: false
         default: '25'
+      hourly_store:
+        description: 'hourly-store-probe: 対象店名（コンボ部分一致）'
+        required: false
+        default: 'NagaGutsu'
+      hourly_ranges:
+        description: 'hourly-store-probe: 期間 ラベル:from:to,... (YYYY-MM-DD)'
+        required: false
+        default: '基準:2026-08-01:2026-08-14,eタバコ後:2026-08-15:2026-08-16,空調後:2026-08-17:2026-08-23,新ランチ後:2026-08-24:2026-08-26'
 
 env:
   TZ: Asia/Tokyo
@@ -147,6 +156,11 @@ jobs:
                 --abc-item "${{ inputs.abc_item }}" \
                 --abc-month "${{ inputs.abc_month }}" \
                 --abc-end-day "${{ inputs.abc_end_day }}" \
+                --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "hourly-store-probe" ]; then
+              xvfb-run -a python -m hansoku.cli fw-daily --mode hourly-store-probe \
+                --hourly-store "${{ inputs.hourly_store }}" \
+                --hourly-ranges "${{ inputs.hourly_ranges }}" \
                 --artifacts fw-artifacts
             else
               xvfb-run -a python -m hansoku.cli fw-explore $args --artifacts fw-artifacts

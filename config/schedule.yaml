@@ -95,6 +95,8 @@ campaigns:
   - { id: r1137-gm, stores: ["1137"], title: GM改定, kind: gm, start: "2026-09-05", note: 9月初旬（概算）}
 
   # ── NagaGutsu（1151）──────────────────────────────
+  - { id: r1151-ecig, stores: ["1151"], title: 電子タバコOK（喫煙可に変更）, kind: dev, start: "2026-08-15", note: "8/15〜電子タバコの店内利用を許可。時間帯別の集客・客単価で効果を見る" }
+  - { id: r1151-aircon, stores: ["1151"], title: 空調改善（ダクトファン交換・清掃）, kind: dev, start: "2026-08-17", note: "8/17〜ダクトファン入れ替え＋清掃で店内温度が快適に（それ以前は空調効かず高温）。時間帯別の集客・客単価で効果を見る" }
   - { id: r1151-lunch, stores: ["1151"], title: 新ランチ「禁断の沼パスタ」, kind: lunch, start: "2026-08-24", note: "スープパスタ3種（完熟トマト/ペペロンチーノ/こくうまクリーム）＋トッピング10種＋追いメニュー（POP 2608）" }
   - { id: r1151-bounenkai, stores: ["1151"], title: 忘年会（既存コース名称変更）, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
   - { id: r1151-gm, stores: ["1151"], title: GM改定, kind: gm, start: "2026-08-15", note: 8月中旬（概算）}

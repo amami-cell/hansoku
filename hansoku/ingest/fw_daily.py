@@ -565,6 +565,69 @@ def ingest_hourly(
     return 0
 
 
+# 時間帯グリッドの整数列 [組数0, 客数1, 売上2, 組単価3, 客単価4, 坪売上5, …]。
+_HOUR_SPP = 4  # 客単価の位置
+
+
+def probe_hourly_store(
+    artifacts: Path,
+    *,
+    store: str,
+    ranges: list[tuple[str, str, str]],
+) -> int:
+    """1店舗・複数の任意期間で 時間帯別売上 を引き、時間帯×(客数・売上・客単価)を印字する診断。
+
+    施策前後の比較（例: 電子タバコ許可・空調改善の前後で、時間帯別の集客／客単価が
+    どう動いたか）に使う。ranges は (ラベル, YYYY/MM/DD_from, YYYY/MM/DD_to) の並び。
+    1回のログインで店を選び、各レンジで日付を入れ直して検索→グリッドを読む。
+    """
+    import sys
+
+    sys.stdout.reconfigure(line_buffering=True)
+    from .fw_budget import _click_search, _combo_options, _select_combo
+
+    with fw_session(artifacts) as session:
+        _open_hourly(session)
+        options = _combo_options(session)
+        hit = next((o for o in options if store in o["name"]), None)
+        if hit is None:
+            cand = [o["name"][:18] for o in options[:14]]
+            print(f"[時間帯probe] コンボに『{store}』一致なし。候補先頭: {cand}")
+            return 1
+        print(f"[時間帯probe] 対象店: {hit['name']}（value={hit['value']}）／{len(ranges)}レンジ")
+        for label, d_from, d_to in ranges:
+            if not _select_combo(session, hit["value"]):
+                print(f"[時間帯probe] {label}: 店舗選択に失敗")
+                continue
+            if not _set_date_range(session, d_from, d_to):
+                print(f"[時間帯probe] {label}: 日付設定に失敗 {d_from}〜{d_to}")
+            _click_search(session)
+            time.sleep(1.6)
+            grid = _extract_hour_grid(session)
+            if not grid:
+                session.snapshot(f"nohour_probe_{label}")
+                print(f"=== {label} {d_from}〜{d_to} === グリッドなし")
+                continue
+            tot_c = tot_s = 0
+            lines = []
+            for band in grid:
+                ints = band["ints"]
+                covers = ints[_HOUR_COVERS] if len(ints) > _HOUR_COVERS else 0
+                sales = ints[_HOUR_SALES] if len(ints) > _HOUR_SALES else 0
+                spp = ints[_HOUR_SPP] if len(ints) > _HOUR_SPP else (
+                    round(sales / covers) if covers else 0
+                )
+                tot_c += covers
+                tot_s += sales
+                lines.append(f"  {band['hour']:>2}時  客数{covers:>5}  売上{sales:>8}  客単価{spp:>5}")
+            avg = round(tot_s / tot_c) if tot_c else 0
+            print(f"=== {label} {d_from}〜{d_to} ===（{len(grid)}帯）")
+            for ln in lines:
+                print(ln)
+            print(f"  －－ 合計 客数{tot_c} 売上{tot_s} 客単価{avg}")
+    return 0
+
+
 # ── ABC分析（販売管理→店舗業務）からの商品別売上取り込み ──────────────────
 #
 # 画面（URL 末尾 abc…）は EJS TreeGrid で、選んだ期間を商品別に集計する。
