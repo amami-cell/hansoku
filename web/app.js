@@ -1158,11 +1158,26 @@ function renderLunch(code) {
   const riceNote = rice.length
     ? `<div class="lnote">ご飯：${rice.map(r => `${esc(r.name)} ${r.qty}回`).join("・")}（無料・売上0）</div>` : "";
 
-  // 前年・直前の対比（取れていれば）
+  // 前年・直前の対比
   const cmp = e.compare || {};
-  const cmpNote = (cmp.prev_year || cmp.prev_month)
-    ? ""  // TODO: 数値が入ったら対比表を出す
-    : `<div class="lnote muted">前年・直前（旧ランチ）の対比は取得中です。反映され次第ここに出ます。</div>`;
+  let cmpNote;
+  if (cmp.unavailable) {
+    const sm = (cmp.store_monthly || []).map(r =>
+      `<div><b>${man(r.sales)}</b><span>${esc(r.ym)}${r.partial ? "（途中）" : ""}</span></div>`).join("");
+    cmpNote = `
+      <section class="block">
+        <div class="bhead"><h2>前年比・新旧比較</h2><span class="bnote">FW ABCの制約</span></div>
+        <div class="panel">
+          <div class="lnote">${esc(cmp.reason || "過去月のランチ明細は取得できません。")}</div>
+          ${sm ? `<div class="bnote" style="margin-top:10px">参考：店全体の月次売上（ランチ単位ではありません）</div>
+            <div class="lstat" style="border:0;margin:6px 0 0">${sm}</div>` : ""}
+        </div>
+      </section>`;
+  } else if (cmp.prev_year || cmp.prev_month) {
+    cmpNote = "";  // 数値が入ったら対比表（将来、取得できた店で）
+  } else {
+    cmpNote = `<div class="lnote muted">前年・直前（旧ランチ）の対比は取得中です。</div>`;
+  }
 
   return `
     <div class="crumbs">

@@ -40,7 +40,15 @@
         { "name": "ご飯大盛り", "qty": 35, "sales": 0, "cost_rate": 0, "rank": "C", "type": "rice" },
         { "name": "ご飯おかわり(無料)", "qty": 98, "sales": 0, "cost_rate": 0, "rank": "C", "type": "rice" }
       ],
-      "compare": { "prev_year": null, "prev_month": null }
+      "compare": {
+        "unavailable": true,
+        "reason": "FWのABC分析は過去月の商品明細を返さない（前年2025/08・直前2026/07とも、4回再試行・日付確認済みでデータなし）。ランチ単位の前年比／新旧比はABCからは取得できません。",
+        "store_monthly": [
+          { "ym": "2025-08", "sales": 4059832 },
+          { "ym": "2026-07", "sales": 9044786 },
+          { "ym": "2026-08", "sales": 6116074, "partial": true }
+        ]
+      }
     }
   ]
 }
