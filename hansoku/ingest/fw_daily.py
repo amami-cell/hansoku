@@ -1260,18 +1260,27 @@ def analyze_lunch(
             (2025, month, "前年"),
             (2026, prev_month, "直前(旧)"),
         )
+        want = f"{eff_start:02d}"
         for y, mm, label in periods:
-            _set_date_range(session, d(y, mm, eff_start), d(y, mm, end_day))
-            time.sleep(0.4)
-            applied = date_fields()
-            print(f"[LUNCH] {label} 日付欄セット後={applied}")
-            rows = _abc_search_and_rows(session)
-            period_row = next(
-                (" | ".join(c[:6]) for c in rows if c and c[0].strip() == "期間"), "?"
-            )
-            nodata = any("データなし" in c for row in rows for c in row)
-            print(f"[LUNCH] {label} グリッド期間={period_row} / データなし={nodata}")
-            print(f"[LUNCH] ==== {label} {y}/{mm}/{eff_start:02d}..{end_day:02d} 部門グリッド（関連行） ====")
+            # 過去月はFWのABCが返ってこないことがある（月次実績には売上あり＝flaky）。
+            # 日付を毎回入れ直して検索を最大4回、期間行が目的の年月を映すまで粘る。
+            rows: list[list[str]] = []
+            period_row, nodata, applied = "?", True, []
+            for attempt in range(4):
+                _set_date_range(session, d(y, mm, eff_start), d(y, mm, end_day))
+                time.sleep(0.5)
+                applied = date_fields()
+                rows = _abc_search_and_rows(session, tries=1, waits=14)
+                period_row = next(
+                    (" | ".join(c[:6]) for c in rows if c and c[0].strip() == "期間"), "?"
+                )
+                nodata = any("データなし" in c for row in rows for c in row) or not _extract_product_grid(session)
+                ok_period = f"{y}/{mm}/{want}" in period_row.replace(" ", "") or f"{y}/{int(mm)}/{eff_start}" in period_row.replace(" ", "")
+                print(f"[LUNCH] {label} 試行{attempt + 1} 日付欄={applied} 期間={period_row} データなし={nodata}")
+                if not nodata and ok_period:
+                    break
+                time.sleep(2)
+            print(f"[LUNCH] ==== {label} {y}/{mm}/{eff_start:02d}..{end_day:02d} 部門グリッド（関連行）／データなし={nodata} ====")
             for cells in rows:
                 line = " | ".join(cells[:14])
                 if kw.search(line):

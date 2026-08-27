@@ -5,7 +5,7 @@
       "store_code": "1739",
       "store_name": "ぎふや 天満橋店",
       "menu_title": "新・日替わりランチ",
-      "start_date": "2026-08-04",
+      "start_date": "2026-08-01",
       "period": { "from": "2026-08-01", "to": "2026-08-25", "days": 25 },
       "store_sales": 6137765,
       "lunch": { "sales": 1041540, "cost_rate": 0.2929 },
