@@ -368,6 +368,8 @@ function render() {
   const app = document.getElementById("app");
   if (VIEW.kind === "store") app.innerHTML = renderStore(VIEW.code);
   else if (VIEW.kind === "lunch") app.innerHTML = renderLunch(VIEW.code);
+  else if (VIEW.kind === "campaign") app.innerHTML = renderCampaign(VIEW.id);
+  else if (VIEW.kind === "manage") app.innerHTML = renderManage();
   else if (VIEW.kind === "overview") app.innerHTML = renderOverview();
   else if (VIEW.kind === "list") app.innerHTML = renderList();
   else if (VIEW.kind === "campaigns") app.innerHTML = renderCampaigns();
@@ -375,10 +377,12 @@ function render() {
   else if (VIEW.kind === "calendar") app.innerHTML = renderCalendar();
   else app.innerHTML = renderSchedule();
 
+  app.querySelectorAll("[data-camp]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "campaign", id: el.dataset.camp }); }));
   app.querySelectorAll("[data-store]").forEach(el =>
     el.addEventListener("click", () => go({ kind: "store", code: el.dataset.store })));
   app.querySelectorAll("[data-lunch]").forEach(el =>
-    el.addEventListener("click", () => go({ kind: "lunch", code: el.dataset.lunch })));
+    el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "lunch", code: el.dataset.lunch }); }));
   app.querySelectorAll("[data-view]").forEach(el =>
     el.addEventListener("click", () => go({ kind: el.dataset.view })));
   app.querySelectorAll("[data-cal]").forEach(el =>
@@ -482,11 +486,11 @@ function renderSchedule() {
     const k = kindOf(c.kind);
     const tip = `${c.title}（${c.start === c.end ? c.start : c.start + "〜" + c.end}）`;
     if (c.start === c.end) {
-      return `<div class="cmk" style="left:${P(frac(c.start))};--lane:${lane};--kc:${k.color}" title="${tip}">
+      return `<div class="cmk" data-camp="${c.id}" style="left:${P(frac(c.start))};--lane:${lane};--kc:${k.color}" title="${tip}">
         <span class="cmk-t">${c.title}</span></div>`;
     }
     const l = frac(c.start), w = Math.max(frac(c.end) - l, 0.015);
-    return `<div class="cbar" style="left:${P(l)};width:${P(w)};--lane:${lane};--kc:${k.color}" title="${tip}">${c.title}</div>`;
+    return `<div class="cbar" data-camp="${c.id}" style="left:${P(l)};width:${P(w)};--lane:${lane};--kc:${k.color}" title="${tip}">${c.title}</div>`;
   };
 
   const rowsHtml = DATA.regions.map(r => {
@@ -533,6 +537,8 @@ function renderSchedule() {
     ${renderGroupProducts()}
     <div class="ovrlink">
       <button class="linkbtn" data-view="campaigns">施策の効果 →</button>
+      <span class="sep">／</span>
+      <button class="linkbtn" data-view="manage">店舗管理 →</button>
       <span class="sep">／</span>
       <button class="linkbtn" data-view="list">店舗カードで見る →</button>
       <span class="sep">／</span>
@@ -763,7 +769,7 @@ function renderCampaigns() {
     const memoHtml = memo
       ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${c.id}" title="メモを編集">✎</button></div>`
       : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${c.id}">＋ 要因メモ</button></div>`;
-    return `<li>
+    return `<li data-camp="${c.id}">
       <span class="kchip" style="--kc:${k.color}">${k.label}</span>
       <div class="cbody">
         <div class="ctitle">${c.title}<span class="tagx">${scope}</span>
@@ -799,6 +805,207 @@ function renderCampaigns() {
         <span class="bnote">${METRIC_LABELS[METRIC]}・確定月の全店合算／前年同月比　${withEff.length ? `前年比プラス ${plus}/${withEff.length}` : ""}</span></div>
       ${fbar}
       ${rows.length ? `<ul class="clist">${body}</ul>` : empty}
+    </section>`;
+}
+
+// ── 施策詳細（スケジュール・一覧からタップして遷移）────────────────────────
+// 施策内容／進捗（状態・期間の進み）／結果（対象店ごとの前年比・前月比・集客・目標達成）
+// ／要因メモ／POP・制作物を1画面に。ランチ施策は各店の効果一覧への導線も出す。
+const campById = id => (DATA.campaigns || []).find(c => c.id === id) || null;
+const creativesForCampaign = id => (DATA.creatives || []).filter(cr => cr.campaign_id === id);
+
+// 期間の進み具合（%）。予定=0／終了=100／実施中はstart〜endの経過割合。
+function campTimeProgress(c) {
+  const st = parseDate(c.start), en = parseDate(c.end), now = new Date();
+  const k = campStatus(c).k;
+  if (k === "soon") return 0;
+  if (k === "done") return 100;
+  if (c.start === c.end) return 100;
+  return Math.max(1, Math.min(99, Math.round((now - st) / (en - st) * 100)));
+}
+
+function renderCampaign(id) {
+  const c = campById(id);
+  if (!c) return `<div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
+    <div class="empty">施策が見つかりません。</div>`;
+  const k = kindOf(c.kind);
+  const st = campStatus(c);
+  const range = c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
+  const sum = campaignSummary(c);
+  const tgt = targetOf(c);
+  const prog = campTimeProgress(c);
+  const isRatio = METRIC === "cost_rate";
+
+  // 目標（進捗欄で編集）
+  const goalBtn = tgt != null
+    ? `<button class="goalbtn" data-goal="${c.id}" title="目標を編集">目標 ${man(tgt)}円 ✎</button>`
+    : `<button class="goalbtn add" data-goal="${c.id}">＋ 目標を入力</button>`;
+
+  // 全体結果（確定月・全店合算）
+  let overall;
+  if (isRatio) {
+    overall = `<div class="empty">原価率では施策の効果集計を出しません。売上に切り替えてご覧ください。</div>`;
+  } else if (sum.stores) {
+    const yoy = sum.pct != null
+      ? `<span class="${sum.pct >= 0 ? "up" : "down"}">前年比 ${signed(sum.pct)}%</span>`
+      : `<span class="muted">前年比 ―</span>`;
+    const mom = sum.momPct != null
+      ? `<span class="${sum.momPct >= 0 ? "up" : "down"}">前月比 ${signed(sum.momPct)}%</span>` : "";
+    const rate = (tgt && sum.cur) ? sum.cur / tgt * 100 : null;
+    const goalKpi = tgt != null
+      ? `<div class="kpi"><div class="lbl">目標達成</div>
+          <div class="big ${rate != null && rate >= 100 ? "up" : "down"}">${rate != null ? rate.toFixed(0) + "%" : "―"}</div>
+          <div class="delta">目標 ${man(tgt)} → 実績 ${man(sum.cur)}</div></div>` : "";
+    const covKpi = (METRIC === "sales" && sum.covers != null)
+      ? `<div class="kpi"><div class="lbl">集客（確定分）</div><div class="big">${nin(sum.covers)}</div>
+          <div class="delta">${sum.coversPct != null ? `<span class="${sum.coversPct >= 0 ? "up" : "down"}">前年比 ${signed(sum.coversPct)}%</span>` : "前年比 ―"}</div></div>` : "";
+    overall = `<div class="kpis">
+      <div class="kpi"><div class="lbl">実績（確定${sum.months}ヶ月・${sum.stores}/${sum.total}店）</div>
+        <div class="big">${man(sum.cur)}<span class="unit">円</span></div>
+        <div class="delta">${yoy}　${mom}</div></div>
+      ${goalKpi}${covKpi}
+    </div>`;
+  } else {
+    overall = `<div class="empty">確定した月の売上が出たら、前年同月比などの結果を表示します（月単位で集計）。</div>`;
+  }
+
+  // 対象店ごとの結果（クリックで店舗詳細へ／ランチ施策は効果一覧への導線）
+  const rowsHtml = c.stores.map(code => {
+    if (!hasData(code)) return `<li class="cmrow is-muted"><span class="cmnm">${storeName(code)}</span>
+      <span class="cmeff sub">実績データなし</span></li>`;
+    const lunchLink = (c.kind === "lunch" && lunchFor(code))
+      ? `<button class="linkbtn cmlunch" data-lunch="${esc(code)}">新ランチ効果 →</button>` : "";
+    let effHtml = `<span class="sub">確定待ち</span>`;
+    if (!isRatio) {
+      const eff = campEffect(code, c);
+      if (eff) {
+        const yoy = eff.pct != null
+          ? `<span class="${eff.pct >= 0 ? "up" : "down"}">前年比 ${signed(eff.pct)}%</span>` : `<span class="muted">前年比 ―</span>`;
+        const mom = eff.momPct != null
+          ? `・<span class="${eff.momPct >= 0 ? "up" : "down"}">前月比 ${signed(eff.momPct)}%</span>` : "";
+        const cov = (METRIC === "sales") ? campCovers(code, c) : null;
+        const cv = cov ? `・集客 ${nin(cov.cur)}${cov.pct != null ? `(<span class="${cov.pct >= 0 ? "up" : "down"}">${signed(cov.pct)}%</span>)` : ""}` : "";
+        effHtml = `<b>${man(eff.cur)}円</b>　${yoy}${mom}${cv}`;
+      }
+    } else {
+      effHtml = `<span class="muted">―</span>`;
+    }
+    return `<li class="cmrow" data-store="${code}">
+      <span class="cmnm">${storeName(code)}</span>
+      <span class="cmeff">${effHtml}</span>${lunchLink}</li>`;
+  }).join("");
+
+  // 要因メモ
+  const memo = memoOf(c);
+  const memoHtml = memo
+    ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${c.id}" title="メモを編集">✎</button></div>`
+    : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${c.id}">＋ 要因メモ</button></div>`;
+
+  // POP・制作物（この施策に紐づくもの）
+  const crs = creativesForCampaign(id);
+  const crBlock = crs.length
+    ? `<section class="block"><div class="bhead"><h2>POP・制作物</h2><span class="bnote">${crs.length}件</span></div>
+        <div class="cgrid">${crs.map(creativeCard).join("")}</div></section>` : "";
+
+  return `
+    <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button>
+      <span class="sep">／</span><button class="linkbtn" data-view="campaigns">施策の効果</button></div>
+    <header class="chd">
+      <div class="chd-top">
+        <span class="kchip" style="--kc:${k.color}">${k.label}</span>
+        <span class="cstat ${st.k}">${st.label}</span>
+        <span class="tagx">${c.scope_all ? "全店" : c.stores.length + "店"}</span>
+      </div>
+      <h1 class="cname">${c.title}</h1>
+      <div class="csub">${range}</div>
+      ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
+    </header>
+
+    <section class="block">
+      <div class="bhead"><h2>進捗</h2>
+        <span class="bnote">${st.label}${st.k === "live" ? `・期間の ${prog}% 経過` : ""}</span></div>
+      <div class="panel">
+        <div class="cprog"><span class="cprog-fill ${st.k}" style="width:${prog}%"></span></div>
+        <div class="cprog-lbl"><span>${c.start}</span><span class="cprog-now ${st.k}">${st.label}</span><span>${c.end}</span></div>
+        <div class="cgoalbar">${goalBtn}</div>
+      </div>
+    </section>
+
+    <section class="block">
+      <div class="bhead"><h2>結果（全体）</h2>
+        <span class="bnote">${METRIC_LABELS[METRIC]}・確定月の全店合算／前年同月比（当月の暫定は除く）</span></div>
+      <div class="panel">${overall}</div>
+    </section>
+
+    <section class="block">
+      <div class="bhead"><h2>要因メモ</h2>
+        <span class="bnote">なぜ動いた／動かなかったか</span></div>
+      <div class="panel">${memoHtml}</div>
+    </section>
+
+    <section class="block">
+      <div class="bhead"><h2>対象店ごとの結果</h2>
+        <span class="bnote">${c.stores.length}店　店をタップで詳細へ</span></div>
+      <div class="panel"><ul class="cmlist">${rowsHtml}</ul></div>
+    </section>
+    ${crBlock}`;
+}
+
+// ── 店舗管理（店舗ごとの施策一覧・進捗・結果）─────────────────────────────
+// 各店の施策を「実施中→予定→終了」で並べ、実施中を目立たせる。
+// 施策バーをタップで施策詳細、店名タップで店舗詳細へ。
+function renderManage() {
+  const STATUS_ORDER = { live: 0, soon: 1, done: 2 };
+  const isRatio = METRIC === "cost_rate";
+  const blocks = DATA.regions.map(r => {
+    const codes = r.stores.filter(hasData);
+    if (!codes.length) return "";
+    const color = regionColor(r.name);
+    const storeBlocks = codes.map(code => {
+      const camps = (DATA.campaigns || []).filter(c => c.stores.includes(code))
+        .sort((a, b) => {
+          const d = STATUS_ORDER[campStatus(a).k] - STATUS_ORDER[campStatus(b).k];
+          return d !== 0 ? d : (a.start < b.start ? -1 : 1);
+        });
+      const live = camps.filter(c => campStatus(c).k === "live").length;
+      const items = camps.length
+        ? camps.map(c => {
+            const k = kindOf(c.kind), s = campStatus(c);
+            let eff = null;
+            if (!isRatio) eff = campEffect(code, c);
+            const effHtml = eff && eff.pct != null
+              ? `<span class="${eff.pct >= 0 ? "up" : "down"}">前年比 ${signed(eff.pct)}%</span>`
+              : `<span class="sub">${s.k === "soon" ? "開始前" : "―"}</span>`;
+            const prog = campTimeProgress(c);
+            return `<li class="mgrow ${s.k}" data-camp="${c.id}">
+              <span class="kdot" style="background:${k.color}"></span>
+              <span class="mgnm">${c.title}</span>
+              <span class="cstat ${s.k}">${s.label}</span>
+              <span class="mgbar" title="期間の${prog}%経過"><span class="mgfill ${s.k}" style="width:${prog}%"></span></span>
+              <span class="mgeff">${effHtml}</span></li>`;
+          }).join("")
+        : `<li class="mgrow is-empty"><span class="sub">施策なし</span></li>`;
+      return `<div class="mgstore${live ? " has-live" : ""}">
+        <button class="mghd" data-store="${code}">
+          <span class="rtag" style="--rc:${color}">${r.name}</span>
+          <span class="mgsnm">${storeName(code)}</span>
+          ${live ? `<span class="mglive">実施中 ${live}件</span>` : `<span class="mgnone">実施中なし</span>`}
+          <span class="more" style="--rc:${color}">詳しく →</span>
+        </button>
+        <ul class="mglist">${items}</ul>
+      </div>`;
+    }).join("");
+    return `<div class="sgrp"><span>${r.name}</span><span class="sgrp-n">${codes.length}店</span></div>${storeBlocks}`;
+  }).join("");
+
+  return `
+    <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button>
+      <span class="sep">／</span><button class="linkbtn" data-view="campaigns">施策の効果</button></div>
+    <section class="block">
+      <div class="bhead"><h2>店舗管理</h2>
+        <span class="bnote">店舗ごとの施策一覧・進捗・結果　実施中を上に　施策/店名をタップで詳細</span></div>
+      <div class="klgrow">${legendHtml()}</div>
+      ${blocks}
     </section>`;
 }
 
@@ -993,7 +1200,7 @@ function renderStore(code) {
         const memoHtml = memo
           ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${c.id}" title="メモを編集">✎</button></div>`
           : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${c.id}">＋ 要因メモ</button></div>`;
-        return `<li>
+        return `<li data-camp="${c.id}">
           <span class="kchip" style="--kc:${k.color}">${k.label}</span>
           <div class="cbody">
             <div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}<span class="cstat ${st.k}">${st.label}</span></div>

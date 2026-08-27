@@ -33,3 +33,9 @@ creatives:
     date: "2025-06-01"
     file: creatives/2025/kisetsu2025/LG3_kisetsu_menu_POP_2506.pdf
 
+  - id: gfy10-lunch-2608
+    title: ランチメニューPOP（新・日替わりランチ 2608）
+    campaign: r1739-lunch
+    date: "2026-08-01"
+    file: creatives/2026/r1739-lunch/GFY10_Lmenu_2608.pdf
+

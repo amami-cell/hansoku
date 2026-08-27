@@ -121,7 +121,7 @@ campaigns:
 
   # ── ぎふや パナンテ天満橋（1739）───────────────────
   - { id: r1739-osusume, stores: ["1739"], title: 秋おすすめ（小皿系4〜6品）, kind: osusume, start: "2026-09-20", end: "2026-11-30" }
-  - { id: r1739-lunch, stores: ["1739"], title: ランチ変更, kind: lunch, start: "2026-08-01" }
+  - { id: r1739-lunch, stores: ["1739"], title: 新・日替わりランチ, kind: lunch, start: "2026-08-01", note: "冷やし鶏蕎麦&ミニ海鮮丼・ミックスフライ定食＋トッピング（POP 2608）" }
   - { id: r1739-gm, stores: ["1739"], title: GM改定, kind: gm, start: "2026-11-01", note: 開始月のみ（概算）}
 
   # ── すさび湯 河原町三条店（1742）───────────────────
