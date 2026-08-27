@@ -1274,17 +1274,23 @@ def probe_abc_totals(
                     print("[ABC合計probe] 店舗選択に失敗。終了。")
                     return 1
                 print(f"[ABC合計probe] 対象店: {hit}")
+            print(f"=== {label} {d_from}〜{d_to} ===")
             _abc_click_radio(session.page, "グループ")
             rows = _abc_search_and_rows(session)
-            print(f"=== {label} {d_from}〜{d_to} ===")
             for cells in rows:
-                line = " | ".join(cells[:6])
-                m = hdr.match(line)
+                m = hdr.match(" | ".join(cells[:6]))
                 if not m:
                     continue
                 name = m.group(1).strip()
                 if any(w in name for w in want):
                     print(f"  {name:<12} 数量{num(m.group(3)):>6}  売上{num(m.group(4)):>10}")
+            # 部門で 飲み放題(¥0)・ハッピーアワーの数量も拾う（有料1杯単価の算出用）
+            _abc_click_radio(session.page, "部門")
+            drows = _abc_search_and_rows(session)
+            for cells in drows:
+                m = hdr.match(" | ".join(cells[:6]))
+                if m and any(w in m.group(1) for w in ("飲み放題", "ハッピーアワー")):
+                    print(f"  [部門] {m.group(1).strip():<16} 数量{num(m.group(3)):>6}  売上{num(m.group(4)):>10}")
     return 0
 
 
