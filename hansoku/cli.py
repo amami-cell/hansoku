@@ -273,6 +273,28 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
             month=args.abc_month or "08",
             end_day=int(args.abc_end_day),
         )
+    if args.mode == "abc-totals-probe":
+        from .ingest.fw_daily import probe_abc_totals
+
+        def _slash(d: str) -> str:
+            return d.strip().replace("-", "/")
+
+        raw = args.abc_ranges or (
+            "基準:2026-08-01:2026-08-14,eタバコ後:2026-08-15:2026-08-16,"
+            "空調後:2026-08-17:2026-08-23,新ランチ後:2026-08-24:2026-08-26"
+        )
+        ranges: list[tuple[str, str, str]] = []
+        for chunk in raw.split(","):
+            parts = chunk.split(":")
+            if len(parts) != 3:
+                continue
+            label, d_from, d_to = parts
+            ranges.append((label.strip(), _slash(d_from), _slash(d_to)))
+        return probe_abc_totals(
+            Path(args.artifacts),
+            store=args.abc_store or "NagaGutsu",
+            ranges=ranges,
+        )
     if args.mode == "hourly-store-probe":
         from .ingest.fw_daily import probe_hourly_store
 
@@ -563,7 +585,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="probe",
         choices=["probe", "ingest", "report", "monthly", "monthly-dry",
                  "hourly", "hourly-dry", "abc", "abc-dry", "abc-store-probe",
-                 "lunch-analyze", "hourly-store-probe"],
+                 "lunch-analyze", "hourly-store-probe", "abc-totals-probe"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument("--month", default=None, help="hourly の対象月（YYYY-MM、既定は前月）")
@@ -583,6 +605,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="hourly-store-probe の対象店名（コンボ部分一致、既定=NagaGutsu）")
     fwdaily.add_argument("--hourly-ranges", default=None, dest="hourly_ranges",
                          help="hourly-store-probe の期間 'ラベル:from:to,...'（YYYY-MM-DD）")
+    fwdaily.add_argument("--abc-ranges", default=None, dest="abc_ranges",
+                         help="abc-totals-probe の期間 'ラベル:from:to,...'（YYYY-MM-DD）")
     fwdaily.add_argument("--menu", default=None, help="report モードで開く帳票名")
     fwdaily.add_argument("--months", type=int, default=2, help="遡る月数")
     fwdaily.add_argument("--limit", type=int, default=None, help="先頭N店だけ（試走用）")

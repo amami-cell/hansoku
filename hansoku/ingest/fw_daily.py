@@ -1235,6 +1235,59 @@ def probe_abc_store(
     return 0
 
 
+def probe_abc_totals(
+    artifacts: Path,
+    *,
+    store: str,
+    ranges: list[tuple[str, str, str]],
+) -> int:
+    """1店・複数期間で ABC(分類=グループ) の グループ合計＋総合計（数量・売上）を印字。
+
+    施策前後で『一人あたりの注文品数（出品数）』が上がったかを見るための素材。
+    フード/ドリンク/コースの各数量と総合計を期間ごとに出す。客数（時間帯別プローブの
+    合計）で割れば 品数/客 が出る。ranges は (ラベル, YYYY/MM/DD_from, YYYY/MM/DD_to)。
+    """
+    import re
+    import sys
+
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+    hdr = re.compile(r"^(.+?)\s\|\s(\d+\.\d+)%\s\|\s([\d,]+)\s\|\s([\d,]+)")
+    num = lambda s: int(s.replace(",", ""))  # noqa: E731
+    want = ("フード", "ドリンク", "コース", "合計")
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+        _open_abc(session)
+        _select_date_preset(session, _ABC_PRESET_LASTMONTH)
+        hit = None
+        for label, d_from, d_to in ranges:
+            _set_date_range(session, d_from, d_to)
+            if hit is None:
+                hit = _abc_open_store_modal_and_select_one(session, store)
+                if hit is None:
+                    print("[ABC合計probe] 店舗選択に失敗。終了。")
+                    return 1
+                print(f"[ABC合計probe] 対象店: {hit}")
+            _abc_click_radio(session.page, "グループ")
+            rows = _abc_search_and_rows(session)
+            print(f"=== {label} {d_from}〜{d_to} ===")
+            for cells in rows:
+                line = " | ".join(cells[:6])
+                m = hdr.match(line)
+                if not m:
+                    continue
+                name = m.group(1).strip()
+                if any(w in name for w in want):
+                    print(f"  {name:<12} 数量{num(m.group(3)):>6}  売上{num(m.group(4)):>10}")
+    return 0
+
+
 def _abc_item_qty(session, keyword: str) -> int:
     """現在のABCグリッドから、商品名に keyword を含む行の販売数量を返す（無ければ0）。"""
     for p in _extract_product_grid(session):
