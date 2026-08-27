@@ -263,6 +263,16 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
             d_from=_slash(args.abc_from),
             d_to=_slash(args.abc_to),
         )
+    if args.mode == "lunch-analyze":
+        from .ingest.fw_daily import analyze_lunch
+
+        return analyze_lunch(
+            Path(args.artifacts),
+            store=args.abc_store or "ぎふや 天満橋店",
+            item=args.abc_item or "冷やし鶏",
+            month=args.abc_month or "08",
+            end_day=int(args.abc_end_day),
+        )
     if args.mode == "report":
         return report_probe(Path(args.artifacts), args.menu or "損益管理,実績管理業務,月別日別実績")
     if args.mode in ("monthly", "monthly-dry"):
@@ -530,16 +540,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         default="probe",
         choices=["probe", "ingest", "report", "monthly", "monthly-dry",
-                 "hourly", "hourly-dry", "abc", "abc-dry", "abc-store-probe"],
+                 "hourly", "hourly-dry", "abc", "abc-dry", "abc-store-probe",
+                 "lunch-analyze"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument("--month", default=None, help="hourly の対象月（YYYY-MM、既定は前月）")
     fwdaily.add_argument("--abc-store", default=None, dest="abc_store",
-                         help="abc-store-probe の対象店名（部分一致）")
+                         help="abc-store-probe/lunch-analyze の対象店名（部分一致）")
     fwdaily.add_argument("--abc-from", default=None, dest="abc_from",
                          help="abc-store-probe の開始日 YYYY-MM-DD")
     fwdaily.add_argument("--abc-to", default=None, dest="abc_to",
                          help="abc-store-probe の終了日 YYYY-MM-DD")
+    fwdaily.add_argument("--abc-item", default=None, dest="abc_item",
+                         help="lunch-analyze: 開始日検出に使う新商品名の一部（既定=冷やし鶏）")
+    fwdaily.add_argument("--abc-month", default=None, dest="abc_month",
+                         help="lunch-analyze: 対象月 MM（既定=08）")
+    fwdaily.add_argument("--abc-end-day", default=25, dest="abc_end_day",
+                         help="lunch-analyze: 期間の終了日（既定=25）")
     fwdaily.add_argument("--menu", default=None, help="report モードで開く帳票名")
     fwdaily.add_argument("--months", type=int, default=2, help="遡る月数")
     fwdaily.add_argument("--limit", type=int, default=None, help="先頭N店だけ（試走用）")

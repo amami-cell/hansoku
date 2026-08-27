@@ -1164,6 +1164,95 @@ def probe_abc_store(
     return 0
 
 
+def _abc_item_qty(session, keyword: str) -> int:
+    """現在のABCグリッドから、商品名に keyword を含む行の販売数量を返す（無ければ0）。"""
+    for p in _extract_product_grid(session):
+        if keyword in p["name"]:
+            ints = p["ints"]
+            return ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
+    return 0
+
+
+def analyze_lunch(
+    artifacts: Path,
+    *,
+    store: str = "ぎふや 天満橋店",
+    item: str = "冷やし鶏",
+    month: str = "08",
+    end_day: int = 25,
+    detect_lo: int = 1,
+    detect_hi: int = 25,
+) -> int:
+    """新ランチの効果を測る診断。1ログインで 開始日検出→直近→前年 を回す。
+
+    開始日 = item（新商品）が最初に売れた日。2026年内の累積販売数量>0 の最小日を
+    二分探索で特定。次に 部門分類で 直近(2026/月/開始日..end_day) と
+    前年(2025/同日付) のグリッドを出し、ランチ部門・合計・新2品の行を印字する。
+    数値の集計（1日平均・構成比・前年比）は印字結果から人手で組む。
+    """
+    import re as _re
+    import sys as _sys
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    def d(y: int, dd: int) -> str:
+        return f"{y}/{month}/{dd:02d}"
+
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+        _open_abc(session)
+        _select_date_preset(session, _ABC_PRESET_LASTMONTH)
+        hit = _abc_open_store_modal_and_select_one(session, store)
+        print(f"[LUNCH] 店舗={hit}")
+        if hit is None:
+            session.snapshot("lunch_nostore")
+            return 0
+        _abc_click_radio(session.page, "部門")
+
+        def item_qty_upto(dd: int) -> int:
+            _set_date_range(session, d(2026, 1), d(2026, dd))
+            _abc_search_and_rows(session)
+            q = _abc_item_qty(session, item)
+            print(f"[LUNCH] 2026/{month}/01..{dd:02d} 『{item}』数量={q}")
+            return q
+
+        start_day = None
+        if item_qty_upto(detect_hi) <= 0:
+            print(f"[LUNCH] 『{item}』は{month}月{detect_hi}日までに販売なし。開始日は検出できず。")
+        else:
+            lo, hi = detect_lo, detect_hi
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if item_qty_upto(mid) > 0:
+                    hi = mid
+                else:
+                    lo = mid + 1
+            start_day = lo
+            print(f"[LUNCH] ★開始日 = 2026/{month}/{start_day:02d}")
+        eff_start = start_day or 1
+        days = end_day - eff_start + 1
+        print(f"[LUNCH] 直近=2026/{month}/{eff_start:02d}..{end_day:02d}（{days}日）／前年=2025 同日付")
+
+        kw = _re.compile("ランチ|合計|冷やし鶏|ミックスフライ")
+        for y, label in ((2026, "直近"), (2025, "前年")):
+            _set_date_range(session, d(y, eff_start), d(y, end_day))
+            rows = _abc_search_and_rows(session)
+            print(f"[LUNCH] ==== {label} {y}/{month}/{eff_start:02d}..{end_day:02d} 部門グリッド（関連行） ====")
+            for cells in rows:
+                line = " | ".join(cells[:14])
+                if kw.search(line):
+                    print("   ", line)
+        session.snapshot("lunch_analyze")
+    return 0
+
+
 def probe(artifacts: Path) -> int:
     """日別実績入力に入り、店舗を選び検索して、グリッド構造を吸い出す。"""
     with fw_session(artifacts) as session:
