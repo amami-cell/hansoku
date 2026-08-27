@@ -1198,8 +1198,10 @@ def analyze_lunch(
     except Exception:  # noqa: BLE001
         pass
 
-    def d(y: int, dd: int) -> str:
-        return f"{y}/{month}/{dd:02d}"
+    prev_month = f"{int(month) - 1:02d}" if int(month) > 1 else "12"
+
+    def d(y: int, mm: str, dd: int) -> str:
+        return f"{y}/{mm}/{dd:02d}"
 
     with fw_session(artifacts) as session:
         try:
@@ -1217,7 +1219,7 @@ def analyze_lunch(
         _abc_click_radio(session.page, "部門")
 
         def item_qty_upto(dd: int) -> int:
-            _set_date_range(session, d(2026, 1), d(2026, dd))
+            _set_date_range(session, d(2026, month, 1), d(2026, month, dd))
             _abc_search_and_rows(session)
             q = _abc_item_qty(session, item)
             print(f"[LUNCH] 2026/{month}/01..{dd:02d} 『{item}』数量={q}")
@@ -1240,11 +1242,36 @@ def analyze_lunch(
         days = end_day - eff_start + 1
         print(f"[LUNCH] 直近=2026/{month}/{eff_start:02d}..{end_day:02d}（{days}日）／前年=2025 同日付")
 
+        def date_fields() -> list[str]:
+            try:
+                return session.page.evaluate(
+                    r"""() => { const re=/^\d{4}\/\d{1,2}\/\d{1,2}$/;
+                    return [...document.querySelectorAll('input')]
+                      .filter(i=>i.offsetParent && re.test((i.value||'').trim()))
+                      .map(i=>i.value.trim()); }"""
+                )
+            except Exception:
+                return []
+
         kw = _re.compile("ランチ|合計|冷やし鶏|ミックスフライ")
-        for y, label in ((2026, "直近"), (2025, "前年")):
-            _set_date_range(session, d(y, eff_start), d(y, end_day))
+        # 直近(新ランチ)＝2026/当月/開始日..end、前年＝2025/同日付、直前(旧ランチ)＝2026/前月/同日付
+        periods = (
+            (2026, month, "直近(新)"),
+            (2025, month, "前年"),
+            (2026, prev_month, "直前(旧)"),
+        )
+        for y, mm, label in periods:
+            _set_date_range(session, d(y, mm, eff_start), d(y, mm, end_day))
+            time.sleep(0.4)
+            applied = date_fields()
+            print(f"[LUNCH] {label} 日付欄セット後={applied}")
             rows = _abc_search_and_rows(session)
-            print(f"[LUNCH] ==== {label} {y}/{month}/{eff_start:02d}..{end_day:02d} 部門グリッド（関連行） ====")
+            period_row = next(
+                (" | ".join(c[:6]) for c in rows if c and c[0].strip() == "期間"), "?"
+            )
+            nodata = any("データなし" in c for row in rows for c in row)
+            print(f"[LUNCH] {label} グリッド期間={period_row} / データなし={nodata}")
+            print(f"[LUNCH] ==== {label} {y}/{mm}/{eff_start:02d}..{end_day:02d} 部門グリッド（関連行） ====")
             for cells in rows:
                 line = " | ".join(cells[:14])
                 if kw.search(line):
