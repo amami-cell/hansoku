@@ -1216,13 +1216,21 @@ def probe_abc_store(
             return [...new Set(out)].slice(0,30); }"""
         )
         print(f"[ABCprobe] 条件ラジオ: {radios}")
+        # ランチ部門・沼パスタが下位（行60以降）に埋もれるため、全行を出しつつ
+        # ランチ関連キーワード一致行を別途ハイライトする。
+        KW = ("スープ", "沼", "ランチ", "パスタ", "完熟", "ペペロン", "こくうま", "クリーム", "禁断")
         for level in levels:
             ok = _abc_click_radio(session.page, level)
             print(f"[ABCprobe] 分類ラジオ『{level}』クリック={ok}")
             rows = _abc_search_and_rows(session)
-            print(f"[ABCprobe] === 分類={level} 視覚行（先頭60） ===")
-            for cells in rows[:60]:
+            print(f"[ABCprobe] === 分類={level} 視覚行（先頭200/計{len(rows)}） ===")
+            for cells in rows[:200]:
                 print("   ", " | ".join(cells[:14]))
+            hits = [c for c in rows if any(k in " ".join(c) for k in KW)]
+            if hits:
+                print(f"[ABCprobe] --- {level}: ランチ関連キーワード一致 {len(hits)}行 ---")
+                for cells in hits:
+                    print("   *", " | ".join(cells[:14]))
         session.snapshot("abc_store_probe")
     return 0
 
