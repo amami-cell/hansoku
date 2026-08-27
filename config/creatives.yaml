@@ -39,3 +39,9 @@ creatives:
     date: "2026-08-01"
     file: creatives/2026/r1739-lunch/GFY10_Lmenu_2608.pdf
 
+  - id: ng2-lunch-2608
+    title: ランチメニューPOP（禁断の沼パスタ 2608）
+    campaign: r1151-lunch
+    date: "2026-08-24"
+    file: creatives/2026/r1151-lunch/NG2_lunch_2608.pdf
+
