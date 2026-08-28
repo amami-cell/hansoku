@@ -31,6 +31,7 @@ on:
           - hourly-store-probe
           - abc-totals-probe
           - menu-hourly-probe
+          - abc-store-ingest
         default: explore
       path:
         description: '探索するメニュー名（カンマ区切り）'
@@ -72,6 +73,10 @@ on:
         description: 'abc-totals-probe: 期間 ラベル:from:to,... (YYYY-MM-DD)'
         required: false
         default: '基準:2026-08-01:2026-08-14,eタバコ後:2026-08-15:2026-08-16,空調後:2026-08-17:2026-08-23,新ランチ後:2026-08-24:2026-08-26'
+      abc_ingest_month:
+        description: 'abc-store-ingest: 対象月 YYYY-MM（既定は前月）。--abc-store に店コード or 店名'
+        required: false
+        default: '2026-07'
 
 env:
   TZ: Asia/Tokyo
@@ -177,6 +182,11 @@ jobs:
               xvfb-run -a python -m hansoku.cli fw-daily --mode menu-hourly-probe \
                 --hourly-store "${{ inputs.hourly_store }}" \
                 --hourly-ranges "${{ inputs.hourly_ranges }}" \
+                --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "abc-store-ingest" ]; then
+              xvfb-run -a python -m hansoku.cli fw-daily --mode abc-store-ingest \
+                --abc-store "${{ inputs.abc_store }}" \
+                --month "${{ inputs.abc_ingest_month }}" \
                 --artifacts fw-artifacts
             else
               xvfb-run -a python -m hansoku.cli fw-explore $args --artifacts fw-artifacts

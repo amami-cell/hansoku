@@ -263,6 +263,22 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
             d_from=_slash(args.abc_from),
             d_to=_slash(args.abc_to),
         )
+    if args.mode == "abc-store-ingest":
+        from .ingest.fw_daily import ingest_abc_store
+
+        if not args.abc_store:
+            raise SystemExit("abc-store-ingest には --abc-store（店コード or 店名）が必要です")
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return ingest_abc_store(
+                warehouse,
+                master,
+                artifacts=Path(args.artifacts),
+                store=args.abc_store,
+                month=args.month,
+                dry_run=args.dry_run,
+            )
     if args.mode == "lunch-analyze":
         from .ingest.fw_daily import analyze_lunch
 
@@ -607,7 +623,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["probe", "ingest", "report", "monthly", "monthly-dry",
                  "hourly", "hourly-dry", "abc", "abc-dry", "abc-store-probe",
                  "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
-                 "menu-hourly-probe"],
+                 "menu-hourly-probe", "abc-store-ingest"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument("--month", default=None, help="hourly の対象月（YYYY-MM、既定は前月）")

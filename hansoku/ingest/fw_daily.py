@@ -1096,6 +1096,164 @@ def ingest_abc(
     return 0
 
 
+def ingest_abc_store(
+    warehouse,
+    master,
+    *,
+    artifacts: Path,
+    store: str,
+    month: str | None = None,
+    top_n: int = _ABC_TOP_N,
+    dry_run: bool = False,
+) -> int:
+    """1店舗の商品ABC（売れ筋・上位）＋部門内訳（ランチ/ドリンク等）を取り込む。
+
+    店舗選択モーダルで1店だけを選び、分類=全商品で商品別売上の上位、分類=部門で
+    部門別の数量・売上（原価率）を取得する。実店舗コードに焼くが、店ごとに
+    source=fw_abc_<code> で分けるので、店を1つずつ流しても互いに上書きしない
+    （replace_actuals の冪等キーは source×grain×date）。ナガグツ以外の稼働店を
+    1店ずつ集めていく用途。store は店コードでも店名でも可。
+    """
+    import re as _re
+    import sys as _sys
+    from datetime import date as _date
+    from datetime import datetime, timezone
+
+    from ..model import (
+        GRAIN_MONTH,
+        KIND_FINAL,
+        METRIC_DEPT_QTY,
+        METRIC_DEPT_SALES,
+        METRIC_PRODUCT_SALES,
+        ActualRow,
+    )
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    if not month:
+        today = datetime.now(timezone.utc)
+        y, m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
+        month = f"{y}-{m:02d}"
+    d_from, d_to = _month_bounds(month)
+    rep_date = _date(int(month[:4]), int(month[5:7]), 1)
+
+    # store（コード or 名前）→ 実店舗を解決。モーダルの左リストは店名で一致させる。
+    st = None
+    try:
+        st = master.by_code(store)
+    except Exception:  # noqa: BLE001
+        st = master.find_by_name(store) or next(
+            (s for s in master.active if store in s.store_name), None
+        )
+    if st is None:
+        print(f"[ABC店] 店舗『{store}』をマスタで解決できません。終了。")
+        return 1
+    code, name = st.store_code, st.store_name
+    source = f"fw_abc_{code}"
+    ingested_at = datetime.now(timezone.utc)
+    collected: list[ActualRow] = []
+    hdr = _re.compile(r"^(.+?)\s\|\s(\d+\.\d+)%\s\|\s([\d,]+)\s\|\s([\d,]+)")
+    num = lambda s: int(s.replace(",", ""))  # noqa: E731
+
+    t0 = time.time()
+    print(f"[ABC店] {code} {name} / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+        _open_abc(session)
+        _select_date_preset(session, _ABC_PRESET_LASTMONTH)
+        _set_date_range(session, d_from, d_to)  # _month_bounds は既に YYYY/MM/DD
+        hit = _abc_open_store_modal_and_select_one(session, name)
+        if hit is None:
+            print(f"[ABC店] 店舗選択に失敗（{name}）。スナップショットを保存し 0件終了。")
+            session.snapshot(f"abc_store_ingest_nostore_{code}")
+            return 0
+
+        # --- 分類=全商品：売れ筋 上位 ---
+        _abc_click_radio(session.page, "全商品")
+        _abc_search_and_rows(session)  # グリッド充填まで粘る
+        products = _extract_product_grid(session)
+        products.sort(
+            key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
+            reverse=True,
+        )
+        n_prod = 0
+        for prod in products[:top_n]:
+            ints = prod["ints"]
+            if len(ints) <= _ABC_SALES:
+                continue
+            sales = ints[_ABC_SALES]
+            if sales <= 0:
+                continue
+            collected.append(
+                ActualRow(
+                    store_code=code,
+                    date=rep_date,
+                    grain=GRAIN_MONTH,
+                    metric=METRIC_PRODUCT_SALES,
+                    value=float(sales),
+                    product_name=prod["name"][:80],
+                    product_category=prod["rank"],
+                    kind=KIND_FINAL,
+                    source=source,
+                    ingested_at=ingested_at,
+                )
+            )
+            n_prod += 1
+        top = products[0]["name"][:16] if products else "-"
+        print(f"[ABC店] {code} 商品 {len(products)}品 → {n_prod}行（1位 {top}） (+{time.time() - t0:.0f}s)")
+
+        # --- 分類=部門：ランチ/ドリンク等の内訳（数量・売上・原価率） ---
+        _abc_click_radio(session.page, "部門")
+        drows = _abc_search_and_rows(session)
+        n_dept = 0
+        for cells in drows:
+            m = hdr.match(" | ".join(cells[:6]))
+            if not m:
+                continue
+            dname = m.group(1).strip()
+            if dname in _ABC_TOTAL_NAMES or dname in ("部門", "部門名", "分類"):
+                continue
+            cost_rate = m.group(2)  # 原価率 "25.25"
+            qty = num(m.group(3))
+            sales = num(m.group(4))
+            if sales <= 0 and qty <= 0:
+                continue
+            collected.append(
+                ActualRow(
+                    store_code=code, date=rep_date, grain=GRAIN_MONTH,
+                    metric=METRIC_DEPT_SALES, value=float(sales),
+                    product_name=dname[:80], product_category=cost_rate,
+                    kind=KIND_FINAL, source=source, ingested_at=ingested_at,
+                )
+            )
+            collected.append(
+                ActualRow(
+                    store_code=code, date=rep_date, grain=GRAIN_MONTH,
+                    metric=METRIC_DEPT_QTY, value=float(qty),
+                    product_name=dname[:80], product_category=cost_rate,
+                    kind=KIND_FINAL, source=source, ingested_at=ingested_at,
+                )
+            )
+            n_dept += 1
+        print(f"[ABC店] {code} 部門 {n_dept}件 (+{time.time() - t0:.0f}s)")
+
+    print(f"[ABC店] 収集 {len(collected)} 行")
+    if dry_run:
+        print("[ABC店] dry-run のため書き込みはしません")
+        return 0
+    warehouse.ensure_schema()
+    loaded = warehouse.replace_actuals(collected)
+    print(f"[ABC店] warehouse へ {loaded} 件 書き込みました（source={source}）")
+    return 0
+
+
 def _abc_click_radio(page, label: str) -> bool:
     """条件パネルのラジオ/ラベル（全商品・部門・グループ・メニュー等）を実クリックする。"""
     loc = page.get_by_text(label, exact=True)

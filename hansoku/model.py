@@ -45,6 +45,9 @@ METRIC_SUPPLY_INVENTORY: Final = "supply_inventory"
 METRIC_COVERS: Final = "covers"
 METRIC_AVG_CHECK: Final = "avg_check"
 METRIC_PRODUCT_SALES: Final = "product_sales"
+# 部門別（ABC 分類=部門）の売上・数量。ランチ/ドリンク/コース等の構成把握に使う。
+METRIC_DEPT_SALES: Final = "dept_sales"
+METRIC_DEPT_QTY: Final = "dept_qty"
 
 METRICS: Final = (
     METRIC_SALES,
@@ -63,6 +66,8 @@ METRICS: Final = (
     METRIC_COVERS,
     METRIC_AVG_CHECK,
     METRIC_PRODUCT_SALES,
+    METRIC_DEPT_SALES,
+    METRIC_DEPT_QTY,
 )
 
 # 合計してよい指標（加法的）。客単価・原価率のような比率は合計できないため、
@@ -84,6 +89,8 @@ ADDITIVE_METRICS: Final = frozenset(
         METRIC_SUPPLY_INVENTORY,
         METRIC_COVERS,
         METRIC_PRODUCT_SALES,
+        METRIC_DEPT_SALES,
+        METRIC_DEPT_QTY,
     }
 )
 
