@@ -574,3 +574,20 @@ tbody tr:last-child td{border-bottom:0;}
 .clist li{cursor:pointer;}
 .clist li:hover{background:var(--surface-2);}
 .clist li:hover .cgo{text-decoration:underline;}
+
+/* ── 年間販促（renderYear）───────────────────────────────────────────────── */
+.ytabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
+.ytab{font:inherit;font-size:13px;font-weight:600;color:var(--ink-2);
+  background:var(--surface);border:1px solid var(--line);border-radius:8px;
+  padding:5px 14px;cursor:pointer;}
+.ytab:hover{border-color:var(--accent-line);}
+.ytab.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+:root[data-theme="dark"] .ytab.on,:root:not([data-theme="light"]) .ytab.on{color:#0E1116;}
+@media (prefers-color-scheme:light){:root:not([data-theme="dark"]) .ytab.on{color:#fff;}}
+.ysum{display:flex;flex-wrap:wrap;gap:8px 14px;margin-bottom:12px;
+  font-size:12px;color:var(--ink-2);}
+.ysum-i{display:inline-flex;align-items:center;gap:5px;}
+.ysum-i i{width:9px;height:9px;border-radius:2px;display:inline-block;}
+.ygrp{display:flex;gap:8px;align-items:baseline;background:var(--surface-2);
+  padding:6px 12px;border-radius:7px;margin:14px 0 4px;font-weight:700;
+  font-size:12.5px;color:var(--ink-2);}

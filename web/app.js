@@ -59,6 +59,7 @@ let DATA = null;
 let VIEW = { kind: "schedule" };   // schedule(TOP) | calendar | store,code | list | overview
 let METRIC = "sales";
 let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"）
+let YEAR = null;                   // 年間販促ビューで表示中の年（数値）
 let CAMP_FILTER = { status: "all", kind: "all" };   // 施策の効果ビューの絞り込み
 // 販促の目標（施策id→円）。本番は Neon（/api/targets）に共有保存、
 // プレビュー等 API が無い所では端末内（localStorage）に保存する。
@@ -241,6 +242,7 @@ async function boot() {
     return;
   }
   CAL_MONTH = CURRENT_MONTH;
+  YEAR = new Date().getFullYear();
   GOALS = loadGoals();
   NOTES = loadNotes();
   await fetchServerTargets();   // 本番は Neon の共有目標を読む。無ければ端末内保存で動く
@@ -373,6 +375,7 @@ function render() {
   else if (VIEW.kind === "overview") app.innerHTML = renderOverview();
   else if (VIEW.kind === "list") app.innerHTML = renderList();
   else if (VIEW.kind === "campaigns") app.innerHTML = renderCampaigns();
+  else if (VIEW.kind === "year") app.innerHTML = renderYear();
   else if (VIEW.kind === "gallery") app.innerHTML = renderGallery();
   else if (VIEW.kind === "calendar") app.innerHTML = renderCalendar();
   else app.innerHTML = renderSchedule();
@@ -387,6 +390,8 @@ function render() {
     el.addEventListener("click", () => go({ kind: el.dataset.view })));
   app.querySelectorAll("[data-cal]").forEach(el =>
     el.addEventListener("click", () => { CAL_MONTH = addMonth(CAL_MONTH, el.dataset.cal === "next" ? 1 : -1); render(); }));
+  app.querySelectorAll("[data-year]").forEach(el =>
+    el.addEventListener("click", () => { YEAR = +el.dataset.year; render(); }));
   app.querySelectorAll("[data-goal]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); editGoal(el.dataset.goal); }));
   app.querySelectorAll("[data-memo]").forEach(el =>
@@ -537,6 +542,8 @@ function renderSchedule() {
     ${renderGroupProducts()}
     <div class="ovrlink">
       <button class="linkbtn" data-view="campaigns">施策の効果 →</button>
+      <span class="sep">／</span>
+      <button class="linkbtn" data-view="year">年間販促 →</button>
       <span class="sep">／</span>
       <button class="linkbtn" data-view="manage">店舗管理 →</button>
       <span class="sep">／</span>
@@ -1108,6 +1115,70 @@ function lunchHeadline(c) {
 }
 // 施策1件の比較ワンライン（環境系→前後、ランチ→ランチ要点）。無ければ空。
 const campHeadline = c => envHeadline(c.id) || (c.kind === "lunch" ? lunchHeadline(c) : "");
+
+// ── 年間販促（振り返り）─────────────────────────────────────────────────
+// 年（2024〜今年）を選び、四半期別に施策を並べる。各行に実績＋直近差異、詳細へ。
+// 施策1件の実績＋直近差異の1行（環境/ランチはワンライン、月次施策は実績＋前年比/前月比）。
+function campReviewLine(c) {
+  const hl = campHeadline(c);
+  if (hl) return hl;
+  if (METRIC === "cost_rate") return "";
+  const sum = campaignSummary(c);
+  if (sum.stores) {
+    const yoy = sum.pct != null ? `<span class="${sum.pct >= 0 ? "up" : "down"}">前年比 ${signed(sum.pct)}%</span>` : "";
+    const mom = sum.momPct != null ? `・<span class="${sum.momPct >= 0 ? "up" : "down"}">前月比 ${signed(sum.momPct)}%</span>` : "";
+    return `<div class="ccmp"><span class="ccmp-i">実績 <b>${man(sum.cur)}円</b></span>` +
+      (yoy ? `<span class="ccmp-i">${yoy}${mom}</span>` : "") +
+      `<span class="ccmp-i sub">確定${sum.months}ヶ月・${sum.stores}店</span></div>`;
+  }
+  return "";
+}
+function renderYear() {
+  const camps = DATA.campaigns || [];
+  const yNow = new Date().getFullYear();
+  const years = []; for (let y = 2024; y <= yNow; y++) years.push(y);
+  const year = YEAR || yNow;
+  const ys = `${year}-01-01`, ye = `${year}-12-31`;
+  const inYear = c => c.start.slice(0, 10) <= ye && (c.end || c.start).slice(0, 10) >= ys;
+  const list = camps.filter(inYear).sort((a, b) => a.start < b.start ? -1 : 1);
+  // 四半期グループ（開始月ベース。前年から続く施策は「前年から継続」）
+  const q = c => c.start.slice(0, 4) < String(year) ? 0 : Math.ceil(+c.start.slice(5, 7) / 3);
+  const groups = [[0, "前年から継続"], [1, "1〜3月"], [2, "4〜6月"], [3, "7〜9月"], [4, "10〜12月"]];
+  const kindCount = {};
+  list.forEach(c => { kindCount[c.kind] = (kindCount[c.kind] || 0) + 1; });
+  const kindSummary = Object.entries(kindCount)
+    .map(([k, n]) => `<span class="ysum-i"><i style="background:${kindOf(k).color}"></i>${kindOf(k).label} ${n}</span>`).join("");
+  const body = groups.map(([qi, label]) => {
+    const gs = list.filter(c => q(c) === qi);
+    if (!gs.length) return "";
+    const items = gs.map(c => {
+      const k = kindOf(c.kind), st = campStatus(c);
+      const range = c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
+      const scope = c.scope_all ? "全店" : `${c.stores.length}店`;
+      return `<li data-camp="${c.id}">
+        <span class="kchip" style="--kc:${k.color}">${k.label}</span>
+        <div class="cbody">
+          <div class="ctitle">${c.title}<span class="tagx">${scope}</span><span class="cstat ${st.k}">${st.label}</span></div>
+          ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
+          ${campReviewLine(c)}
+          <div class="cgo">詳細を確認 →</div>
+        </div>
+        <span class="crange">${range}</span></li>`;
+    }).join("");
+    return `<div class="ygrp"><span>${label}</span><span class="sgrp-n">${gs.length}件</span></div><ul class="clist">${items}</ul>`;
+  }).join("");
+  const tabs = years.map(y => `<button class="ytab${y === year ? " on" : ""}" data-year="${y}">${y}年</button>`).join("");
+  return `
+    <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button>
+      <span class="sep">／</span><button class="linkbtn" data-view="campaigns">施策の効果</button></div>
+    <section class="block">
+      <div class="bhead"><h2>年間販促（振り返り）</h2>
+        <span class="bnote">${year}年・${list.length}件　四半期別　実績＋直近差異　施策をタップで詳細</span></div>
+      <div class="ytabs">${tabs}</div>
+      ${kindSummary ? `<div class="ysum">${kindSummary}</div>` : ""}
+      ${list.length ? body : `<div class="empty">${year}年の施策は登録されていません。config/schedule.yaml に追記すると、ここに年間で並びます（過去分は分かる範囲で足せます）。</div>`}
+    </section>`;
+}
 
 // ── 制作物ギャラリー（config/creatives.yaml 由来）──────────────────────────
 // この店に掛かる制作物（全店ものも含む）。掲出日の新しい順は export 側で済み。
