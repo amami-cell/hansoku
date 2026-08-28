@@ -1364,6 +1364,27 @@ def _abc_click_radio(page, label: str) -> bool:
     その状態だと is_visible=False でクリックを取りこぼす（1069/1137 で部門に切替らず
     全商品のままだった原因）。クリック前に必ず可視域へスクロールする。
     """
+    # まず role=radio でラジオ input 自体を掴む（テキスト要素がラベルとして紐づいて
+    # いれば、これが最も確実。1069/1137 は可視テキストのクリックでは切替らなかった）。
+    try:
+        radio = page.get_by_role("radio", name=label, exact=True)
+        for i in range(min(radio.count(), 6)):
+            el = radio.nth(i)
+            try:
+                el.scroll_into_view_if_needed(timeout=1500)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                el.check(timeout=2000)
+                return True
+            except Exception:  # noqa: BLE001
+                try:
+                    el.click(timeout=1500, force=True)
+                    return True
+                except Exception:  # noqa: BLE001
+                    continue
+    except Exception:  # noqa: BLE001
+        pass
     loc = page.get_by_text(label, exact=True)
     for i in range(min(loc.count(), 12)):
         try:
@@ -1410,9 +1431,19 @@ def _abc_open_store_modal_and_select_one(session, store_name: str):
         print("[ABCprobe] 店舗選択モーダルが出ませんでした")
         return None
     names = _abc_left_option_names(target, 400)
+    # 空白差（全角/半角）や店名表記ゆれに強くする: まず素の部分一致、
+    # 駄目なら空白除去で部分一致、それも駄目なら店名の識別断片で照合。
+    _nospace = lambda s: (s or "").replace(" ", "").replace("　", "")  # noqa: E731
     hit = next((n for n in names if store_name in n), None)
     if hit is None:
-        print(f"[ABCprobe] 左リストに『{store_name}』一致なし。候補先頭: {names[:8]}")
+        tgt = _nospace(store_name)
+        hit = next((n for n in names if tgt in _nospace(n)), None)
+    if hit is None:
+        # 識別しやすい断片（末尾の「〇〇店」やブランド後半）でゆるく照合
+        frag = _nospace(store_name)[-4:]
+        hit = next((n for n in names if frag and frag in _nospace(n)), None)
+    if hit is None:
+        print(f"[ABCprobe] 左リストに『{store_name}』一致なし。候補先頭: {names[:12]}")
         return None
     loc = target.get_by_text(hit, exact=True)
     clicked = False
