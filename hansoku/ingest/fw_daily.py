@@ -1292,19 +1292,29 @@ def ingest_abc_store(
             # 全商品行（"商品CD | 商品名 | 単価 | 原価"）は名前に '|' を含む→部門ではない
             return m if "|" not in name else None
 
+        # まず分類=部門で粘り、それでも切替らない店（1069/1137）は 分類=グループ
+        # （フード/ドリンク/コース…の粗い区分・最も安定して出る）へフォールバックする。
         drows: list[list[str]] = []
-        for dtry in range(4):
-            try:
-                session.page.mouse.wheel(0, -3000)  # 条件パネルを可視域へ
-            except Exception:  # noqa: BLE001
-                pass
-            _abc_click_radio(session.page, "部門")
-            time.sleep(1)
-            drows = _abc_search_and_rows(session)
+        used_level = "部門"
+        for level in ("部門", "グループ"):
+            for dtry in range(3):
+                try:
+                    session.page.mouse.wheel(0, -3000)  # 条件パネルを可視域へ
+                except Exception:  # noqa: BLE001
+                    pass
+                _abc_click_radio(session.page, level)
+                time.sleep(1)
+                drows = _abc_search_and_rows(session)
+                if any(_clean_dept(c) for c in drows):
+                    used_level = level
+                    break
+                print(f"[ABC店] {code} {level}グリッド未確定（{dtry + 1}回目・全商品のまま/未充填）。再切替。")
+                time.sleep(2)
             if any(_clean_dept(c) for c in drows):
                 break
-            print(f"[ABC店] {code} 部門グリッド未確定（{dtry + 1}回目・全商品のまま/未充填）。再切替。")
-            time.sleep(2)
+            if level == "部門":
+                print(f"[ABC店] {code} 部門が切替らず。分類=グループへフォールバック。")
+        print(f"[ABC店] {code} 使用した分類={used_level}")
         n_dept = 0
         for cells in drows:
             m = _clean_dept(cells)
