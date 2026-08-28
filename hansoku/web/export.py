@@ -53,6 +53,22 @@ def load_lunch(path: Path | None = None) -> list[dict]:
     return stores if isinstance(stores, list) else []
 
 
+DEFAULT_ENV_EFFECTS_PATH = ROOT / "config" / "env_effects.json"
+
+
+def load_env_effects(path: Path | None = None) -> list[dict]:
+    """人が貼る config/env_effects.json（施策前後の時間帯別分析）を読む。無ければ空。"""
+    p = Path(path) if path else DEFAULT_ENV_EFFECTS_PATH
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return []
+    effects = data.get("effects", []) if isinstance(data, dict) else []
+    return effects if isinstance(effects, list) else []
+
+
 def _resolve_stores(master: StoreMaster, stores_field) -> tuple[list[str], bool]:
     """stores 欄（all / コードor店名の配列）を稼働店コードの一覧に直す。
 
@@ -434,6 +450,8 @@ def build(
         "creatives": creatives or [],
         # ランチ効果分析（config/lunch_analysis.json 由来・店舗別）。空でも画面は成立する。
         "lunch": load_lunch(),
+        # 施策前後の時間帯別分析（config/env_effects.json 由来・施策別）。空でも画面は成立する。
+        "env_effects": load_env_effects(),
     }
 
 

@@ -948,6 +948,7 @@ function renderCampaign(id) {
         <span class="bnote">${c.stores.length}店　店をタップで詳細へ</span></div>
       <div class="panel"><ul class="cmlist">${rowsHtml}</ul></div>
     </section>
+    ${renderEnvEffect(id)}
     ${crBlock}`;
 }
 
@@ -1006,6 +1007,69 @@ function renderManage() {
         <span class="bnote">店舗ごとの施策一覧・進捗・結果　実施中を上に　施策/店名をタップで詳細</span></div>
       <div class="klgrow">${legendHtml()}</div>
       ${blocks}
+    </section>`;
+}
+
+// ── 施策前後の時間帯別効果（config/env_effects.json 由来）──────────────────
+// 電子タバコ・空調改善など環境系施策の前後を、集客／客単価／品数／単価で見せる。
+// 深夜(22-1時)は「1人品数 × 1品単価」に分解（FW 時間帯別メニュー出数＋時間帯別売上）。
+const envEffectFor = id => (DATA.env_effects || []).find(e => (e.campaign_ids || []).includes(id)) || null;
+function envMetrics(p) {
+  const paidDrink = (p.drink_items || 0) - (p.nomihoudai || 0);
+  return {
+    perDay: p.days ? p.covers / p.days : 0,
+    avgCheck: p.covers ? p.sales / p.covers : 0,
+    itemsPer: p.covers ? p.items / p.covers : 0,
+    foodUnit: p.food_items ? p.food_sales / p.food_items : 0,
+    drinkUnit: paidDrink > 0 ? p.drink_sales / paidDrink : 0,
+    nPerDay: p.days ? p.night_covers / p.days : 0,
+    nItemsPer: p.night_covers ? p.night_items / p.night_covers : 0,
+    nUnit: p.night_items ? p.night_sales / p.night_items : 0,
+    nCheck: p.night_covers ? p.night_sales / p.night_covers : 0,
+  };
+}
+function renderEnvEffect(id) {
+  const e = envEffectFor(id);
+  if (!e || !(e.periods || []).length) return "";
+  const per = e.periods;
+  const base = per.find(p => p.label === e.base_label) || per[0];
+  const after = per.find(p => p.label === e.after_label) || per[per.length - 1];
+  if (!base || !after) return "";
+  const mb = envMetrics(base), ma = envMetrics(after);
+  const dp = (a, b) => a ? (b / a - 1) * 100 : null;
+  const arrow = v => v == null ? "―" : `<span class="${v >= 0 ? "up" : "down"}">${signed(v)}%</span>`;
+  const n2 = v => (Math.round(v * 100) / 100).toFixed(2);
+  const row = (label, bv, av, fmt) =>
+    `<tr><td class="ek">${label}</td><td class="num">${fmt(bv)}</td><td class="num">${fmt(av)}</td><td class="num">${arrow(dp(bv, av))}</td></tr>`;
+  const dayRows = [
+    row("集客/日", mb.perDay, ma.perDay, v => per1(v) + "人"),
+    row("客単価", mb.avgCheck, ma.avgCheck, yen),
+    row("品数/客", mb.itemsPer, ma.itemsPer, n2),
+    row("一品単価(フード)", mb.foodUnit, ma.foodUnit, yen),
+    row("有料1杯単価", mb.drinkUnit, ma.drinkUnit, yen),
+  ].join("");
+  const nightRows = per.map(p => {
+    const m = envMetrics(p);
+    const key = p.label === e.base_label || p.label === e.after_label;
+    return `<tr class="${key ? "ekey" : "esub2"}"><td>${esc(p.label)}${p.note ? `<span class="enote">${esc(p.note)}</span>` : ""}</td>
+      <td class="num">${per1(m.nPerDay)}人</td><td class="num">${n2(m.nItemsPer)}</td>
+      <td class="num">${yen(m.nUnit)}</td><td class="num">${yen(m.nCheck)}</td></tr>`;
+  }).join("");
+  return `
+    <section class="block">
+      <div class="bhead"><h2>効果（時間帯別・前後）</h2>
+        <span class="bnote">${esc(e.title || "")}</span></div>
+      <div class="panel">
+        <div class="ehd">全日　${esc(e.base_label)} → ${esc(e.after_label)}</div>
+        <div class="chartwrap"><table class="etbl">
+          <thead><tr><th></th><th class="num">${esc(e.base_label)}</th><th class="num">${esc(e.after_label)}</th><th class="num">変化</th></tr></thead>
+          <tbody>${dayRows}</tbody></table></div>
+        <div class="ehd" style="margin-top:16px">深夜（22〜1時）　1人品数 × 1品単価</div>
+        <div class="chartwrap"><table class="etbl">
+          <thead><tr><th>期間</th><th class="num">客/日</th><th class="num">品数/客</th><th class="num">1品単価</th><th class="num">客単価</th></tr></thead>
+          <tbody>${nightRows}</tbody></table></div>
+        ${e.caveat ? `<div class="lnote" style="margin-top:12px">${esc(e.caveat)}</div>` : ""}
+      </div>
     </section>`;
 }
 

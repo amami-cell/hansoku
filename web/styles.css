@@ -544,3 +544,20 @@ tbody tr:last-child td{border-bottom:0;}
   .mgrow .mgbar{display:none;}
   .cmnm{min-width:100px;}
 }
+
+/* ── 施策前後の時間帯別効果（renderEnvEffect）───────────────────────────── */
+.ehd{font-size:12.5px;font-weight:700;color:var(--ink-2);margin:2px 0 8px;
+  letter-spacing:.02em;}
+.etbl{width:100%;border-collapse:collapse;font-size:13px;min-width:360px;
+  font-variant-numeric:tabular-nums;}
+.etbl th{font-size:11px;font-weight:600;color:var(--ink-3);text-align:left;
+  padding:5px 8px;border-bottom:1px solid var(--line);}
+.etbl th.num,.etbl td.num{text-align:right;}
+.etbl td{padding:7px 8px;border-bottom:1px solid var(--line);color:var(--ink);}
+.etbl tbody tr:last-child td{border-bottom:0;}
+.etbl td.ek{color:var(--ink-2);font-weight:500;}
+.etbl .up{color:var(--good-ink);font-weight:700;}
+.etbl .down{color:var(--warning-ink);font-weight:700;}
+.etbl tr.ekey td{background:var(--accent-soft);}
+.etbl tr.esub2 td{color:var(--ink-2);}
+.enote{display:inline-block;font-size:10.5px;color:var(--ink-3);margin-left:6px;}

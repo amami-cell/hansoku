@@ -1,0 +1,19 @@
+{
+  "note": "施策前後の効果（FW 時間帯別売上＋ABC＋時間帯別メニュー出数）。人が貼る。売上/客数=時間帯別売上、品数/フード/ドリンク=ABC、深夜出数=時間帯別メニュー出数。基準と空調後は週末比率が同じ(0.29)で公平比較。",
+  "effects": [
+    {
+      "campaign_ids": ["r1151-ecig", "r1151-aircon"],
+      "store_code": "1151",
+      "title": "環境改善（電子タバコ8/15＋空調8/17）の時間帯別 前後",
+      "base_label": "基準",
+      "after_label": "空調後",
+      "caveat": "電子タバコ(8/15)と空調改善(8/17)は2日差で完全分離は不可。基準(8/1-14)と空調後(8/17-23)は週末比率が同じ(0.29)で公平比較。深夜(22-1時)は1日4〜7人と母数が小さく方向性として見る。売上は時間帯別売上、品数はABC・メニュー出数由来。",
+      "periods": [
+        { "label": "基準", "from": "2026-08-01", "to": "2026-08-14", "days": 14, "covers": 811, "sales": 1907283, "items": 3593, "food_items": 1488, "food_sales": 1155288, "drink_items": 1884, "drink_sales": 549443, "nomihoudai": 379, "night_covers": 60, "night_sales": 141995, "night_items": 258 },
+        { "label": "eタバコ後", "from": "2026-08-15", "to": "2026-08-16", "days": 2, "covers": 113, "sales": 279667, "items": 448, "food_items": 228, "food_sales": 186014, "drink_items": 218, "drink_sales": 83798, "nomihoudai": 9, "night_covers": 11, "night_sales": 42916, "night_items": 67, "note": "週末2日のみ・参考" },
+        { "label": "空調後", "from": "2026-08-17", "to": "2026-08-23", "days": 7, "covers": 400, "sales": 1021124, "items": 1846, "food_items": 777, "food_sales": 605625, "drink_items": 987, "drink_sales": 333375, "nomihoudai": 219, "night_covers": 49, "night_sales": 96778, "night_items": 160 },
+        { "label": "新ランチ後", "from": "2026-08-24", "to": "2026-08-26", "days": 3, "covers": 97, "sales": 217626, "items": 448, "food_items": 189, "food_sales": 131567, "drink_items": 238, "drink_sales": 48807, "nomihoudai": 95, "night_covers": 8, "night_sales": 15292, "night_items": 35, "note": "平日3日のみ・参考" }
+      ]
+    }
+  ]
+}
