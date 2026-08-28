@@ -1324,6 +1324,12 @@ def ingest_abc_store(
             # ログに残す。誤分類をログから見つけて分類辞書を直せるようにする。
             bkt = dept_bucket(dname)
             print(f"[ABC店部門] {dname:<18} → {bkt:<6} 数量{qty:>6} 売上{sales:>10} 原価{cost_rate}%")
+        if n_dept == 0:
+            # 0件だった店（1069/1137等）の原因切り分け: 部門グリッドの生の視覚行を出す。
+            # データなし（空/読み込み中）か、列レイアウトが違って regex に載らないかを見る。
+            print(f"[ABC店] {code} 部門0件。生の視覚行（先頭15）をダンプ:")
+            for cells in _visual_rows(session)[:15]:
+                print("   [部門raw]", " | ".join(c for c in cells[:10] if c is not None)[:200])
         print(f"[ABC店] {code} 部門 {n_dept}件 (+{time.time() - t0:.0f}s)")
 
     print(f"[ABC店] 収集 {len(collected)} 行")
