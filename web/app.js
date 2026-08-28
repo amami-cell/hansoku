@@ -1085,11 +1085,16 @@ function envHeadline(id) {
   if (!b || !a) return "";
   const mb = envMetrics(b), ma = envMetrics(a);
   const d = (x, y) => x ? (y / x - 1) * 100 : null;
-  const chip = (lab, v) => v == null ? "" :
-    `<span class="ccmp-i">${lab} <span class="${v >= 0 ? "up" : "down"}">${signed(v)}%</span></span>`;
+  // 実績（＝空調改善後の値）＋ 直近差異（基準→後の変化率）を並べる
+  const chip = (lab, val, v, fmt) => {
+    const delta = v == null ? "" : ` <span class="${v >= 0 ? "up" : "down"}">${signed(v)}%</span>`;
+    return `<span class="ccmp-i">${lab} <b>${fmt(val)}</b>${delta}</span>`;
+  };
+  const n2 = x => (Math.round(x * 100) / 100).toFixed(2);
   return `<div class="ccmp"><span class="ccmp-h">${esc(e.base_label)}→${esc(e.after_label)}</span>` +
-    chip("客単価", d(mb.avgCheck, ma.avgCheck)) + chip("集客", d(mb.perDay, ma.perDay)) +
-    chip("品数/客", d(mb.itemsPer, ma.itemsPer)) + "</div>";
+    chip("客単価", ma.avgCheck, d(mb.avgCheck, ma.avgCheck), yen) +
+    chip("集客", ma.perDay, d(mb.perDay, ma.perDay), x => per1(x) + "人/日") +
+    chip("品数/客", ma.itemsPer, d(mb.itemsPer, ma.itemsPer), n2) + "</div>";
 }
 function lunchHeadline(c) {
   const code = (c.stores || []).find(s => lunchFor(s));
