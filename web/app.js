@@ -776,7 +776,9 @@ function renderCampaigns() {
           <span class="cstat ${s.k}">${s.label}</span>${goalHtml}</div>
         ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
         <div class="ceff">${effHtml}</div>
+        ${campHeadline(c)}
         ${memoHtml}
+        <div class="cgo">詳細を確認 →</div>
       </div>
       <span class="crange">${range}</span>
     </li>`;
@@ -1073,6 +1075,35 @@ function renderEnvEffect(id) {
     </section>`;
 }
 
+// 販促集計の行に出す「前後比較のワンライン」。見たいときは行から詳細へ。
+function envHeadline(id) {
+  const e = envEffectFor(id);
+  if (!e || !(e.periods || []).length) return "";
+  const per = e.periods;
+  const b = per.find(p => p.label === e.base_label) || per[0];
+  const a = per.find(p => p.label === e.after_label) || per[per.length - 1];
+  if (!b || !a) return "";
+  const mb = envMetrics(b), ma = envMetrics(a);
+  const d = (x, y) => x ? (y / x - 1) * 100 : null;
+  const chip = (lab, v) => v == null ? "" :
+    `<span class="ccmp-i">${lab} <span class="${v >= 0 ? "up" : "down"}">${signed(v)}%</span></span>`;
+  return `<div class="ccmp"><span class="ccmp-h">${esc(e.base_label)}→${esc(e.after_label)}</span>` +
+    chip("客単価", d(mb.avgCheck, ma.avgCheck)) + chip("集客", d(mb.perDay, ma.perDay)) +
+    chip("品数/客", d(mb.itemsPer, ma.itemsPer)) + "</div>";
+}
+function lunchHeadline(c) {
+  const code = (c.stores || []).find(s => lunchFor(s));
+  const e = code && lunchFor(code);
+  if (!e) return "";
+  const m = lunchMetrics(e);
+  return `<div class="ccmp"><span class="ccmp-h">${esc(e.menu_title || "新ランチ")}</span>` +
+    `<span class="ccmp-i">${per1(m.dailyPerDay)}食/日</span>` +
+    `<span class="ccmp-i">原価 ${pct(m.dailyCost)}</span>` +
+    `<span class="ccmp-i">ランチ構成比 ${pct(m.lunchShare)}</span></div>`;
+}
+// 施策1件の比較ワンライン（環境系→前後、ランチ→ランチ要点）。無ければ空。
+const campHeadline = c => envHeadline(c.id) || (c.kind === "lunch" ? lunchHeadline(c) : "");
+
 // ── 制作物ギャラリー（config/creatives.yaml 由来）──────────────────────────
 // この店に掛かる制作物（全店ものも含む）。掲出日の新しい順は export 側で済み。
 const creativesFor = code => (DATA.creatives || []).filter(cr => cr.scope_all || cr.stores.includes(code));
@@ -1270,8 +1301,10 @@ function renderStore(code) {
             <div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}<span class="cstat ${st.k}">${st.label}</span></div>
             ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
             ${effHtml}
+            ${campHeadline(c)}
             ${goalHtml}
             ${memoHtml}
+            <div class="cgo">詳細を確認 →</div>
           </div>
           <span class="crange">${range}</span>
         </li>`;

@@ -561,3 +561,16 @@ tbody tr:last-child td{border-bottom:0;}
 .etbl tr.ekey td{background:var(--accent-soft);}
 .etbl tr.esub2 td{color:var(--ink-2);}
 .enote{display:inline-block;font-size:10.5px;color:var(--ink-3);margin-left:6px;}
+
+/* ── 販促集計の前後比較ワンライン＋詳細への導線 ──────────────────────────── */
+.ccmp{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-top:6px;
+  font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+.ccmp-h{font-weight:700;color:var(--ink);font-size:11.5px;
+  background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent-line);
+  border-radius:5px;padding:1px 8px;}
+.ccmp-i{white-space:nowrap;color:var(--ink-2);}
+.ccmp-i .up{color:var(--good-ink);font-weight:700;} .ccmp-i .down{color:var(--warning-ink);font-weight:700;}
+.cgo{margin-top:8px;font-size:12px;font-weight:600;color:var(--accent);}
+.clist li{cursor:pointer;}
+.clist li:hover{background:var(--surface-2);}
+.clist li:hover .cgo{text-decoration:underline;}
