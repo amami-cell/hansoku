@@ -69,6 +69,25 @@ def load_env_effects(path: Path | None = None) -> list[dict]:
     return effects if isinstance(effects, list) else []
 
 
+DEFAULT_PROPOSALS_PATH = ROOT / "config" / "proposals.json"
+
+
+def load_proposals(path: Path | None = None) -> dict:
+    """人/AIが書く config/proposals.json（施策別の次回提案）を読む。無ければ空。
+
+    形: {"施策id": {"next": "次回への一手…", "by": "AI", "at": "YYYY-MM-DD"}}
+    """
+    p = Path(path) if path else DEFAULT_PROPOSALS_PATH
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+    props = data.get("proposals", data) if isinstance(data, dict) else {}
+    return props if isinstance(props, dict) else {}
+
+
 def _resolve_stores(master: StoreMaster, stores_field) -> tuple[list[str], bool]:
     """stores 欄（all / コードor店名の配列）を稼働店コードの一覧に直す。
 
@@ -452,6 +471,8 @@ def build(
         "lunch": load_lunch(),
         # 施策前後の時間帯別分析（config/env_effects.json 由来・施策別）。空でも画面は成立する。
         "env_effects": load_env_effects(),
+        # 施策別の次回提案（config/proposals.json 由来・人/AI）。空でも画面は成立する。
+        "proposals": load_proposals(),
     }
 
 

@@ -423,7 +423,9 @@ function actionPanel() {
     .sort((a, b) => a.d - b.d).slice(0, 8);
   // 実施中なのに目標が未入力（その場で入れられる）
   const noGoal = camps.filter(c => campStatus(c).k === "live" && targetOf(c) == null).slice(0, 8);
-  if (!soon.length && !noGoal.length) return "";
+  // 終了したのに振り返り(要因メモ/次回提案)が未記入＝やりっぱなし
+  const review = camps.filter(needsReview).sort((a, b) => a.end < b.end ? 1 : -1).slice(0, 8);
+  if (!soon.length && !noGoal.length && !review.length) return "";
 
   const scopeOf = c => c.scope_all ? "全店" : `${c.stores.length}店`;
   const soonHtml = soon.map(({ c, d }) => {
@@ -437,9 +439,15 @@ function actionPanel() {
       <span class="amain">${c.title}</span><span class="atag">${scopeOf(c)}</span>
       <button class="goalbtn add" data-goal="${c.id}">＋ 目標を入力</button></li>`).join("");
 
+  const reviewHtml = review.map(c =>
+    `<li><span class="kdot" style="background:${kindOf(c.kind).color}"></span>
+      <span class="amain">${c.title}</span><span class="atag">${scopeOf(c)}</span>
+      <button class="goalbtn add" data-camp="${c.id}">振り返る →</button></li>`).join("");
+
   const cols = [];
   if (soon.length) cols.push(`<div class="acol"><div class="ahd">まもなく開始</div><ul class="alist">${soonHtml}</ul></div>`);
   if (noGoal.length) cols.push(`<div class="acol"><div class="ahd">目標が未入力（実施中）</div><ul class="alist">${goalHtml}</ul></div>`);
+  if (review.length) cols.push(`<div class="acol"><div class="ahd">要振り返り（終了・未記入）</div><ul class="alist">${reviewHtml}</ul></div>`);
   return `<section class="actions"><div class="ahead">直近のアクション</div>
     <div class="acols">${cols.join("")}</div></section>`;
 }
@@ -946,11 +954,7 @@ function renderCampaign(id) {
       <div class="panel">${overall}</div>
     </section>
 
-    <section class="block">
-      <div class="bhead"><h2>要因メモ</h2>
-        <span class="bnote">なぜ動いた／動かなかったか</span></div>
-      <div class="panel">${memoHtml}</div>
-    </section>
+    ${renderReview(c)}
 
     <section class="block">
       <div class="bhead"><h2>対象店ごとの結果</h2>
@@ -1115,6 +1119,100 @@ function lunchHeadline(c) {
 }
 // 施策1件の比較ワンライン（環境系→前後、ランチ→ランチ要点）。無ければ空。
 const campHeadline = c => envHeadline(c.id) || (c.kind === "lunch" ? lunchHeadline(c) : "");
+
+// ── PDCA（やりっぱなしにしない：実績→判定→近隣→次の一手）──────────────────
+const proposalFor = id => (DATA.proposals || {})[id] || null;
+
+// 実績からの自動判定（good/warn/flat/wait）＋根拠シグナル。近隣・提案と合わせて使う。
+function campVerdict(c) {
+  const e = envEffectFor(c.id);
+  if (e && (e.periods || []).length) {
+    const per = e.periods;
+    const b = per.find(p => p.label === e.base_label) || per[0];
+    const a = per.find(p => p.label === e.after_label) || per[per.length - 1];
+    const mb = envMetrics(b), ma = envMetrics(a);
+    const d = (x, y) => x ? (y / x - 1) * 100 : 0;
+    const dc = d(mb.avgCheck, ma.avgCheck), dp = d(mb.perDay, ma.perDay);
+    const sig = [`客単価 ${signed(dc)}%`, `集客 ${signed(dp)}%`];
+    if (dc >= 3 || dp >= 3) return { tone: "good", label: "効果あり", signals: sig };
+    if (dc <= -3 && dp <= -3) return { tone: "warn", label: "要改善", signals: sig };
+    return { tone: "flat", label: "横ばい", signals: sig };
+  }
+  if (c.kind === "lunch") {
+    const code = (c.stores || []).find(s => lunchFor(s));
+    const le = code && lunchFor(code);
+    if (le) {
+      const m = lunchMetrics(le);
+      const sig = [`${per1(m.dailyPerDay)}食/日`, `原価 ${pct(m.dailyCost)}`, `構成比 ${pct(m.lunchShare)}`];
+      if (m.dailyCost > 0.32) return { tone: "warn", label: "原価高め", signals: sig };
+      if (m.lunchShare >= 0.12) return { tone: "good", label: "定着", signals: sig };
+      return { tone: "flat", label: "様子見", signals: sig };
+    }
+  }
+  if (METRIC !== "cost_rate") {
+    const sum = campaignSummary(c);
+    if (sum.stores && sum.pct != null) {
+      const sig = [`前年比 ${signed(sum.pct)}%`];
+      if (sum.momPct != null) sig.push(`前月比 ${signed(sum.momPct)}%`);
+      return sum.pct >= 0
+        ? { tone: "good", label: "効果あり", signals: sig }
+        : { tone: "warn", label: "要改善", signals: sig };
+    }
+  }
+  return { tone: "wait", label: campStatus(c).k === "soon" ? "開始前" : "計測中", signals: [] };
+}
+
+// 近隣（同エリア）の同種類施策の実績を拾って比較材料にする
+function campNeighbor(c) {
+  const out = [], seen = new Set();
+  for (const code of c.stores) {
+    const region = store(code).region;
+    const nb = (DATA.stores || []).filter(x => x.region === region && x.code !== code && hasData(x.code));
+    for (const n of nb) {
+      for (const cc of (DATA.campaigns || [])) {
+        if (cc.id === c.id || cc.kind !== c.kind || !cc.stores.includes(n.code)) continue;
+        const eff = campEffect(n.code, cc);
+        if (eff && eff.pct != null && !seen.has(cc.id + n.code)) {
+          seen.add(cc.id + n.code);
+          out.push({ store: n.name || n.code, title: cc.title, pct: eff.pct });
+        }
+      }
+    }
+  }
+  return out.sort((a, b) => b.pct - a.pct).slice(0, 3);
+}
+
+// 終了したのに振り返り(要因メモ)も次回提案も無い＝やりっぱなし
+function needsReview(c) {
+  return campStatus(c).k === "done" && !memoOf(c) && !(proposalFor(c.id) && proposalFor(c.id).next);
+}
+
+function renderReview(c) {
+  const v = campVerdict(c);
+  const memo = memoOf(c);
+  const prop = proposalFor(c.id);
+  const nb = campNeighbor(c);
+  const sig = v.signals.length ? `<span class="rvsig">${v.signals.map(esc).join("　")}</span>` : "";
+  const nbHtml = nb.length
+    ? `<div class="rvnb"><b>近隣の同種施策</b>　${nb.map(x =>
+        `${esc(x.store)}「${esc(x.title)}」<span class="${x.pct >= 0 ? "up" : "down"}">${signed(x.pct)}%</span>`).join("　")}</div>`
+    : `<div class="rvnb muted">近隣（同エリア）に同種類の実績はまだありません。</div>`;
+  const memoHtml = memo
+    ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${c.id}" title="メモを編集">✎</button></div>`
+    : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${c.id}">＋ 要因メモ</button></div>`;
+  const nextHtml = prop && prop.next
+    ? `<div class="rvnext">${escBr(prop.next)}<div class="rvby">— ${esc(prop.by || "AI")}${prop.at ? "・" + esc(prop.at) : ""}</div></div>`
+    : `<div class="rvnext muted">次回提案は未記入です。config/proposals.json に追記（AIに依頼も可）。</div>`;
+  return `<section class="block">
+    <div class="bhead"><h2>振り返り＆次回提案（PDCA）</h2>
+      <span class="bnote">やりっぱなしにしない：実績→判定→次の一手${needsReview(c) ? "　⚠ 要振り返り" : ""}</span></div>
+    <div class="panel">
+      <div class="rvline">判定 <span class="rvbadge ${v.tone}">${v.label}</span> ${sig}</div>
+      ${nbHtml}
+      <div class="rvhd">要因（Check）</div>${memoHtml}
+      <div class="rvhd">次回への一手（Act）</div>${nextHtml}
+    </div></section>`;
+}
 
 // ── 年間販促（振り返り）─────────────────────────────────────────────────
 // 年（2024〜今年）を選び、四半期別に施策を並べる。各行に実績＋直近差異、詳細へ。
