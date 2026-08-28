@@ -376,6 +376,7 @@ function render() {
   else if (VIEW.kind === "list") app.innerHTML = renderList();
   else if (VIEW.kind === "campaigns") app.innerHTML = renderCampaigns();
   else if (VIEW.kind === "year") app.innerHTML = renderYear();
+  else if (VIEW.kind === "cross") app.innerHTML = renderCross();
   else if (VIEW.kind === "gallery") app.innerHTML = renderGallery();
   else if (VIEW.kind === "calendar") app.innerHTML = renderCalendar();
   else app.innerHTML = renderSchedule();
@@ -552,6 +553,8 @@ function renderSchedule() {
       <button class="linkbtn" data-view="campaigns">施策の効果 →</button>
       <span class="sep">／</span>
       <button class="linkbtn" data-view="year">年間販促 →</button>
+      <span class="sep">／</span>
+      <button class="linkbtn" data-view="cross">販促ターゲット（横断）→</button>
       <span class="sep">／</span>
       <button class="linkbtn" data-view="manage">店舗管理 →</button>
       <span class="sep">／</span>
@@ -1275,6 +1278,136 @@ function renderYear() {
       <div class="ytabs">${tabs}</div>
       ${kindSummary ? `<div class="ysum">${kindSummary}</div>` : ""}
       ${list.length ? body : `<div class="empty">${year}年の施策は登録されていません。config/schedule.yaml に追記すると、ここに年間で並びます（過去分は分かる範囲で足せます）。</div>`}
+    </section>`;
+}
+
+// ── 販促ターゲット（横断）────────────────────────────────────────────────
+// 全店・ブランド横断で部門構成を並べ、ランチ/飲み放題/コースの構成比が
+// 同ブランドの平均より弱い店を「販促ターゲット」として自動抽出する。
+// 近隣＝同ブランド（多くは同商圏）の実績を相手に置いて示す。
+const DEPT_ORDER = ["コース", "ランチ", "アラカルト", "飲み放題", "食べ放題"];
+
+function crossStores() {
+  return (DATA.stores || [])
+    .map(s => ({ s, d: deptFor(s.code) }))
+    .filter(x => x.d && x.d.buckets && x.d.buckets.length)
+    .map(({ s, d }) => {
+      const share = {};
+      d.buckets.forEach(b => (share[b.name] = b.share || 0));
+      const top = ((DATA.products || {})[s.code] || [])[0];
+      return { code: s.code, name: s.name, brand: s.brand, brand_name: s.brand_name, d, share, top };
+    });
+}
+
+function crossByBrand() {
+  const map = new Map();
+  crossStores().forEach(x => {
+    if (!map.has(x.brand)) map.set(x.brand, { brand: x.brand, brand_name: x.brand_name, rows: [] });
+    map.get(x.brand).rows.push(x);
+  });
+  // ブランド内は売上規模の大きい順
+  return [...map.values()].map(g => {
+    g.rows.sort((a, b) => (b.d.total_sales || 0) - (a.d.total_sales || 0));
+    return g;
+  }).sort((a, b) => b.rows.length - a.rows.length);
+}
+
+// ターゲット判定: 同ブランド平均に対し構成比が半分未満、かつ平均が意味のある水準。
+const CROSS_DIMS = [
+  { key: "ランチ", flag: "ランチ強化候補", why: "昼の集客と回転を作る余地" },
+  { key: "飲み放題", flag: "宴会・飲み放題プッシュ候補", why: "宴会需要の取り込み余地" },
+  { key: "コース", flag: "コース訴求候補", why: "客単価・宴会の底上げ余地" },
+];
+
+function crossTargets() {
+  const out = [];
+  crossByBrand().forEach(g => {
+    if (g.rows.length < 2) return;  // 比較相手がいないブランドは平均比較しない
+    CROSS_DIMS.forEach(dim => {
+      const vals = g.rows.map(r => r.share[dim.key] || 0);
+      const avg = vals.reduce((a, v) => a + v, 0) / vals.length;
+      if (avg < 0.03) return;  // ブランド自体がその区分をほぼ持たないならスキップ
+      g.rows.forEach(r => {
+        const v = r.share[dim.key] || 0;
+        if (v < avg * 0.5) {
+          out.push({
+            code: r.code, name: r.name, brand_name: r.brand_name,
+            dim: dim.key, flag: dim.flag, why: dim.why,
+            v, avg, gap: avg - v,
+          });
+        }
+      });
+    });
+  });
+  return out.sort((a, b) => b.gap - a.gap);
+}
+
+function renderCross() {
+  const brands = crossByBrand();
+  const nStores = crossStores().length;
+  if (!nStores) {
+    return `<div class="crumb"><button class="linkbtn" data-view="schedule">← 予定表</button></div>
+      <section class="block"><div class="bhead"><h2>販促ターゲット（横断）</h2></div>
+      <div class="panel"><p class="muted">部門データがまだありません。abc-store-ingest で店舗別ABCを取り込むと表示されます。</p></div></section>`;
+  }
+  const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
+
+  // 部門構成マトリクス（ブランド別・積み上げバー）
+  const bar = r => DEPT_ORDER.filter(n => (r.share[n] || 0) > 0.004).map(n => {
+    const pct = Math.round((r.share[n] || 0) * 100);
+    return `<span class="xseg" style="width:${(r.share[n] * 100).toFixed(1)}%;--dc:${DEPT_COLORS[n]}" title="${n} ${pct}%"></span>`;
+  }).join("");
+  const legend = DEPT_ORDER.map(n =>
+    `<span class="xlg"><i style="--dc:${DEPT_COLORS[n]}"></i>${n}</span>`).join("");
+  const brandBlocks = brands.map(g => {
+    const rows = g.rows.map(r => {
+      const shareTxt = DEPT_ORDER.filter(n => (r.share[n] || 0) >= 0.05)
+        .map(n => `${n[0]}${Math.round(r.share[n] * 100)}`).join(" ");
+      const topTxt = r.top ? `<span class="xtop" title="売れ筋1位">${esc(r.top.name)}</span>` : "";
+      return `<li class="xrow" data-store="${r.code}">
+        <span class="xname">${esc(r.name)}</span>
+        <span class="xbar">${bar(r)}</span>
+        <span class="xshare">${shareTxt}</span>
+        ${topTxt}
+        <span class="xsales">${yen(r.d.total_sales)}</span></li>`;
+    }).join("");
+    return `<div class="xbrand"><div class="xbh">${esc(g.brand_name || g.brand)}<span class="xbn">${g.rows.length}店</span></div>
+      <ul class="xlist">${rows}</ul></div>`;
+  }).join("");
+
+  // 販促ターゲット自動抽出
+  const targets = crossTargets();
+  const tByStore = new Map();
+  targets.forEach(t => {
+    if (!tByStore.has(t.code)) tByStore.set(t.code, { code: t.code, name: t.name, brand_name: t.brand_name, items: [] });
+    tByStore.get(t.code).items.push(t);
+  });
+  const tcards = [...tByStore.values()].map(x => {
+    const chips = x.items.map(t =>
+      `<span class="xtag" title="${t.why}">${t.flag}<b>${Math.round(t.v * 100)}%</b><small>平均${Math.round(t.avg * 100)}%</small></span>`).join("");
+    return `<li class="xtcard" data-store="${x.code}">
+      <div class="xtc-h"><b>${esc(x.name)}</b><span class="muted">${esc(x.brand_name)}</span></div>
+      <div class="xtc-b">${chips}</div>
+      <div class="cgo">店舗詳細で確認 →</div></li>`;
+  }).join("");
+  const targetBlock = targets.length
+    ? `<ul class="xtlist">${tcards}</ul>`
+    : `<p class="muted">同ブランド平均に対して大きく弱い区分は見つかりませんでした（バランス良好）。</p>`;
+
+  return `
+    <div class="crumb"><button class="linkbtn" data-view="schedule">← 予定表</button></div>
+    <section class="block">
+      <div class="bhead"><h2>販促ターゲット（横断）</h2>
+        <span class="bnote">同ブランドの平均より弱い区分を自動抽出${monthLbl}　${nStores}店</span></div>
+      <div class="panel">
+        <div class="xlead">同ブランド（＝多くは同商圏）を相手に、<b>ランチ・飲み放題・コース</b>の構成比が
+          平均の半分未満の店を「次にやると効く販促」として並べています。</div>
+        ${targetBlock}
+      </div>
+    </section>
+    <section class="block">
+      <div class="bhead"><h2>部門構成マトリクス</h2><span class="bnote">${legend}</span></div>
+      <div class="panel xmatrix">${brandBlocks}</div>
     </section>`;
 }
 
