@@ -1096,6 +1096,75 @@ def ingest_abc(
     return 0
 
 
+def report_abc_coverage(warehouse, master, month: str | None = None) -> int:
+    """店舗別ABC取込のカバレッジ確認。各稼働店の 商品数・部門数・バケット別売上を印字。
+
+    23店を1店ずつ焼いた結果を1回のDB照会でまとめて確認する（どの店が未取得か・
+    部門分類が妥当かをログで見る）。FWログイン不要。month は使わず全期間から拾う。
+    """
+    import sys as _sys
+    from datetime import date as _date
+
+    from ..db.warehouse import AggregateQuery
+    from ..model import (
+        GRAIN_MONTH,
+        METRIC_DEPT_SALES,
+        METRIC_PRODUCT_SALES,
+        dept_bucket,
+    )
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    d_from, d_to = _date(2024, 1, 1), _date(2027, 12, 31)
+    # 商品数（store×product）
+    prod_n: dict[str, int] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=d_from, date_to=d_to, grain=GRAIN_MONTH,
+            metrics=[METRIC_PRODUCT_SALES], store_codes=master.active_codes,
+            group_by=("store_code", "product_name"),
+        )
+    ):
+        prod_n[row["store_code"]] = prod_n.get(row["store_code"], 0) + 1
+    # 部門（store×dept）→ バケット別売上
+    dept_bkt: dict[str, dict[str, float]] = {}
+    dept_n: dict[str, int] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=d_from, date_to=d_to, grain=GRAIN_MONTH,
+            metrics=[METRIC_DEPT_SALES], store_codes=master.active_codes,
+            group_by=("store_code", "product_name"),
+        )
+    ):
+        code = row["store_code"]
+        dept_n[code] = dept_n.get(code, 0) + 1
+        b = dept_bkt.setdefault(code, {})
+        bk = dept_bucket(row["product_name"])
+        b[bk] = b.get(bk, 0.0) + row["value"]
+
+    print("=== 店舗別ABC カバレッジ（2026-07 想定） ===")
+    order = ("コース", "ランチ", "アラカルト", "飲み放題", "食べ放題")
+    have, miss = 0, []
+    for s in master.active:
+        code = s.store_code
+        if code == "1151":
+            continue  # ナガグツは対象外
+        p, dn = prod_n.get(code, 0), dept_n.get(code, 0)
+        if p and dn:
+            have += 1
+            bk = dept_bkt.get(code, {})
+            parts = [f"{k}{int(bk[k]):,}" for k in order if bk.get(k)]
+            print(f"  ✓ {code} {s.store_name[:16]:<16} 商品{p:>3} 部門{dn:>3} | " + " / ".join(parts))
+        else:
+            miss.append(code)
+            print(f"  ✗ {code} {s.store_name[:16]:<16} 商品{p:>3} 部門{dn:>3}  ← 未取得/不足")
+    print(f"=== 取得済み {have}店 / 未取得 {len(miss)}店: {miss} ===")
+    return 0
+
+
 def ingest_abc_store(
     warehouse,
     master,
