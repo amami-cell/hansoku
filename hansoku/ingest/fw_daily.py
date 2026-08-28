@@ -1280,8 +1280,16 @@ def ingest_abc_store(
         print(f"[ABC店] {code} 商品 {len(products)}品 → {n_prod}行（1位 {top}） (+{time.time() - t0:.0f}s)")
 
         # --- 分類=部門：ランチ/ドリンク等の内訳（数量・売上・原価率） ---
-        _abc_click_radio(session.page, "部門")
-        drows = _abc_search_and_rows(session)
+        # 部門グリッドは負荷時に埋まりきらず0件になることがある（並行実行の取りこぼし）。
+        # 部門らしい行（原価率%|数量|売上 形）が出るまでラジオ再クリック＋検索を最大3回粘る。
+        drows: list[list[str]] = []
+        for dtry in range(3):
+            _abc_click_radio(session.page, "部門")
+            drows = _abc_search_and_rows(session)
+            if any(hdr.match(" | ".join(c[:6])) for c in drows):
+                break
+            print(f"[ABC店] {code} 部門グリッド未充填（{dtry + 1}回目）。再検索。")
+            time.sleep(2)
         n_dept = 0
         for cells in drows:
             m = hdr.match(" | ".join(cells[:6]))
