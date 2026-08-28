@@ -844,6 +844,60 @@ function campTimeProgress(c) {
   return Math.max(1, Math.min(99, Math.round((now - st) / (en - st) * 100)));
 }
 
+// 施策の種類に対応する部門バケット（効果が最も表れる区分）。
+function campKindBucket(kind) {
+  return kind === "lunch" ? "ランチ" : kind === "bounenkai" ? "コース" : null;
+}
+const bucketOf = (code, name) => {
+  const d = deptFor(code);
+  return d ? (d.buckets || []).find(b => b.name === name) || null : null;
+};
+
+// 施策×データ紐づけ: 種類に応じて「関連部門の直近実績」または「売れ筋」を出す。
+// lunch→ランチ部門、bounenkai→コース部門、osusume/gm→売れ筋上位。dev は環境効果(別)。
+function campDeptCard(c) {
+  const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
+  const bname = campKindBucket(c.kind);
+  if (bname) {
+    const rows = c.stores.map(code => {
+      const d = deptFor(code);
+      if (!d) return "";
+      const b = bucketOf(code, bname);
+      if (!b || (!b.sales && !b.qty)) return `<li class="cdrow is-muted"><span class="cdnm">${storeName(code)}</span>
+        <span class="sub">${bname}の計上なし</span></li>`;
+      const share = Math.round((b.share || 0) * 100);
+      const cr = b.cost_rate != null ? `<span class="cdcr">原価${b.cost_rate}%</span>` : "";
+      const q = b.qty ? `・${b.qty.toLocaleString("ja-JP")}点` : "";
+      return `<li class="cdrow" data-store="${code}">
+        <span class="cdnm">${storeName(code)}</span>
+        <span class="cdmet"><b>${yen(b.sales)}</b>　構成比 ${share}%${q}　${cr}</span></li>`;
+    }).filter(Boolean).join("");
+    if (!rows) return "";
+    return `<section class="block">
+      <div class="bhead"><h2>関連部門の実績（${bname}）</h2>
+        <span class="bnote">FW ABC 部門${monthLbl}・この施策が効く区分</span></div>
+      <div class="panel"><ul class="cdlist">${rows}</ul>
+        <div class="cdnote">${bname}の売上・構成比が施策後に伸びているかを、確定月ごとに追ってください。</div></div>
+    </section>`;
+  }
+  if (c.kind === "osusume" || c.kind === "gm") {
+    const rows = c.stores.map(code => {
+      const items = ((DATA.products || {})[code] || []).slice(0, 3);
+      if (!items.length) return "";
+      const chips = items.map((p, i) => `<span class="cdtop">${i + 1}. ${esc(p.name)} ${yen(p.sales)}</span>`).join("");
+      return `<li class="cdrow" data-store="${code}"><span class="cdnm">${storeName(code)}</span>
+        <span class="cdtops">${chips}</span></li>`;
+    }).filter(Boolean).join("");
+    if (!rows) return "";
+    return `<section class="block">
+      <div class="bhead"><h2>売れ筋（対象店）</h2>
+        <span class="bnote">FW ABC 商品${monthLbl}・フェア/改定の主役候補</span></div>
+      <div class="panel"><ul class="cdlist">${rows}</ul></div>
+    </section>`;
+  }
+  return "";
+}
+
 function renderCampaign(id) {
   const c = campById(id);
   if (!c) return `<div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
@@ -958,6 +1012,7 @@ function renderCampaign(id) {
     </section>
 
     ${renderReview(c)}
+    ${campDeptCard(c)}
 
     <section class="block">
       <div class="bhead"><h2>対象店ごとの結果</h2>
