@@ -295,6 +295,27 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
             store=args.abc_store or "NagaGutsu",
             ranges=ranges,
         )
+    if args.mode == "menu-hourly-probe":
+        from .ingest.fw_daily import probe_menu_hourly
+
+        def _slash(d: str) -> str:
+            return d.strip().replace("-", "/")
+
+        raw = args.hourly_ranges or (
+            "基準:2026-08-01:2026-08-14,空調後:2026-08-17:2026-08-23"
+        )
+        ranges: list[tuple[str, str, str]] = []
+        for chunk in raw.split(","):
+            parts = chunk.split(":")
+            if len(parts) != 3:
+                continue
+            label, d_from, d_to = parts
+            ranges.append((label.strip(), _slash(d_from), _slash(d_to)))
+        return probe_menu_hourly(
+            Path(args.artifacts),
+            store=args.hourly_store or "NagaGutsu",
+            ranges=ranges,
+        )
     if args.mode == "hourly-store-probe":
         from .ingest.fw_daily import probe_hourly_store
 
@@ -585,7 +606,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="probe",
         choices=["probe", "ingest", "report", "monthly", "monthly-dry",
                  "hourly", "hourly-dry", "abc", "abc-dry", "abc-store-probe",
-                 "lunch-analyze", "hourly-store-probe", "abc-totals-probe"],
+                 "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
+                 "menu-hourly-probe"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument("--month", default=None, help="hourly の対象月（YYYY-MM、既定は前月）")

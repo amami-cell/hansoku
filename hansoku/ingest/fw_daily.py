@@ -1240,6 +1240,56 @@ def probe_abc_store(
     return 0
 
 
+MENU_HOURLY_MENU = ("販売管理", "店舗業務", "時間帯別メニュー出数")
+
+
+def probe_menu_hourly(
+    artifacts: Path,
+    *,
+    store: str,
+    ranges: list[tuple[str, str, str]],
+    dump_rows: int = 45,
+) -> int:
+    """時間帯別メニュー出数（商品×時間帯の出数マトリクス）を1店・複数期間で吸い出す診断。
+
+    深夜(22時〜)の総出数を得て、時間帯別売上の客数・客単価と合わせて
+    『深夜の1人あたり品数・1品単価』を分解するための素材。まずは行（合計行・
+    見出しの時間帯ラベル・商品行）をそのままダンプして横並びの列構造を把握する。
+    """
+    import sys
+
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+    from .fw_budget import _click_search, _combo_options, _select_combo
+
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+        _open_menu(session, MENU_HOURLY_MENU)
+        options = _combo_options(session)
+        hit = next((o for o in options if store in o["name"]), None)
+        if hit is None:
+            print(f"[出数probe] コンボに『{store}』なし。候補: {[o['name'][:16] for o in options[:12]]}")
+            return 1
+        print(f"[出数probe] 対象店: {hit['name']}（value={hit['value']}）／{len(ranges)}レンジ")
+        for label, d_from, d_to in ranges:
+            _select_combo(session, hit["value"])
+            _set_date_range(session, d_from, d_to)
+            _click_search(session)
+            time.sleep(2.0)
+            rows = _visual_rows(session)
+            print(f"=== {label} {d_from}〜{d_to}（視覚行 {len(rows)}） ===")
+            for cells in rows[:dump_rows]:
+                line = " | ".join(c for c in cells[:80] if c is not None)
+                print("   ", line[:500])
+    return 0
+
+
 def probe_abc_totals(
     artifacts: Path,
     *,
