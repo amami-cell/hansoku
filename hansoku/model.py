@@ -98,6 +98,37 @@ ADDITIVE_METRICS: Final = frozenset(
 KIND_INTERIM: Final = "中間"
 KIND_FINAL: Final = "確定"
 
+# FWの「部門」（店ごとに命名がバラバラ）を、販促で見たい標準バケットへ寄せる。
+# 天さんの区分: コース(宴会飲み放題込み)／ランチ／アラカルト(フード・ドリンク)／
+# 飲み放題／食べ放題。表示順もこの並び。取込ログと画面の集計を同じ規則で揃えるため
+# ここに一元化する。
+DEPT_BUCKETS: Final = ("コース", "ランチ", "アラカルト", "飲み放題", "食べ放題", "その他")
+# アラカルトの中でドリンク扱いにする語（残りはフード）。
+_DEPT_DRINK_WORDS: Final = (
+    "ドリンク", "飲料", "酒", "ビール", "ワイン", "ウイスキー", "ハイボール",
+    "サワー", "カクテル", "焼酎", "日本酒", "ソフト", "スパークリング", "ノンアル",
+    "ハッピー",  # ハッピーアワー＝時間帯ドリンク値引き。アラカルト・ドリンク寄り。
+)
+
+
+def dept_bucket(name: str) -> str:
+    """FWの部門名（例 "66飲み放題" "10ランチサブ" "99コース"）→ 標準バケット。"""
+    n = name
+    if "食べ放題" in n or "食放" in n or "食べ放" in n:
+        return "食べ放題"
+    if "飲み放題" in n or "飲放" in n or "のみほ" in n or "呑み放題" in n:
+        return "飲み放題"
+    if "ランチ" in n or "昼" in n:
+        return "ランチ"
+    if "コース" in n or "宴会" in n:
+        return "コース"
+    return "アラカルト"
+
+
+def is_drink_dept(name: str) -> bool:
+    """アラカルト部門のうちドリンク寄りか（フード/ドリンクの内訳表示用）。"""
+    return any(w in name for w in _DEPT_DRINK_WORDS)
+
 
 @dataclass(frozen=True)
 class ActualRow:

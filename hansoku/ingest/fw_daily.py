@@ -1126,6 +1126,7 @@ def ingest_abc_store(
         METRIC_DEPT_SALES,
         METRIC_PRODUCT_SALES,
         ActualRow,
+        dept_bucket,
     )
 
     try:
@@ -1242,6 +1243,10 @@ def ingest_abc_store(
                 )
             )
             n_dept += 1
+            # 部門名→バケット分類の監査（コース/ランチ/アラカルト/飲み放題/食べ放題）を
+            # ログに残す。誤分類をログから見つけて分類辞書を直せるようにする。
+            bkt = dept_bucket(dname)
+            print(f"[ABC店部門] {dname:<18} → {bkt:<6} 数量{qty:>6} 売上{sales:>10} 原価{cost_rate}%")
         print(f"[ABC店] {code} 部門 {n_dept}件 (+{time.time() - t0:.0f}s)")
 
     print(f"[ABC店] 収集 {len(collected)} 行")

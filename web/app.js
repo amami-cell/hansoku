@@ -1504,9 +1504,63 @@ function renderStore(code) {
     </section>
     ${renderHourly(code)}
     ${renderLunchCard(code)}
+    ${renderDepartments(code)}
     ${renderProducts(code)}
     ${neighBlock}
   `;
+}
+
+// ── 部門構成（FW ABC・分類=部門）────────────────────────────────────────────
+// 店ごとにバラバラな部門名を コース/ランチ/アラカルト/飲み放題/食べ放題 に寄せて
+// 構成比で見せる。生の部門は折りたたみに残す。abc-store-ingest で店を1つずつ焼くと入る。
+function deptFor(code) {
+  return (DATA.departments || {})[code] || null;
+}
+const DEPT_COLORS = {
+  "コース": "var(--brand-bounenkai, #b5651d)",
+  "ランチ": "var(--brand-lunch, #2e8b57)",
+  "アラカルト": "var(--accent)",
+  "飲み放題": "#4a7fb5",
+  "食べ放題": "#c06a9e",
+  "その他": "var(--ink-3)",
+};
+function renderDepartments(code) {
+  const d = deptFor(code);
+  if (!d || !d.buckets || !d.buckets.length) return "";
+  const total = d.total_sales || 1;
+  const rows = d.buckets.map(b => {
+    const pct = Math.round((b.share || 0) * 100);
+    const w = Math.max(2, pct);
+    const cr = b.cost_rate != null ? `<span class="dcr">原価${b.cost_rate}%</span>` : "";
+    const q = b.qty ? `<span class="dqty">${b.qty.toLocaleString("ja-JP")}点</span>` : "";
+    let sub = "";
+    if (b.name === "アラカルト" && d.alacarte) {
+      const f = d.alacarte["フード"] || 0, dr = d.alacarte["ドリンク"] || 0;
+      if (f || dr) sub = `<div class="dsub">フード ${yen(f)}／ドリンク ${yen(dr)}</div>`;
+    }
+    return `<li class="drow">
+      <span class="dname" style="--dc:${DEPT_COLORS[b.name] || "var(--ink-3)"}">${esc(b.name)}</span>
+      <span class="dbar"><span class="dfill" style="width:${w}%;--dc:${DEPT_COLORS[b.name] || "var(--ink-3)"}"></span></span>
+      <span class="dpct">${pct}%</span>
+      <span class="dsales">${yen(b.sales)}</span>
+      ${q}${cr}${sub}</li>`;
+  }).join("");
+  const raw = (d.raw || []).map(r => {
+    const cr = r.cost_rate != null ? ` 原価${r.cost_rate}%` : "";
+    return `<li><span class="rbk" style="--dc:${DEPT_COLORS[r.bucket] || "var(--ink-3)"}">${esc(r.bucket)}</span>
+      ${esc(r.name)}<span class="rval">${yen(r.sales)}・${(r.qty || 0).toLocaleString("ja-JP")}点${cr}</span></li>`;
+  }).join("");
+  const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
+  const rawBlock = raw
+    ? `<details class="draw"><summary>FWの生の部門 ${d.raw.length}件を見る</summary>
+         <ul class="drawlist">${raw}</ul></details>`
+    : "";
+  return `
+    <section class="block">
+      <div class="bhead"><h2>部門構成</h2>
+        <span class="bnote">コース/ランチ/アラカルト/飲み放題/食べ放題${monthLbl}　合計 ${yen(total)}</span></div>
+      <div class="panel"><ul class="dlist">${rows}</ul>${rawBlock}</div>
+    </section>`;
 }
 
 // 売れ筋商品（FW ABC分析）。売上上位を棒つきで並べ、FWのABCランクを添える。

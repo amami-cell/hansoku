@@ -16,9 +16,12 @@ import yaml
 from ..analytics import RATIO_METRICS, ratio
 from ..db.warehouse import AggregateQuery, Warehouse
 from ..model import (
+    DEPT_BUCKETS,
     GRAIN_HOUR,
     GRAIN_MONTH,
     METRIC_COVERS,
+    METRIC_DEPT_QTY,
+    METRIC_DEPT_SALES,
     METRIC_DRINK_SALES,
     METRIC_DRINK_THEORY_COST,
     METRIC_FOOD_SALES,
@@ -26,6 +29,8 @@ from ..model import (
     METRIC_PRODUCT_SALES,
     METRIC_SALES,
     METRIC_SALES_BUDGET,
+    dept_bucket,
+    is_drink_dept,
 )
 
 # 店舗詳細に出す売れ筋商品の件数
@@ -390,6 +395,91 @@ def build(
     products_group.sort(key=lambda p: p["sales"], reverse=True)
     products_group = products_group[:PRODUCTS_TOP_N]
 
+    # 部門内訳（FW ABC 分類=部門）。店ごとにバラバラな部門名を標準バケット
+    # （コース/ランチ/アラカルト/飲み放題/食べ放題）へ寄せて、店舗詳細で構成比を出す。
+    # 生の部門も raw に残す。売上=dept_sales・数量=dept_qty・原価率=product_category(%)。
+    dept_raw: dict[str, dict[str, dict]] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_DEPT_SALES],
+            store_codes=master.active_codes,
+            group_by=("store_code", "product_name", "product_category"),
+        )
+    ):
+        try:
+            rate = float(row["product_category"]) if row["product_category"] else None
+        except (TypeError, ValueError):
+            rate = None
+        d = dept_raw.setdefault(row["store_code"], {}).setdefault(
+            row["product_name"], {"sales": 0.0, "qty": 0.0, "rate": rate}
+        )
+        d["sales"] += row["value"]
+        if rate is not None:
+            d["rate"] = rate
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_DEPT_QTY],
+            store_codes=master.active_codes,
+            group_by=("store_code", "product_name"),
+        )
+    ):
+        store = dept_raw.get(row["store_code"])
+        if store and row["product_name"] in store:
+            store[row["product_name"]]["qty"] += row["value"]
+
+    departments: dict[str, dict] = {}
+    for code, depts in dept_raw.items():
+        total = sum(d["sales"] for d in depts.values()) or 1.0
+        buckets: dict[str, dict] = {}
+        alacarte_split = {"フード": 0.0, "ドリンク": 0.0}
+        raw_list = []
+        for name, d in depts.items():
+            bucket = dept_bucket(name)
+            cost = d["sales"] * (d["rate"] / 100.0) if d["rate"] is not None else 0.0
+            b = buckets.setdefault(bucket, {"sales": 0.0, "qty": 0.0, "cost": 0.0})
+            b["sales"] += d["sales"]
+            b["qty"] += d["qty"]
+            b["cost"] += cost
+            if bucket == "アラカルト":
+                key = "ドリンク" if is_drink_dept(name) else "フード"
+                alacarte_split[key] += d["sales"]
+            raw_list.append(
+                {
+                    "name": name,
+                    "bucket": bucket,
+                    "sales": round(d["sales"]),
+                    "qty": round(d["qty"]),
+                    "cost_rate": round(d["rate"], 1) if d["rate"] is not None else None,
+                }
+            )
+        bucket_list = []
+        for name in DEPT_BUCKETS:
+            if name not in buckets:
+                continue
+            b = buckets[name]
+            bucket_list.append(
+                {
+                    "name": name,
+                    "sales": round(b["sales"]),
+                    "qty": round(b["qty"]),
+                    "share": round(b["sales"] / total, 4),
+                    "cost_rate": round(b["cost"] / b["sales"] * 100, 1) if b["sales"] else None,
+                }
+            )
+        raw_list.sort(key=lambda r: r["sales"], reverse=True)
+        departments[code] = {
+            "total_sales": round(total),
+            "buckets": bucket_list,
+            "alacarte": {k: round(v) for k, v in alacarte_split.items()},
+            "raw": raw_list,
+        }
+
     for row in warehouse.aggregate(
         AggregateQuery(
             date_from=date_from,
@@ -463,6 +553,9 @@ def build(
         # 全店（グループ全体）の売れ筋商品 上位。おすすめ料理候補としてTOPに出す。
         "products_group": products_group,
         "products_month": prod_month,
+        # 部門内訳（FW ABC 分類=部門・店舗別）。コース/ランチ/アラカルト/飲み放題/食べ放題の
+        # 構成比＋生の部門。abc-store-ingest で店を1つずつ焼くと入る。空でも画面は成立する。
+        "departments": departments,
         # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
         "campaigns": campaigns or [],
         # 制作物ギャラリー（config/creatives.yaml 由来）。空でも画面は成立する。
