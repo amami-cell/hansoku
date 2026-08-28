@@ -64,6 +64,11 @@ def report_probe(artifacts: Path, path_str: str) -> int:
         _open_menu(session, labels)
         items = session.dump_clickables("report_screen")
         print(f"[report] 「{last_label}」の操作要素 {len(items)}件")
+        print("[report] クリック要素テキスト一覧:")
+        for it in items:
+            t = " ".join((it.get("text") or "").split())
+            if t:
+                print("   -", t[:40])
         options = _combo_options(session)
         print(f"[report] 店舗コンボボックス {len(options)}件")
         if options:
