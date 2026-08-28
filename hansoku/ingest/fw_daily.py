@@ -1281,8 +1281,15 @@ def probe_menu_hourly(
             _select_combo(session, hit["value"])
             _set_date_range(session, d_from, d_to)
             _click_search(session)
-            time.sleep(2.0)
-            rows = _visual_rows(session)
+            # 合計行（時間帯別の総出数）が埋まるまで粘る（読み込み中を避ける）
+            rows: list[list[str]] = []
+            for _ in range(10):
+                time.sleep(1.5)
+                rows = _visual_rows(session)
+                tot = next((c for c in rows if c and c[0].strip() == "合計"
+                            and len([x for x in c if x.strip()]) > 6), None)
+                if tot:
+                    break
             print(f"=== {label} {d_from}〜{d_to}（視覚行 {len(rows)}） ===")
             for cells in rows[:dump_rows]:
                 line = " | ".join(c for c in cells[:80] if c is not None)
