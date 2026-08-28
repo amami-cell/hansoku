@@ -1280,19 +1280,34 @@ def ingest_abc_store(
         print(f"[ABC店] {code} 商品 {len(products)}品 → {n_prod}行（1位 {top}） (+{time.time() - t0:.0f}s)")
 
         # --- 分類=部門：ランチ/ドリンク等の内訳（数量・売上・原価率） ---
-        # 部門グリッドは負荷時に埋まりきらず0件になることがある（並行実行の取りこぼし）。
-        # 部門らしい行（原価率%|数量|売上 形）が出るまでラジオ再クリック＋検索を最大3回粘る。
+        # 部門グリッドは負荷時に埋まりきらず0件になる／部門ラジオに切替らず全商品の
+        # ままになることがある（1069/1137）。「きれいな部門行」（先頭セルが部門名で、
+        # 名前にセル区切り '|' を含まない＝商品CD付きの全商品行ではない）が出るまで
+        # 先頭へスクロール→部門クリック→検索を最大4回粘る。
+        def _clean_dept(cells: list[str]):
+            m = hdr.match(" | ".join(c for c in cells[:6] if c is not None))
+            if not m:
+                return None
+            name = m.group(1).strip()
+            # 全商品行（"商品CD | 商品名 | 単価 | 原価"）は名前に '|' を含む→部門ではない
+            return m if "|" not in name else None
+
         drows: list[list[str]] = []
-        for dtry in range(3):
+        for dtry in range(4):
+            try:
+                session.page.mouse.wheel(0, -3000)  # 条件パネルを可視域へ
+            except Exception:  # noqa: BLE001
+                pass
             _abc_click_radio(session.page, "部門")
+            time.sleep(1)
             drows = _abc_search_and_rows(session)
-            if any(hdr.match(" | ".join(c[:6])) for c in drows):
+            if any(_clean_dept(c) for c in drows):
                 break
-            print(f"[ABC店] {code} 部門グリッド未充填（{dtry + 1}回目）。再検索。")
+            print(f"[ABC店] {code} 部門グリッド未確定（{dtry + 1}回目・全商品のまま/未充填）。再切替。")
             time.sleep(2)
         n_dept = 0
         for cells in drows:
-            m = hdr.match(" | ".join(cells[:6]))
+            m = _clean_dept(cells)
             if not m:
                 continue
             dname = m.group(1).strip()
@@ -1343,11 +1358,20 @@ def ingest_abc_store(
 
 
 def _abc_click_radio(page, label: str) -> bool:
-    """条件パネルのラジオ/ラベル（全商品・部門・グループ・メニュー等）を実クリックする。"""
+    """条件パネルのラジオ/ラベル（全商品・部門・グループ・メニュー等）を実クリックする。
+
+    商品グリッドを読んだ後は条件パネルが画面外へスクロールしていることがあり、
+    その状態だと is_visible=False でクリックを取りこぼす（1069/1137 で部門に切替らず
+    全商品のままだった原因）。クリック前に必ず可視域へスクロールする。
+    """
     loc = page.get_by_text(label, exact=True)
     for i in range(min(loc.count(), 12)):
         try:
             el = loc.nth(i)
+            try:
+                el.scroll_into_view_if_needed(timeout=1500)
+            except Exception:  # noqa: BLE001
+                pass
             if el.is_visible():
                 el.click(timeout=2000)
                 return True
