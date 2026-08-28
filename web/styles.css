@@ -689,3 +689,13 @@ tbody tr:last-child td{border-bottom:0;}
 .cdtop{font-size:11px;color:var(--ink-2);background:var(--surface);border:1px solid var(--line);
   border-radius:999px;padding:2px 9px;}
 .cdnote{margin-top:12px;font-size:12px;color:var(--ink-3);}
+
+/* 店舗詳細トップの「販促の狙いどころ」 */
+.stargets{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.stlbl{font-size:12px;font-weight:700;color:var(--ink-2);}
+.stchip{font-size:12px;font-weight:600;color:var(--warning-ink);
+  background:color-mix(in srgb,var(--warning-ink) 12%,transparent);
+  border:1px solid color-mix(in srgb,var(--warning-ink) 30%,transparent);
+  border-radius:999px;padding:3px 11px;cursor:default;}
+.stlink{margin-left:auto;}

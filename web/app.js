@@ -1507,6 +1507,17 @@ function renderGallery() {
 }
 
 // ── 店舗詳細（販促×売上×近隣）───────────────────────────────────────────
+// 店舗詳細トップの「販促の狙いどころ」チップ。横断分析でこの店が
+// ターゲット判定された区分（同ブランド平均より弱い）を要点として出す。
+function storeTargetChip(code) {
+  const items = crossTargets().filter(t => t.code === code);
+  if (!items.length) return "";
+  const chips = items.map(t =>
+    `<span class="stchip" title="この店 ${Math.round(t.v * 100)}%・同ブランド平均 ${Math.round(t.avg * 100)}%／${t.why}">${t.flag}</span>`).join("");
+  return `<div class="stargets"><span class="stlbl">販促の狙いどころ</span>${chips}
+    <button class="linkbtn stlink" data-view="cross">横断で見る →</button></div>`;
+}
+
 function renderStore(code) {
   const s = store(code);
   const months = DATA.months;
@@ -1679,6 +1690,7 @@ function renderStore(code) {
       <div class="shd"><span class="rtag" style="--rc:${color}">${s.region}</span>
         <h2 class="sname">${s.name}</h2>${s.shared_facility ? '<span class="tagx">共営施設</span>' : ""}</div>
       ${kpis}
+      ${storeTargetChip(code)}
     </section>
     <section class="block">
       <div class="bhead"><h2>この店の販促</h2>
