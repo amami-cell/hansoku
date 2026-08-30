@@ -1096,6 +1096,59 @@ def ingest_abc(
     return 0
 
 
+def probe_abc_dom(artifacts: Path, *, store: str) -> int:
+    """1069/1137 で分類ラジオが切替らない原因を突き止めるDOM診断。
+
+    ABCを開き1店選択したうえで、全 input[type=radio] の name/id/value/checked/
+    可視/座標/ラベル文言を列挙し、『部門/グループ/全商品』を含む要素の outerHTML も出す。
+    ラジオの実体・イベント結線が他店とどう違うかを見て、確実な切替方法を決める。
+    """
+    import sys as _sys
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+        _open_abc(session)
+        _select_date_preset(session, _ABC_PRESET_LASTMONTH)
+        d_from, d_to = _month_bounds("2026-07")
+        _set_date_range(session, d_from, d_to)
+        hit = _abc_open_store_modal_and_select_one(session, store)
+        print(f"[ABC-DOM] 選択店: {hit}")
+        radios = session.page.evaluate(
+            r"""() => { const clip=s=>(s||'').replace(/\s+/g,' ').trim();
+            const out=[];
+            for(const i of document.querySelectorAll('input[type=radio]')){
+              let lab='';
+              if(i.id){const l=document.querySelector('label[for="'+CSS.escape(i.id)+'"]'); if(l) lab=clip(l.textContent);}
+              if(!lab){let n=i.parentElement; for(let k=0;k<3&&n;k++){const t=clip(n.innerText); if(t){lab=t.slice(0,30);break;} n=n.parentElement;}}
+              const r=i.getBoundingClientRect();
+              out.push({name:i.name,id:i.id,value:i.value,checked:i.checked,vis:!!i.offsetParent,x:Math.round(r.x),y:Math.round(r.y),lab});
+            } return out; }"""
+        )
+        print(f"[ABC-DOM] radios {len(radios)}件:")
+        for r in radios[:50]:
+            print("   ", r)
+        html = session.page.evaluate(
+            r"""() => { const clip=s=>(s||'').replace(/\s+/g,' ').trim();
+            const want=new Set(['部門','グループ','全商品','メニュー']);
+            const nodes=[...document.querySelectorAll('*')].filter(n=>{
+              const own=[...n.childNodes].filter(c=>c.nodeType===3).map(c=>clip(c.textContent)).join('');
+              return want.has(own);});
+            return nodes.slice(0,8).map(n=>{const p=n.closest('label,td,li,div')||n; return p.outerHTML.replace(/\s+/g,' ').slice(0,500);}); }"""
+        )
+        for h in html:
+            print("   [分類HTML]", h)
+        session.snapshot("abc_dom_probe")
+    return 0
+
+
 def report_abc_coverage(warehouse, master, month: str | None = None) -> int:
     """店舗別ABC取込のカバレッジ確認。各稼働店の 商品数・部門数・バケット別売上を印字。
 
