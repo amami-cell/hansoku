@@ -731,20 +731,28 @@ def _fill_manager_period(session, ym: str) -> bool:
 
 
 def _check_manager_radio(session, value: str) -> bool:
-    """全店/全て などの Bootstrap ラベル型ラジオを value で掴んでクリックする。"""
-    for sel in (
-        f'label:has(input[type="radio"][value="{value}"])',
-        f'input[type="radio"][value="{value}"]',
-    ):
-        try:
-            loc = session.page.locator(sel).first
-            if loc.count() and loc.is_visible():
-                loc.click(timeout=3000)
-                return True
-        except Exception:  # noqa: BLE001
-            continue
-    # テキスト一致でのフォールバック（ラベルの文言をクリック）
-    return session.click_text(value, wait=0.4)
+    """全店/全て などの Bootstrap ラベル型ラジオを value で選択する。
+
+    input.checked はAngular側でCSSクラス管理のため当てにならない。input を
+    ネイティブclickし、親labelもクリックし、change/input を発火して状態を確定させる。
+    """
+    return bool(
+        session.page.evaluate(
+            r"""(value) => {
+        const inp = [...document.querySelectorAll('input[type=radio]')]
+            .find(i => (i.value || '') === value);
+        if (!inp) return false;
+        inp.click();                                   // Angular の (change) を発火
+        inp.checked = true;
+        for (const ev of ['input','change'])
+            inp.dispatchEvent(new Event(ev, {bubbles: true}));
+        const lab = inp.closest('label');
+        if (lab) lab.click();
+        return true;
+    }""",
+            value,
+        )
+    )
 
 
 def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
@@ -782,36 +790,83 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
         page = session.page
         ctx = page.context
         path = None
-        try:
-            with page.expect_download(timeout=30000) as dl_info:
-                if not session.click_text("出力", wait=1.2):
-                    page.evaluate(
-                        """() => { for (const b of document.querySelectorAll('button,a')) {
-                          if ((b.innerText||'').replace(/\\s/g,'').includes('出力') && b.offsetParent)
-                          { b.click(); return; } } }"""
-                    )
-            download = dl_info.value
+
+        # 出力が何をするか（XHRでファイルをblob取得？別タブ？）をネットワークで観測する
+        import time as _t
+
+        net_log: list[str] = []
+        console_log: list[str] = []
+
+        def _on_response(resp):  # noqa: ANN001
+            try:
+                ct = (resp.headers or {}).get("content-type", "")
+                cd = (resp.headers or {}).get("content-disposition", "")
+                url = resp.url
+                interesting = (
+                    cd
+                    or any(k in ct.lower() for k in ("csv", "excel", "spreadsheet", "octet-stream", "zip"))
+                    or any(k in url.lower() for k in ("download", "csv", "excel", "export", "output", "dl", "report", "pl"))
+                )
+                if interesting and "/assets/" not in url and not url.endswith((".js", ".css", ".png", ".svg", ".woff", ".woff2")):
+                    net_log.append(f"{resp.request.method} {resp.status} ct={ct[:40]} cd={cd[:60]} {url[:160]}")
+            except Exception:  # noqa: BLE001
+                pass
+
+        def _on_console(msg):  # noqa: ANN001
+            try:
+                if msg.type in ("error", "warning"):
+                    console_log.append(f"{msg.type}: {msg.text[:200]}")
+            except Exception:  # noqa: BLE001
+                pass
+
+        page.on("response", _on_response)
+        page.on("console", _on_console)
+        got_download = {"dl": None}
+
+        def _on_download(dl):  # noqa: ANN001
+            got_download["dl"] = dl
+
+        page.on("download", _on_download)
+
+        # 出力ボタン（button 要素）を明示的に押す
+        clicked = page.evaluate(
+            """() => { const bs=[...document.querySelectorAll('button,a,input[type=button],input[type=submit]')];
+              const b = bs.find(e => (e.innerText||e.value||'').replace(/\\s/g,'').includes('出力') && e.offsetParent);
+              if (b) { b.click(); return true; } return false; }"""
+        )
+        print(f"[店長会DL] 出力ボタン click: {clicked}")
+        # ダウンロード/レスポンス/別タブを最大25秒待つ
+        for _ in range(25):
+            if got_download["dl"] is not None:
+                break
+            _t.sleep(1.0)
+
+        if got_download["dl"] is not None:
+            download = got_download["dl"]
             fname = download.suggested_filename or "manager_dl.bin"
             path = artifacts / fname
             download.save_as(str(path))
             print(f"[店長会DL] ダウンロード成功: {fname}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[店長会DL] 出力クリック後にダウンロード無し: {exc}")
-            # 新タブ/ポップアップが開いていればそのURL/本文を確認
-            try:
-                pops = [p for p in ctx.pages if p is not page]
-                for pop in pops:
-                    pop.wait_for_load_state("domcontentloaded", timeout=6000)
-                    body = pop.evaluate("() => (document.body && document.body.innerText || '').slice(0, 800)")
-                    print(f"[店長会DL] 新タブ検出: url={pop.url}\n本文(先頭800字):\n{body}")
-            except Exception:  # noqa: BLE001
-                pass
+        else:
+            print("[店長会DL] ダウンロードイベント無し。観測ログを出す。")
+
+        print(f"[店長会DL] 気になるレスポンス {len(net_log)}件:")
+        for line in net_log[-25:]:
+            print("   ", line)
+        if console_log:
+            print(f"[店長会DL] console {len(console_log)}件:")
+            for line in console_log[-15:]:
+                print("   ", line)
+        # 別タブ
+        try:
+            pops = [p for p in ctx.pages if p is not page]
+            for pop in pops:
+                pop.wait_for_load_state("domcontentloaded", timeout=6000)
+                print(f"[店長会DL] 新タブ検出: url={pop.url}")
+        except Exception:  # noqa: BLE001
+            pass
+        if path is None:
             session.snapshot("mgrdl_after_output")
-            after = session.dump_clickables("mgrdl_after_output")
-            print(f"[店長会DL] 出力後の操作要素 {len(after)}件（モーダル/形式選択の可能性）:")
-            for it in after[:40]:
-                txt = " ".join((it.get("text") or "").split())[:44]
-                print(f"    {it.get('tag',''):<8} {txt}")
             _dump_manager_form(session, "出力後")
 
         if path:
