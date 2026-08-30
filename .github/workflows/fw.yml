@@ -34,6 +34,7 @@ on:
           - abc-store-ingest
           - abc-coverage
           - abc-dom-probe
+          - manager-dl-probe
         default: explore
       path:
         description: '探索するメニュー名（カンマ区切り）'
@@ -137,6 +138,8 @@ jobs:
               xvfb-run -a python -m hansoku.cli fw-stores --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "budget-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-budget --mode probe --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "manager-dl-probe" ]; then
+              xvfb-run -a python -m hansoku.cli fw-budget --mode manager-dl --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "budget-dry" ]; then
               xvfb-run -a python -m hansoku.cli fw-budget --mode ingest --dry-run --limit 2 --months 2 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "budget-ingest" ]; then

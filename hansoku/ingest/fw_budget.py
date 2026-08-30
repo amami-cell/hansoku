@@ -598,3 +598,89 @@ def ingest(
     loaded = warehouse.replace_actuals(rows)
     print(f"[budget] warehouse へ {loaded} 件 書き込みました")
     return 0
+
+
+# ── 店長会資料DL（損益管理 → 実績管理業務 → 店長会資料DL）──────────────────
+# 店長会議用のP&L系ダウンロード。予実達成率・原価率・粗利・客数・客単価・順位など
+# 月次KPIが1ファイルに揃う（探索で確認: 出力形式 Excel/CSV・出力分類 全商品/部門/
+# グループ）。まず probe でCSVを1本落として列構成を確認し、それに合わせて ingest を書く。
+MANAGER_MENU = ("損益管理", "実績管理業務", "店長会資料DL")
+
+
+def _open_manager_dl(session) -> None:
+    for label in MANAGER_MENU:
+        if not session.click_text(label):
+            session.snapshot(f"missing_{label}")
+            session.dump_clickables(f"failed_{label}")
+            raise FWError(f"「{label}」に進めませんでした")
+        session.snapshot(f"opened_{label}")
+
+
+def _download_csv_any(session, artifacts: Path, name: str, buttons: list[str]) -> Path | None:
+    """複数のボタン名候補で「CSV/ダウンロード」を押してファイルを保存する。"""
+    page = session.page
+    try:
+        with page.expect_download(timeout=30000) as dl_info:
+            clicked = False
+            for b in buttons:
+                if session.click_text(b, wait=1.0):
+                    clicked = True
+                    break
+            if not clicked:
+                page.evaluate(
+                    """(labels) => { const norm=s=>(s||'').replace(/\\s/g,'');
+                    for (const el of document.querySelectorAll('button,a,label,span,div')) {
+                      const t=norm(el.innerText||el.textContent);
+                      if (labels.some(l=>t.includes(l)) && el.offsetParent) { el.click(); return true; } }
+                    return false; }""",
+                    buttons,
+                )
+        download = dl_info.value
+        path = artifacts / name
+        download.save_as(str(path))
+        return path
+    except Exception as exc:  # noqa: BLE001
+        session.snapshot("mgrdl_failed")
+        session.dump_clickables("mgrdl_failed")
+        print(f"[店長会DL] ダウンロード失敗: {exc}")
+        return None
+
+
+def probe_manager_dl(artifacts: Path) -> int:
+    """店長会資料DL の画面に入り、フォーム要素を列挙してCSVを1本落とし、列を印字する。"""
+    import sys
+
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+        _open_manager_dl(session)
+        items = session.dump_clickables("mgrdl_screen")
+        print(f"[店長会DL] 画面の操作要素 {len(items)}件:")
+        for it in items[:70]:
+            txt = " ".join((it.get("text") or "").split())[:44]
+            print(f"    {it.get('tag',''):<8} {txt}")
+        # 出力形式=CSV を選んでおく（あれば）。無ければ既定のまま。
+        session.click_text("CSV", wait=0.6)
+        path = _download_csv_any(
+            session, artifacts, "manager_dl.csv",
+            ["CSV出力", "CSVダウンロード", "ダウンロード", "CSV", "出力", "実行", "DL"],
+        )
+        if path:
+            raw = path.read_bytes()
+            text, enc = _decode(raw)
+            lines = text.splitlines()
+            print(f"[店長会DL] CSV {len(raw)} bytes / {len(lines)}行 / enc={enc}")
+            print("---- CSV 先頭40行 ----")
+            for line in lines[:40]:
+                print(line[:400])
+        else:
+            print("[店長会DL] CSVを落とせず。上の操作要素からボタン名/フォームを確認する。")
+    print(f"\n成果物: {artifacts}")
+    return 0

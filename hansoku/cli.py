@@ -221,6 +221,10 @@ def cmd_fw_budget(args: argparse.Namespace) -> int:
 
     if args.mode == "probe":
         return probe(Path(args.artifacts))
+    if args.mode == "manager-dl":
+        from .ingest.fw_budget import probe_manager_dl
+
+        return probe_manager_dl(Path(args.artifacts))
     if args.mode == "ingest":
         master = StoreMaster.load(args.stores)
         if args.dry_run:
@@ -620,7 +624,7 @@ def build_parser() -> argparse.ArgumentParser:
     fwbudget = sub.add_parser(
         "fw-budget", help="FW月別予算登録から売上予算を取り込む"
     )
-    fwbudget.add_argument("--mode", default="probe", choices=["probe", "ingest"], help="動作")
+    fwbudget.add_argument("--mode", default="probe", choices=["probe", "ingest", "manager-dl"], help="動作")
     fwbudget.add_argument("--months", type=int, default=3, help="遡る月数")
     fwbudget.add_argument("--limit", type=int, default=None, help="先頭N店だけ（試走用）")
     fwbudget.add_argument("--dry-run", action="store_true", help="書き込まず印字のみ")
