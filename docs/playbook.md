@@ -78,6 +78,19 @@
   FW側データ制約で、コードでは回収不可。売れ筋のみ取得。1766 ぎふや福岡天神は新店で
   当月ABCデータなし/店舗選択未一致（開店後に再取得）。
 
+## 店長会資料DL（損益管理→実績管理業務）— 調査結論: 取込対象外
+- 実体は 出力ボタン→ `POST .../ProfitLoss/ManagerMeetingDocumentExcel/`。multipart で
+  DB接続情報＋全社の店コード＋期間を送ると旧Excel(.xls, 約4MB)が**レスポンス本文**で返る
+  （download/response イベントは出ないので `manager-dl` モードは page.request で同期再送して取得）。
+- 中身は**1店1シート**（FW全社＝当社の稼働店以外も多数）の**店長会用レポート雛形**。
+  各シートに 売上/ＦＬ合計/利益/集客/客単価・前年実績/予算/実績/予算達成率/前年比較 の
+  “ラベル”はあるが**値セルは空**（「青いセルは自動計算」＝Excelで開いた時に式で埋まる）。
+  → **DBに焼ける実数値は無い**。`fw-budget --mode manager-dl` は「雛形である」ことを
+  非ゼロ数値セル数で確認する診断として残す（取込はしない）。
+- 欲しいKPIの供給元（既存ツールで充足）:
+  原価率＝ABC部門グリッド（`export.py` の bucket.cost_rate）／利益＝売上−原価／
+  売上・客数・客単価＝monthly・hourly／予算（達成率の分母）＝fw-budget。
+
 ## FWツール早見（GitHub Actions: fw.yml を workflow_dispatch）
 - `abc-store-ingest` … 1店の商品ABC＋部門内訳をNeonへ取込（本番収集の主力）
 - `abc-coverage` … 全店の取得状況をDB照会で一覧（FW不要）

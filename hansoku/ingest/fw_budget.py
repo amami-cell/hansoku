@@ -601,9 +601,19 @@ def ingest(
 
 
 # ── 店長会資料DL（損益管理 → 実績管理業務 → 店長会資料DL）──────────────────
-# 店長会議用のP&L系ダウンロード。予実達成率・原価率・粗利・客数・客単価・順位など
-# 月次KPIが1ファイルに揃う（探索で確認: 出力形式 Excel/CSV・出力分類 全商品/部門/
-# グループ）。まず probe でCSVを1本落として列構成を確認し、それに合わせて ingest を書く。
+# 【調査結論・2026-08】このDLは「データ出力」ではなく「店長会用の空レポート雛形」だった。
+# 実体は Angular 画面の 出力ボタン→ POST .../ci/index.php/ProfitLoss/
+# ManagerMeetingDocumentExcel/ で、multipart(user_id/user_password/database_name=hassin/
+# host_name/loginUserTenpoCd/tenpoCd=全社の店コード/期間/…)を送ると旧Excel(.xls, OLE2,
+# 約4MB)が「レスポンス本文」で返る（download/response イベントは発火しないため
+# page.request.post で同期再送して取得する）。中身は 1店1シート（FW全社・当社の稼働店
+# 以外も多数）で、各シートは 売上/ＦＬ合計/利益/集客/客単価 と 前年実績/予算/実績/
+# 予算達成率/前年比較 のラベルを持つが、値セルは空（「青いセルは自動計算される」＝Excelで
+# 開いた時に式で計算される雛形）。→ DBに焼ける実数値は無い。
+# 従って本アプリのKPI（原価率・利益、客数・客単価内訳）は 店長会資料DL からではなく、
+# 既存の稼働ツールから供給する: 売上/客数/客単価=monthly・hourly、予算=fw-budget、
+# 原価率=ABC部門グリッド(export.py の bucket.cost_rate)、利益=売上−原価 で算出。
+# manager-dl モードは「雛形である」ことを非ゼロ数値セル数で毎回確認できる診断として残す。
 MANAGER_MENU = ("損益管理", "実績管理業務", "店長会資料DL")
 
 
@@ -1069,18 +1079,42 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
                 for line in lines[:40]:
                     print(line[:400])
             elif suffix == ".xls":
-                # 旧Excel(OLE2): xlrd があれば読む。無ければ先頭バイトのみ。
+                # 旧Excel(OLE2): xlrd で1店1シートのテンプレを解析。
+                # 重要な判定: 数値セル(=実データ)が入っているか、空テンプレか。
                 try:
                     import xlrd  # noqa: PLC0415
 
                     wb = xlrd.open_workbook(str(path))
-                    print(f"[店長会DL] xls シート {wb.nsheets}枚: {wb.sheet_names()}")
+                    print(f"[店長会DL] xls シート {wb.nsheets}枚（1店1シート・FW全社）")
+                    print(f"[店長会DL] シート名: {wb.sheet_names()[:40]}")
+                    total_num = 0
                     for sn in wb.sheet_names():
                         ws = wb.sheet_by_name(sn)
-                        print(f"---- シート「{sn}」 {ws.nrows}行×{ws.ncols}列 先頭12行 ----")
-                        for i in range(min(12, ws.nrows)):
-                            cells = [str(ws.cell_value(i, j)) for j in range(ws.ncols)]
-                            print(" | ".join(cells)[:400])
+                        nums = sum(
+                            1
+                            for i in range(ws.nrows)
+                            for j in range(ws.ncols)
+                            if ws.cell_type(i, j) == xlrd.XL_CELL_NUMBER
+                            and ws.cell_value(i, j) not in (0, None)
+                        )
+                        total_num += nums
+                    print(f"[店長会DL] 全シートの非ゼロ数値セル合計: {total_num}")
+                    # 先頭の店舗シートだけ、非空セルを座標付きで出す（実データ有無の確証）
+                    store_sheets = [s for s in wb.sheet_names() if s[:1].isdigit()]
+                    if store_sheets:
+                        ws = wb.sheet_by_name(store_sheets[0])
+                        print(f"---- サンプル「{store_sheets[0]}」の非空セル（先頭40） ----")
+                        shown = 0
+                        for i in range(ws.nrows):
+                            for j in range(ws.ncols):
+                                v = ws.cell_value(i, j)
+                                if v not in ("", None) and shown < 40:
+                                    print(f"  [{i},{j}] {str(v)[:40]}")
+                                    shown += 1
+                    print(
+                        "[店長会DL] 判定: 数値実データが極少なら、これは会議用の空テンプレ"
+                        "（人が記入・青セルはExcel上で自動計算）であり、DBに焼く実数は無い。"
+                    )
                 except Exception as exc:  # noqa: BLE001
                     text, enc = _decode(raw)
                     print(f"[店長会DL] xls読取不可({exc})。テキスト解釈 先頭20行:")
