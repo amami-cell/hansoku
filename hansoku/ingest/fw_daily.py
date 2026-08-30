@@ -1427,27 +1427,31 @@ def _abc_click_radio(page, label: str) -> bool:
     その状態だと is_visible=False でクリックを取りこぼす（1069/1137 で部門に切替らず
     全商品のままだった原因）。クリック前に必ず可視域へスクロールする。
     """
-    # まず role=radio でラジオ input 自体を掴む（テキスト要素がラベルとして紐づいて
-    # いれば、これが最も確実。1069/1137 は可視テキストのクリックでは切替らなかった）。
-    try:
-        radio = page.get_by_role("radio", name=label, exact=True)
-        for i in range(min(radio.count(), 6)):
-            el = radio.nth(i)
-            try:
-                el.scroll_into_view_if_needed(timeout=1500)
-            except Exception:  # noqa: BLE001
-                pass
-            try:
-                el.check(timeout=2000)
-                return True
-            except Exception:  # noqa: BLE001
+    # FWの分類ラジオは Bootstrap のボタン型:
+    #   <label class="btn btn-gray"><input type=radio value="部門" name="出力分類部門1">部門</label>
+    # Angularの切替は LABEL のクリックに結線されており、input を .check() しても UIは
+    # 変わらない（1069/1137 が切替らなかった真因＝input を check して True を返し、効く
+    # ラベルクリックに進まなかった）。value で対象ラベルを一意に掴んでクリックする。
+    for sel in (
+        f'label:has(input[type="radio"][value="{label}"])',
+        f'label:has(input[type="radio"][name^="出力分類{label}"])',
+        f'label:has(input[type="radio"][name^="分類{label}"])',
+    ):
+        try:
+            loc = page.locator(sel)
+            for i in range(min(loc.count(), 6)):
+                el = loc.nth(i)
                 try:
-                    el.click(timeout=1500, force=True)
+                    el.scroll_into_view_if_needed(timeout=1500)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    el.click(timeout=2000)
                     return True
                 except Exception:  # noqa: BLE001
                     continue
-    except Exception:  # noqa: BLE001
-        pass
+        except Exception:  # noqa: BLE001
+            pass
     loc = page.get_by_text(label, exact=True)
     for i in range(min(loc.count(), 12)):
         try:
