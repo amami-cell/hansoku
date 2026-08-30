@@ -646,8 +646,93 @@ def _download_csv_any(session, artifacts: Path, name: str, buttons: list[str]) -
         return None
 
 
-def probe_manager_dl(artifacts: Path) -> int:
-    """店長会資料DL の画面に入り、フォーム要素を列挙してCSVを1本落とし、列を印字する。"""
+def _dump_manager_form(session, tag: str) -> dict:
+    """店長会資料DL のフォーム構成（input/radio/select/label）を吸い出して印字する。
+
+    dump_clickables は radio/checkbox/日付入力を拾わないため、ここで拾う。
+    """
+    info = session.page.evaluate(
+        r"""() => {
+        const clip = s => (s || '').replace(/\s+/g, ' ').trim();
+        const near = el => {                     // 近傍のラベル文言
+            let n = el, out = '';
+            for (let i = 0; i < 5 && n; i++) {
+                n = n.parentElement; if (!n) break;
+                const leaf = [...n.querySelectorAll('*')].find(
+                    e => e.children.length === 0 && clip(e.innerText) &&
+                         !['INPUT','BUTTON'].includes(e.tagName));
+                if (leaf) { out = clip(leaf.innerText); break; }
+            }
+            return out.slice(0, 24);
+        };
+        const inputs = [...document.querySelectorAll('input')].filter(i => i.offsetParent)
+            .map(i => ({type: i.type, id: i.id || '', name: i.name || '',
+                        ph: i.placeholder || '', val: clip(i.value),
+                        checked: i.checked, label: near(i)}));
+        const radios = inputs.filter(i => i.type === 'radio');
+        const dates  = [...document.querySelectorAll('input')].filter(i => i.offsetParent &&
+                        (/date|day|from|to|period|期間/i.test(i.id + i.name + i.placeholder) ||
+                         /^\d{4}\/\d{1,2}\/\d{1,2}$/.test((i.value||'').trim())))
+            .map(i => ({id: i.id||'', name: i.name||'', ph: i.placeholder||'', val: clip(i.value)}));
+        const selects = [...document.querySelectorAll('select')].filter(s => s.offsetParent)
+            .map(s => ({id: s.id||'', name: s.name||'', label: near(s),
+                        opts: [...s.options].slice(0, 12).map(o => clip(o.textContent))}));
+        const labels = [...document.querySelectorAll('label')].filter(l => l.offsetParent)
+            .map(l => clip(l.innerText)).filter(Boolean).slice(0, 30);
+        return {n_inputs: inputs.length, radios, dates, selects, labels,
+                text_inputs: inputs.filter(i => ['text','tel',''].includes(i.type))};
+    }"""
+    )
+    print(f"[店長会DL] フォーム構成（{tag}）: input {info.get('n_inputs')}個")
+    for r in info.get("radios", [])[:20]:
+        print(f"    radio [{r['label']}] name={r['name']} id={r['id']} val={r['val']} checked={r['checked']}")
+    for d in info.get("dates", [])[:8]:
+        print(f"    date  id={d['id']} name={d['name']} ph={d['ph']} val={d['val']}")
+    for s in info.get("selects", [])[:8]:
+        print(f"    select[{s['label']}] name={s['name']} opts={s['opts']}")
+    for t in info.get("text_inputs", [])[:14]:
+        print(f"    text  [{t['label']}] id={t['id']} name={t['name']} ph={t['ph']} val={t['val']}")
+    if info.get("labels"):
+        print(f"    labels: {info['labels']}")
+    return info
+
+
+def _fill_manager_period(session, ym: str) -> bool:
+    """期間（from〜to）を対象月に設定する。空欄でも入るよう複数手法を試す。ym='YYYY-MM'。"""
+    import calendar
+
+    y, m = int(ym[:4]), int(ym[5:7])
+    last = calendar.monthrange(y, m)[1]
+    d_from, d_to = f"{y}/{m:02d}/01", f"{y}/{m:02d}/{last:02d}"
+    return bool(
+        session.page.evaluate(
+            r"""([f, t]) => {
+        const set = (el, v) => {
+            el.focus(); el.value = v;
+            for (const ev of ['input','change','blur'])
+                el.dispatchEvent(new Event(ev, {bubbles: true}));
+            el.dispatchEvent(new KeyboardEvent('keyup', {key: ' ', bubbles: true}));
+        };
+        // 期間らしいテキスト入力（値が空/日付形式）を左→右に2つ拾う
+        const cand = [...document.querySelectorAll('input')].filter(i => i.offsetParent &&
+            ['text','tel',''].includes(i.type) &&
+            (!(i.value||'').trim() || /^\d{4}\/\d{1,2}\/\d{1,2}$/.test((i.value||'').trim())));
+        if (cand.length >= 2) { set(cand[0], f); set(cand[1], t); return true; }
+        if (cand.length === 1) { set(cand[0], f); return true; }
+        // type=date もフォールバック
+        const iso = s => s.replace(/\//g, '-').replace(/-(\d)-/g,'-0$1-').replace(/-(\d)$/,'-0$1');
+        const dd = [...document.querySelectorAll('input[type=date]')].filter(i => i.offsetParent);
+        if (dd.length >= 2) { set(dd[0], iso(f)); set(dd[1], iso(t)); return true; }
+        return false;
+    }""",
+            [d_from, d_to],
+        )
+    )
+
+
+def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
+    """店長会資料DL の画面に入り、フォーム構成を吸い出し→期間を設定→出力し、
+    落ちたファイル（CSV/Excel/ZIP）の中身か、モーダル等の後続画面を印字する。"""
     import sys
 
     try:
@@ -663,24 +748,67 @@ def probe_manager_dl(artifacts: Path) -> int:
         _open_manager_dl(session)
         items = session.dump_clickables("mgrdl_screen")
         print(f"[店長会DL] 画面の操作要素 {len(items)}件:")
-        for it in items[:70]:
+        for it in items[:40]:
             txt = " ".join((it.get("text") or "").split())[:44]
             print(f"    {it.get('tag',''):<8} {txt}")
-        # 出力形式=CSV を選んでおく（あれば）。無ければ既定のまま。
-        session.click_text("CSV", wait=0.6)
-        path = _download_csv_any(
-            session, artifacts, "manager_dl.csv",
-            ["CSV出力", "CSVダウンロード", "ダウンロード", "CSV", "出力", "実行", "DL"],
-        )
+        # フォームの実体（radio/date/select）を吸い出す
+        _dump_manager_form(session, "初期")
+        # 出力形式=CSV を選ぶ（radio/label/text いずれでも）
+        for lbl in ("CSV", "ＣＳＶ"):
+            if session.click_text(lbl, wait=0.4):
+                break
+        # 期間を対象月に設定
+        ok = _fill_manager_period(session, month)
+        print(f"[店長会DL] 期間={month} 設定 {'OK' if ok else '失敗（空欄のまま）'}")
+        session.snapshot("mgrdl_ready")
+        _dump_manager_form(session, "設定後")
+
+        page = session.page
+        path = None
+        try:
+            with page.expect_download(timeout=30000) as dl_info:
+                if not session.click_text("出力", wait=1.2):
+                    page.evaluate(
+                        """() => { for (const b of document.querySelectorAll('button,a')) {
+                          if ((b.innerText||'').replace(/\\s/g,'').includes('出力') && b.offsetParent)
+                          { b.click(); return; } } }"""
+                    )
+            download = dl_info.value
+            fname = download.suggested_filename or "manager_dl.bin"
+            path = artifacts / fname
+            download.save_as(str(path))
+            print(f"[店長会DL] ダウンロード成功: {fname}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[店長会DL] 出力クリック後にダウンロード無し: {exc}")
+            session.snapshot("mgrdl_after_output")
+            after = session.dump_clickables("mgrdl_after_output")
+            print(f"[店長会DL] 出力後の操作要素 {len(after)}件（モーダル/形式選択の可能性）:")
+            for it in after[:40]:
+                txt = " ".join((it.get("text") or "").split())[:44]
+                print(f"    {it.get('tag',''):<8} {txt}")
+            _dump_manager_form(session, "出力後")
+
         if path:
             raw = path.read_bytes()
-            text, enc = _decode(raw)
-            lines = text.splitlines()
-            print(f"[店長会DL] CSV {len(raw)} bytes / {len(lines)}行 / enc={enc}")
-            print("---- CSV 先頭40行 ----")
-            for line in lines[:40]:
-                print(line[:400])
-        else:
-            print("[店長会DL] CSVを落とせず。上の操作要素からボタン名/フォームを確認する。")
+            suffix = path.suffix.lower()
+            print(f"[店長会DL] 取得 {len(raw)} bytes / {path.name}")
+            if suffix in (".csv", ".txt") or raw[:4] not in (b"PK\x03\x04",):
+                text, enc = _decode(raw)
+                lines = text.splitlines()
+                print(f"[店長会DL] テキスト {len(lines)}行 / enc={enc}")
+                print("---- 先頭40行 ----")
+                for line in lines[:40]:
+                    print(line[:400])
+            else:
+                # Excel/ZIP の場合はシート/エントリ名だけ確認
+                import io
+                import zipfile
+
+                try:
+                    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                        names = zf.namelist()
+                        print(f"[店長会DL] ZIP/xlsx エントリ {len(names)}件: {names[:20]}")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[店長会DL] バイナリ（解析不可）: {exc}")
     print(f"\n成果物: {artifacts}")
     return 0

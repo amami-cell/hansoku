@@ -139,7 +139,8 @@ jobs:
             elif [ "${{ inputs.mode }}" = "budget-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-budget --mode probe --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "manager-dl-probe" ]; then
-              xvfb-run -a python -m hansoku.cli fw-budget --mode manager-dl --artifacts fw-artifacts
+              xvfb-run -a python -m hansoku.cli fw-budget --mode manager-dl \
+                --month "${{ inputs.abc_ingest_month }}" --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "budget-dry" ]; then
               xvfb-run -a python -m hansoku.cli fw-budget --mode ingest --dry-run --limit 2 --months 2 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "budget-ingest" ]; then
