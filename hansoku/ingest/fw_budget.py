@@ -866,7 +866,7 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
 
         page.on("dialog", _on_dialog)
 
-        captured = {"resp": None, "postdata": None, "url": None}
+        captured = {"resp": None, "postdata": None, "url": None, "ctype": None}
 
         def _on_response(resp):  # noqa: ANN001
             try:
@@ -905,6 +905,8 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
                 if "ManagerMeeting" in u or ("ProfitLoss" in u and req.method == "POST"):
                     try:
                         captured["postdata"] = req.post_data
+                        captured["url"] = u
+                        captured["ctype"] = (req.headers or {}).get("content-type", "")
                     except Exception:  # noqa: BLE001
                         pass
                 if "/assets/" in u or u.endswith((".js", ".css", ".png", ".svg", ".woff", ".woff2", ".ico")):
@@ -952,9 +954,9 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
                   if (b) { b.click(); return true; } return false; }"""
             )
         print(f"[店長会DL] 出力ボタン click: {clicked}")
-        # ダウンロード or 出力レスポンス（Excel POST）を最大90秒待つ（全店はExcel生成が重い）
-        for _ in range(90):
-            if got_download["dl"] is not None or captured["resp"] is not None:
+        # DL/response event は発火しない実装のため、POST捕捉を数秒だけ待って再送へ回す
+        for _ in range(6):
+            if got_download["dl"] is not None or captured["resp"] is not None or captured["postdata"] is not None:
                 break
             _t.sleep(1.0)
 
@@ -983,9 +985,39 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
             except Exception as exc:  # noqa: BLE001
                 print(f"[店長会DL] レスポンス本文の取得に失敗: {exc}")
         else:
-            print("[店長会DL] ダウンロード/レスポンスとも取得できず。観測ログを出す。")
-            print(f"[店長会DL] POST url（もしあれば）: {captured.get('url')}")
-            print(f"[店長会DL] POST body（全文・もしあれば）:\n{str(captured.get('postdata'))[:4000]}")
+            print("[店長会DL] DL/レスポンス event 無し。捕捉した POST を直接叩き直す。")
+            print(f"[店長会DL] POST url: {captured.get('url')}")
+            print(f"[店長会DL] POST ctype: {captured.get('ctype')}")
+            print(f"[店長会DL] POST body(全文):\n{str(captured.get('postdata'))[:4000]}")
+            # 捕捉した multipart 本文を page.request で再送し、レスポンス本文を同期取得する
+            if captured.get("url") and captured.get("postdata") is not None:
+                try:
+                    headers = {}
+                    if captured.get("ctype"):
+                        headers["content-type"] = captured["ctype"]
+                    r2 = page.request.post(
+                        captured["url"],
+                        data=captured["postdata"],
+                        headers=headers,
+                        timeout=120000,
+                    )
+                    body = r2.body()
+                    h = r2.headers or {}
+                    ct = h.get("content-type", "")
+                    cd = h.get("content-disposition", "")
+                    if body[:4] == b"PK\x03\x04":
+                        ext = ".xlsx"
+                    elif body[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+                        ext = ".xls"  # OLE2 旧Excel
+                    elif "csv" in ct.lower():
+                        ext = ".csv"
+                    else:
+                        ext = ".html" if b"<table" in body[:4000].lower() or b"<html" in body[:200].lower() else ".bin"
+                    path = artifacts / f"manager_dl{ext}"
+                    path.write_bytes(body)
+                    print(f"[店長会DL] 再送取得: status={r2.status} ct={ct[:60]} cd={cd[:90]} {len(body)}bytes -> {path.name}")
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[店長会DL] 再送に失敗: {exc}")
 
         if dialog_log:
             print(f"[店長会DL] ダイアログ {len(dialog_log)}件（accept済み）:")
@@ -1017,11 +1049,47 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
             raw = path.read_bytes()
             suffix = path.suffix.lower()
             print(f"[店長会DL] 取得 {len(raw)} bytes / {path.name}")
-            if suffix in (".csv", ".txt") or raw[:4] not in (b"PK\x03\x04",):
+            if suffix == ".html":
+                # HTMLテーブル型Excel: 行×セルに復元して列構成を印字
+                import re as _re
+
+                text, enc = _decode(raw)
+                print(f"[店長会DL] HTML {len(text)}字 / enc={enc}")
+                rows = _re.findall(r"<tr[^>]*>(.*?)</tr>", text, _re.I | _re.S)
+                print(f"[店長会DL] <tr> {len(rows)}行。先頭25行のセル:")
+                for r in rows[:25]:
+                    cells = _re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", r, _re.I | _re.S)
+                    cells = [_re.sub(r"<[^>]+>", "", c).replace("&nbsp;", " ").strip() for c in cells]
+                    print(" | ".join(cells)[:400])
+            elif suffix in (".csv", ".txt"):
                 text, enc = _decode(raw)
                 lines = text.splitlines()
                 print(f"[店長会DL] テキスト {len(lines)}行 / enc={enc}")
                 print("---- 先頭40行 ----")
+                for line in lines[:40]:
+                    print(line[:400])
+            elif suffix == ".xls":
+                # 旧Excel(OLE2): xlrd があれば読む。無ければ先頭バイトのみ。
+                try:
+                    import xlrd  # noqa: PLC0415
+
+                    wb = xlrd.open_workbook(str(path))
+                    print(f"[店長会DL] xls シート {wb.nsheets}枚: {wb.sheet_names()}")
+                    for sn in wb.sheet_names():
+                        ws = wb.sheet_by_name(sn)
+                        print(f"---- シート「{sn}」 {ws.nrows}行×{ws.ncols}列 先頭12行 ----")
+                        for i in range(min(12, ws.nrows)):
+                            cells = [str(ws.cell_value(i, j)) for j in range(ws.ncols)]
+                            print(" | ".join(cells)[:400])
+                except Exception as exc:  # noqa: BLE001
+                    text, enc = _decode(raw)
+                    print(f"[店長会DL] xls読取不可({exc})。テキスト解釈 先頭20行:")
+                    for line in text.splitlines()[:20]:
+                        print(line[:300])
+            elif raw[:4] != b"PK\x03\x04":
+                text, enc = _decode(raw)
+                lines = text.splitlines()
+                print(f"[店長会DL] 非ZIPバイナリ→テキスト解釈 {len(lines)}行 / enc={enc}")
                 for line in lines[:40]:
                     print(line[:400])
             else:
