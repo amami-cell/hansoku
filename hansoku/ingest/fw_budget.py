@@ -866,11 +866,16 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
 
         page.on("dialog", _on_dialog)
 
+        captured = {"resp": None, "postdata": None, "url": None}
+
         def _on_response(resp):  # noqa: ANN001
             try:
                 ct = (resp.headers or {}).get("content-type", "")
                 cd = (resp.headers or {}).get("content-disposition", "")
                 url = resp.url
+                if "ManagerMeeting" in url or ("ProfitLoss" in url and resp.request.method == "POST"):
+                    captured["resp"] = resp  # 出力の実体（Excel）レスポンス
+                    captured["url"] = url
                 interesting = (
                     cd
                     or any(k in ct.lower() for k in ("csv", "excel", "spreadsheet", "octet-stream", "zip"))
@@ -897,6 +902,11 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
         def _on_request(req):  # noqa: ANN001
             try:
                 u = req.url
+                if "ManagerMeeting" in u or ("ProfitLoss" in u and req.method == "POST"):
+                    try:
+                        captured["postdata"] = req.post_data
+                    except Exception:  # noqa: BLE001
+                        pass
                 if "/assets/" in u or u.endswith((".js", ".css", ".png", ".svg", ".woff", ".woff2", ".ico")):
                     return
                 req_log.append(f"{req.method} {u[:150]}")
@@ -942,9 +952,9 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
                   if (b) { b.click(); return true; } return false; }"""
             )
         print(f"[店長会DL] 出力ボタン click: {clicked}")
-        # ダウンロード/レスポンス/別タブを最大25秒待つ
-        for _ in range(25):
-            if got_download["dl"] is not None:
+        # ダウンロード or 出力レスポンス（Excel POST）を最大30秒待つ
+        for _ in range(30):
+            if got_download["dl"] is not None or captured["resp"] is not None:
                 break
             _t.sleep(1.0)
 
@@ -954,8 +964,27 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
             path = artifacts / fname
             download.save_as(str(path))
             print(f"[店長会DL] ダウンロード成功: {fname}")
+        elif captured["resp"] is not None:
+            # 出力の実体は POST ManagerMeetingDocumentExcel のレスポンス本文（Excel）
+            resp = captured["resp"]
+            try:
+                hdr = resp.headers or {}
+                ct = hdr.get("content-type", "")
+                cd = hdr.get("content-disposition", "")
+                body = resp.body()
+                ext = ".xlsx" if ("excel" in ct.lower() or "spreadsheet" in ct.lower() or body[:4] == b"PK\x03\x04") else ".bin"
+                if "csv" in ct.lower():
+                    ext = ".csv"
+                path = artifacts / f"manager_dl{ext}"
+                path.write_bytes(body)
+                print(f"[店長会DL] 出力レスポンス取得: status={resp.status} ct={ct[:50]} cd={cd[:80]} {len(body)}bytes -> {path.name}")
+                print(f"[店長会DL] POST url: {captured['url']}")
+                print(f"[店長会DL] POST body: {str(captured['postdata'])[:600]}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"[店長会DL] レスポンス本文の取得に失敗: {exc}")
         else:
-            print("[店長会DL] ダウンロードイベント無し。観測ログを出す。")
+            print("[店長会DL] ダウンロード/レスポンスとも取得できず。観測ログを出す。")
+            print(f"[店長会DL] POST body（もしあれば）: {str(captured.get('postdata'))[:600]}")
 
         if dialog_log:
             print(f"[店長会DL] ダイアログ {len(dialog_log)}件（accept済み）:")
@@ -995,15 +1024,29 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
                 for line in lines[:40]:
                     print(line[:400])
             else:
-                # Excel/ZIP の場合はシート/エントリ名だけ確認
-                import io
-                import zipfile
-
+                # Excel（xlsx）: シート名と各シートの先頭行を印字して列構成を確認する
                 try:
-                    with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-                        names = zf.namelist()
-                        print(f"[店長会DL] ZIP/xlsx エントリ {len(names)}件: {names[:20]}")
+                    import openpyxl  # noqa: PLC0415
+
+                    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+                    print(f"[店長会DL] xlsx シート {len(wb.sheetnames)}枚: {wb.sheetnames}")
+                    for sn in wb.sheetnames:
+                        ws = wb[sn]
+                        print(f"---- シート「{sn}」 {ws.max_row}行×{ws.max_column}列 先頭12行 ----")
+                        for i, row in enumerate(ws.iter_rows(values_only=True)):
+                            if i >= 12:
+                                break
+                            cells = [("" if c is None else str(c)) for c in row]
+                            print(" | ".join(cells)[:400])
+                    wb.close()
                 except Exception as exc:  # noqa: BLE001
-                    print(f"[店長会DL] バイナリ（解析不可）: {exc}")
+                    import io
+                    import zipfile
+
+                    try:
+                        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                            print(f"[店長会DL] xlsx読取失敗({exc})。ZIPエントリ: {zf.namelist()[:20]}")
+                    except Exception as exc2:  # noqa: BLE001
+                        print(f"[店長会DL] バイナリ（解析不可）: {exc2}")
     print(f"\n成果物: {artifacts}")
     return 0
