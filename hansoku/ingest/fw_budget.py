@@ -730,6 +730,23 @@ def _fill_manager_period(session, ym: str) -> bool:
     )
 
 
+def _check_manager_radio(session, value: str) -> bool:
+    """全店/全て などの Bootstrap ラベル型ラジオを value で掴んでクリックする。"""
+    for sel in (
+        f'label:has(input[type="radio"][value="{value}"])',
+        f'input[type="radio"][value="{value}"]',
+    ):
+        try:
+            loc = session.page.locator(sel).first
+            if loc.count() and loc.is_visible():
+                loc.click(timeout=3000)
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    # テキスト一致でのフォールバック（ラベルの文言をクリック）
+    return session.click_text(value, wait=0.4)
+
+
 def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
     """店長会資料DL の画面に入り、フォーム構成を吸い出し→期間を設定→出力し、
     落ちたファイル（CSV/Excel/ZIP）の中身か、モーダル等の後続画面を印字する。"""
@@ -753,10 +770,9 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
             print(f"    {it.get('tag',''):<8} {txt}")
         # フォームの実体（radio/date/select）を吸い出す
         _dump_manager_form(session, "初期")
-        # 出力形式=CSV を選ぶ（radio/label/text いずれでも）
-        for lbl in ("CSV", "ＣＳＶ"):
-            if session.click_text(lbl, wait=0.4):
-                break
+        # 出力の前提: 店舗スコープ=全店、分類=全て のラジオを選ぶ（未選択だと出力が無反応）
+        print(f"[店長会DL] 全店 チェック: {_check_manager_radio(session, '全店')}")
+        print(f"[店長会DL] 全て チェック: {_check_manager_radio(session, '全て')}")
         # 期間を対象月に設定
         ok = _fill_manager_period(session, month)
         print(f"[店長会DL] 期間={month} 設定 {'OK' if ok else '失敗（空欄のまま）'}")
@@ -764,6 +780,7 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
         _dump_manager_form(session, "設定後")
 
         page = session.page
+        ctx = page.context
         path = None
         try:
             with page.expect_download(timeout=30000) as dl_info:
@@ -780,6 +797,15 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
             print(f"[店長会DL] ダウンロード成功: {fname}")
         except Exception as exc:  # noqa: BLE001
             print(f"[店長会DL] 出力クリック後にダウンロード無し: {exc}")
+            # 新タブ/ポップアップが開いていればそのURL/本文を確認
+            try:
+                pops = [p for p in ctx.pages if p is not page]
+                for pop in pops:
+                    pop.wait_for_load_state("domcontentloaded", timeout=6000)
+                    body = pop.evaluate("() => (document.body && document.body.innerText || '').slice(0, 800)")
+                    print(f"[店長会DL] 新タブ検出: url={pop.url}\n本文(先頭800字):\n{body}")
+            except Exception:  # noqa: BLE001
+                pass
             session.snapshot("mgrdl_after_output")
             after = session.dump_clickables("mgrdl_after_output")
             print(f"[店長会DL] 出力後の操作要素 {len(after)}件（モーダル/形式選択の可能性）:")
