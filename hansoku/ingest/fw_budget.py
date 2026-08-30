@@ -890,6 +890,20 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
 
         page.on("response", _on_response)
         page.on("console", _on_console)
+
+        # クリックで何か通信が起きるかを判定するため、全リクエストも記録（静的資産除く）
+        req_log: list[str] = []
+
+        def _on_request(req):  # noqa: ANN001
+            try:
+                u = req.url
+                if "/assets/" in u or u.endswith((".js", ".css", ".png", ".svg", ".woff", ".woff2", ".ico")):
+                    return
+                req_log.append(f"{req.method} {u[:150]}")
+            except Exception:  # noqa: BLE001
+                pass
+
+        page.on("request", _on_request)
         got_download = {"dl": None}
 
         def _on_download(dl):  # noqa: ANN001
@@ -897,9 +911,20 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
 
         page.on("download", _on_download)
 
+        # 出力ボタン候補を全列挙（正しいボタンを押しているか確認）
+        btns = page.evaluate(
+            r"""() => [...document.querySelectorAll('button')].filter(b => b.offsetParent)
+              .map(b => ({t: (b.innerText||'').replace(/\s+/g,' ').trim().slice(0,20),
+                          dis: b.disabled===true, cls: (b.className||'').toString().slice(0,50)}))"""
+        )
+        print(f"[店長会DL] 可視button {len(btns)}個:")
+        for b in btns[:20]:
+            print(f"    '{b['t']}' disabled={b['dis']} cls={b['cls']}")
+
         # 出力ボタン（button 要素）を Playwright実クリックで押す
+        req_log.clear()  # クリック後のリクエストだけ見る
         clicked = False
-        for sel in ('button:has-text("出力")', 'button:text-is("出力")'):
+        for sel in ('button:text-is("出力")', 'button:has-text("出力")'):
             try:
                 loc = page.locator(sel).first
                 if loc.count():
@@ -936,6 +961,9 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
             print(f"[店長会DL] ダイアログ {len(dialog_log)}件（accept済み）:")
             for line in dialog_log[-8:]:
                 print("   ", line)
+        print(f"[店長会DL] 全リクエスト {len(req_log)}件（クリック後20秒・静的除く）:")
+        for line in req_log[-30:]:
+            print("   ", line)
         print(f"[店長会DL] 気になるレスポンス {len(net_log)}件:")
         for line in net_log[-25:]:
             print("   ", line)
