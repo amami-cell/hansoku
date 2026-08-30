@@ -853,6 +853,18 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
 
         net_log: list[str] = []
         console_log: list[str] = []
+        dialog_log: list[str] = []
+
+        # FWは「出力しますか？」等の confirm を挟むことがある。既定だと dismiss=キャンセルで
+        # 出力が無反応になるため、必ず accept する。
+        def _on_dialog(dlg):  # noqa: ANN001
+            try:
+                dialog_log.append(f"{dlg.type}: {dlg.message[:120]}")
+                dlg.accept()
+            except Exception:  # noqa: BLE001
+                pass
+
+        page.on("dialog", _on_dialog)
 
         def _on_response(resp):  # noqa: ANN001
             try:
@@ -898,8 +910,10 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
                 continue
         if not clicked:
             clicked = page.evaluate(
-                """() => { const bs=[...document.querySelectorAll('button,a,input[type=button],input[type=submit]')];
-                  const b = bs.find(e => (e.innerText||e.value||'').replace(/\\s/g,'').includes('出力') && e.offsetParent);
+                """() => { const bs=[...document.querySelectorAll('button,input[type=button],input[type=submit]')];
+                  const norm = e => (e.innerText||e.value||'').replace(/\\s/g,'');
+                  const b = bs.find(e => norm(e) === '出力' && e.offsetParent)
+                        || bs.find(e => norm(e).includes('出力') && !norm(e).includes('QR') && e.offsetParent);
                   if (b) { b.click(); return true; } return false; }"""
             )
         print(f"[店長会DL] 出力ボタン click: {clicked}")
@@ -918,6 +932,10 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
         else:
             print("[店長会DL] ダウンロードイベント無し。観測ログを出す。")
 
+        if dialog_log:
+            print(f"[店長会DL] ダイアログ {len(dialog_log)}件（accept済み）:")
+            for line in dialog_log[-8:]:
+                print("   ", line)
         print(f"[店長会DL] 気になるレスポンス {len(net_log)}件:")
         for line in net_log[-25:]:
             print("   ", line)
