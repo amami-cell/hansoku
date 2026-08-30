@@ -952,8 +952,8 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
                   if (b) { b.click(); return true; } return false; }"""
             )
         print(f"[店長会DL] 出力ボタン click: {clicked}")
-        # ダウンロード or 出力レスポンス（Excel POST）を最大30秒待つ
-        for _ in range(30):
+        # ダウンロード or 出力レスポンス（Excel POST）を最大90秒待つ（全店はExcel生成が重い）
+        for _ in range(90):
             if got_download["dl"] is not None or captured["resp"] is not None:
                 break
             _t.sleep(1.0)
@@ -979,12 +979,13 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
                 path.write_bytes(body)
                 print(f"[店長会DL] 出力レスポンス取得: status={resp.status} ct={ct[:50]} cd={cd[:80]} {len(body)}bytes -> {path.name}")
                 print(f"[店長会DL] POST url: {captured['url']}")
-                print(f"[店長会DL] POST body: {str(captured['postdata'])[:600]}")
+                print(f"[店長会DL] POST body(全文):\n{str(captured['postdata'])[:4000]}")
             except Exception as exc:  # noqa: BLE001
                 print(f"[店長会DL] レスポンス本文の取得に失敗: {exc}")
         else:
             print("[店長会DL] ダウンロード/レスポンスとも取得できず。観測ログを出す。")
-            print(f"[店長会DL] POST body（もしあれば）: {str(captured.get('postdata'))[:600]}")
+            print(f"[店長会DL] POST url（もしあれば）: {captured.get('url')}")
+            print(f"[店長会DL] POST body（全文・もしあれば）:\n{str(captured.get('postdata'))[:4000]}")
 
         if dialog_log:
             print(f"[店長会DL] ダイアログ {len(dialog_log)}件（accept済み）:")
