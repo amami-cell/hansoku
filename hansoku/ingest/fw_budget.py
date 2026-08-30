@@ -755,6 +755,45 @@ def _check_manager_radio(session, value: str) -> bool:
     )
 
 
+def _dump_manager_html(session, tag: str) -> None:
+    """出力ボタンの disabled 状態と、条件パネルの生HTMLを吸い出す（構造確定用）。"""
+    info = session.page.evaluate(
+        r"""() => {
+        const btn = [...document.querySelectorAll('button,a,input[type=button],input[type=submit]')]
+            .find(e => (e.innerText||e.value||'').replace(/\s/g,'').includes('出力') && e.offsetParent);
+        let panelHtml = '';
+        if (btn) {
+            // 全店/期間/出力 を含む共通の祖先を探す
+            let n = btn;
+            for (let i = 0; i < 10 && n; i++) {
+                n = n.parentElement; if (!n) break;
+                const t = (n.innerText || '');
+                if (t.includes('全店') && t.includes('期間')) { panelHtml = n.outerHTML; break; }
+            }
+        }
+        const radios = [...document.querySelectorAll('input[type=radio]')].slice(0, 4)
+            .map(r => (r.closest('label,div,span') || r).outerHTML.slice(0, 300));
+        return {
+            btn: btn ? {
+                tag: btn.tagName, disabled: btn.disabled === true,
+                cls: (btn.className||'').toString(), html: btn.outerHTML.slice(0, 400),
+            } : null,
+            panel: panelHtml.slice(0, 3000),
+            radios,
+        };
+    }"""
+    )
+    print(f"---- 生HTML（{tag}）----")
+    b = info.get("btn")
+    if b:
+        print(f"[出力ボタン] tag={b['tag']} disabled={b['disabled']} cls={b['cls'][:80]}")
+        print(f"  html: {b['html']}")
+    for i, rh in enumerate(info.get("radios", [])):
+        print(f"[radio{i}] {rh}")
+    if info.get("panel"):
+        print(f"[条件パネル outerHTML]:\n{info['panel']}")
+
+
 def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
     """店長会資料DL の画面に入り、フォーム構成を吸い出し→期間を設定→出力し、
     落ちたファイル（CSV/Excel/ZIP）の中身か、モーダル等の後続画面を印字する。"""
@@ -778,14 +817,32 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
             print(f"    {it.get('tag',''):<8} {txt}")
         # フォームの実体（radio/date/select）を吸い出す
         _dump_manager_form(session, "初期")
-        # 出力の前提: 店舗スコープ=全店、分類=全て のラジオを選ぶ（未選択だと出力が無反応）
-        print(f"[店長会DL] 全店 チェック: {_check_manager_radio(session, '全店')}")
-        print(f"[店長会DL] 全て チェック: {_check_manager_radio(session, '全て')}")
+        _dump_manager_html(session, "初期")
+        # 出力の前提: 店舗スコープ=全店、分類=全て のラジオを Playwright実クリックで選ぶ
+        for value in ("全店", "全て"):
+            done = False
+            for sel in (
+                f'label:has(input[type="radio"][value="{value}"])',
+                f'input[type="radio"][value="{value}"]',
+                f'label:has-text("{value}")',
+            ):
+                try:
+                    loc = session.page.locator(sel).first
+                    if loc.count():
+                        loc.click(force=True, timeout=4000)
+                        done = True
+                        break
+                except Exception:  # noqa: BLE001
+                    continue
+            if not done:
+                done = _check_manager_radio(session, value)
+            print(f"[店長会DL] {value} 実クリック: {done}")
         # 期間を対象月に設定
         ok = _fill_manager_period(session, month)
         print(f"[店長会DL] 期間={month} 設定 {'OK' if ok else '失敗（空欄のまま）'}")
         session.snapshot("mgrdl_ready")
         _dump_manager_form(session, "設定後")
+        _dump_manager_html(session, "設定後")
 
         page = session.page
         ctx = page.context
@@ -828,12 +885,23 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
 
         page.on("download", _on_download)
 
-        # 出力ボタン（button 要素）を明示的に押す
-        clicked = page.evaluate(
-            """() => { const bs=[...document.querySelectorAll('button,a,input[type=button],input[type=submit]')];
-              const b = bs.find(e => (e.innerText||e.value||'').replace(/\\s/g,'').includes('出力') && e.offsetParent);
-              if (b) { b.click(); return true; } return false; }"""
-        )
+        # 出力ボタン（button 要素）を Playwright実クリックで押す
+        clicked = False
+        for sel in ('button:has-text("出力")', 'button:text-is("出力")'):
+            try:
+                loc = page.locator(sel).first
+                if loc.count():
+                    loc.click(force=True, timeout=4000)
+                    clicked = True
+                    break
+            except Exception:  # noqa: BLE001
+                continue
+        if not clicked:
+            clicked = page.evaluate(
+                """() => { const bs=[...document.querySelectorAll('button,a,input[type=button],input[type=submit]')];
+                  const b = bs.find(e => (e.innerText||e.value||'').replace(/\\s/g,'').includes('出力') && e.offsetParent);
+                  if (b) { b.click(); return true; } return false; }"""
+            )
         print(f"[店長会DL] 出力ボタン click: {clicked}")
         # ダウンロード/レスポンス/別タブを最大25秒待つ
         for _ in range(25):
