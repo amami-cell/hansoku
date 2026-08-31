@@ -669,6 +669,19 @@ function storePromoSummary(code) {
   return { count: live.length, rate: t ? a / t * 100 : null };
 }
 
+// 店の収益性（直近確定月の 客単価＝売上/客数、粗利率＝1-原価率）。既存データから。
+function storeProfit(code) {
+  const crAt = (c, m) => (DATA.cost_rate[c] || {})[m];
+  const ls = latestWith(code, salesAt);
+  let kt = null;
+  if (ls) {
+    const cov = coversAt(code, ls.m);
+    if (typeof cov === "number" && cov > 0) kt = ls.v / cov;
+  }
+  const lcr = latestWith(code, crAt);
+  return { kt, gp: lcr ? 1 - lcr.v : null };
+}
+
 function renderList() {
   const months = DATA.months;
   // エリア順に並べる（大阪→東京→…）。エリアは見出しの小さなラベルに留める
@@ -689,11 +702,19 @@ function renderList() {
       const budLine = br
         ? `<span class="budg ${br.rate >= 100 ? "up" : "down"}" title="${br.m} の 実績÷予算">予算 ${br.rate.toFixed(0)}%</span>`
         : "";
+      const pf = storeProfit(code);
+      const profLine = (pf.kt != null || pf.gp != null)
+        ? `<div class="sprof">
+            ${pf.kt != null ? `<span class="pf pf-kt" title="直近確定月の 売上÷客数">客単 ${yen(pf.kt)}</span>` : ""}
+            ${pf.gp != null ? `<span class="pf pf-gp ${pf.gp >= 0.65 ? "up" : pf.gp < 0.60 ? "warn" : ""}" title="100−ABC部門原価率">粗利 ${pct(pf.gp)}</span>` : ""}
+          </div>`
+        : "";
       return `
         <button class="scard" data-store="${code}" style="--rc:${color}">
           <div class="stop"><span class="rtag">${r.name}</span>${storeName(code)}</div>
           <div class="sbig">${man(total)}<span class="unit">円</span></div>
           ${spark}
+          ${profLine}
           ${promoLine}
           <div class="sfoot">${yline}${budLine}<span class="more">詳しく →</span></div>
         </button>`;
@@ -1484,20 +1505,33 @@ function renderCross() {
       const prof = crossProfit().filter(x => x.kt != null).sort((a, b) => b.kt - a.kt);
       if (!prof.length) return "";
       const maxKt = Math.max(1, ...prof.map(x => x.kt));
-      const rows = prof.map((x, i) => `
-        <li class="xprow" data-store="${x.code}">
+      // 粗利率ワースト＝原価改善の狙い目。粗利率のある店の下位3、かつ粗利率60%未満（原価率40%超）。
+      const withGp = prof.filter(x => x.gp != null);
+      const worst = new Set(
+        withGp.slice().sort((a, b) => a.gp - b.gp).filter(x => x.gp < 0.60).slice(0, 3).map(x => x.code),
+      );
+      const rows = prof.map((x, i) => {
+        const isWorst = worst.has(x.code);
+        const gpCls = x.gp != null && x.gp >= 0.65 ? "up" : (x.gp != null && x.gp < 0.60 ? "warn" : "");
+        return `
+        <li class="xprow${isWorst ? " xpworst" : ""}" data-store="${x.code}">
           <span class="xpno">${i + 1}</span>
-          <span class="xpname">${esc(x.name)}<small>${esc(x.brand_name || "")}</small></span>
+          <span class="xpname">${esc(x.name)}<small>${esc(x.brand_name || "")}</small>${isWorst ? '<span class="xptag">原価改善の狙い目</span>' : ""}</span>
           <span class="xpbar"><span class="xpfill" style="width:${Math.max(4, Math.round(x.kt / maxKt * 100))}%"></span></span>
           <span class="xpkt">${yen(x.kt)}<small>客単価</small></span>
-          <span class="xpgp ${x.gp != null && x.gp >= 0.65 ? "up" : ""}">${x.gp != null ? pct(x.gp) : "—"}<small>粗利率</small></span>
-        </li>`).join("");
+          <span class="xpgp ${gpCls}">${x.gp != null ? pct(x.gp) : "—"}<small>粗利率</small></span>
+        </li>`;
+      }).join("");
+      const worstNote = worst.size
+        ? `<div class="bnote" style="margin-top:8px"><b class="warn">原価改善の狙い目</b>＝粗利率60%未満（原価率40%超）の下位${worst.size}店。ABC部門で原価の高い区分を確認 → 値付け/レシピ/仕入れの見直し余地。</div>`
+        : "";
       return `
     <section class="block">
       <div class="bhead"><h2>収益性ランキング（横断）</h2>
         <span class="bnote">直近確定月の 客単価 × 粗利率　${prof.length}店</span></div>
       <div class="panel"><ul class="xplist">${rows}</ul>
         <div class="bnote" style="margin-top:8px">客単価＝売上÷客数、粗利率＝100−原価率（ABC部門）。行タップで店舗詳細へ。</div>
+        ${worstNote}
       </div>
     </section>`;
     })()}
