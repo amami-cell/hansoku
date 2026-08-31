@@ -2,6 +2,32 @@
   "note": "ランチ効果分析（FW ABC・部門06757）。数値は fw-daily --mode lunch-analyze の結果を手で貼る。出品数＝本体(定食)のみ。トッピングは付帯率(一人当たり)＋1食あたり売上で見る。前年・直前が取れたら compare に入れる。",
   "stores": [
     {
+      "store_code": "1151",
+      "store_name": "NagaGutsu",
+      "menu_title": "禁断の沼パスタ",
+      "start_date": "2026-08-24",
+      "period": { "from": "2026-08-24", "to": "2026-08-30", "days": 7 },
+      "lunch": { "sales": 51348, "cost_rate": 0.3082 },
+      "daily_meals": [
+        { "name": "こくうま濃厚クリームスープパスタ", "qty": 16, "sales": 19360, "cost_rate": 0.2984, "rank": "A", "new": true },
+        { "name": "完熟トマトスープパスタ", "qty": 18, "sales": 17820, "cost_rate": 0.3155, "rank": "A", "new": true },
+        { "name": "シンプルなペペロンチーノスープパスタ", "qty": 14, "sales": 14168, "cost_rate": 0.3129, "rank": "A", "new": true }
+      ],
+      "toppings": [
+        { "name": "替え玉パスタ（追い）", "qty": 2, "sales": 500, "cost_rate": 0.3320, "new": true }
+      ],
+      "menu": [
+        { "name": "こくうま濃厚クリームスープパスタ", "qty": 16, "sales": 19360, "cost_rate": 0.2984, "rank": "A", "type": "meal", "new": true },
+        { "name": "完熟トマトスープパスタ", "qty": 18, "sales": 17820, "cost_rate": 0.3155, "rank": "A", "type": "meal", "new": true },
+        { "name": "シンプルなペペロンチーノスープパスタ", "qty": 14, "sales": 14168, "cost_rate": 0.3129, "rank": "A", "type": "meal", "new": true },
+        { "name": "替え玉パスタ（追い）", "qty": 2, "sales": 500, "cost_rate": 0.3320, "rank": "C", "type": "topping", "new": true }
+      ],
+      "compare": {
+        "unavailable": true,
+        "reason": "開始7日目（8/24〜8/30）の速報。POS未登録で当初取れなかった本体3種がFW ABCに計上されたため取得できた。前年・新旧比較はFW ABCの過去月制約により不可。今後の蓄積で食数/日・原価率を継続更新する。"
+      }
+    },
+    {
       "store_code": "1739",
       "store_name": "ぎふや 天満橋店",
       "menu_title": "新・日替わりランチ",
