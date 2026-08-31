@@ -708,3 +708,18 @@ tbody tr:last-child td{border-bottom:0;}
   border:1px solid color-mix(in srgb,var(--dc) 32%,transparent);}
 .pchip i{font-style:normal;font-weight:700;color:var(--dc);}
 .pchip b{font-weight:700;}
+
+/* 収益性ランキング（横断・renderCross） */
+.xplist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;}
+.xprow{display:grid;grid-template-columns:26px 1fr 90px auto auto;align-items:center;gap:10px;
+  padding:7px 8px;border-radius:8px;cursor:pointer;}
+.xprow:hover{background:color-mix(in srgb,var(--ink-1) 6%,transparent);}
+.xpno{color:var(--ink-3);font-variant-numeric:tabular-nums;text-align:center;font-size:12px;}
+.xpname{font-weight:600;display:flex;flex-direction:column;line-height:1.25;}
+.xpname small{font-weight:400;color:var(--ink-3);font-size:11px;}
+.xpbar{height:8px;border-radius:999px;background:color-mix(in srgb,var(--ink-1) 10%,transparent);overflow:hidden;}
+.xpfill{display:block;height:100%;border-radius:999px;background:var(--accent);}
+.xpkt,.xpgp{text-align:right;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.xpkt small,.xpgp small{display:block;font-weight:400;color:var(--ink-3);font-size:10px;}
+.xpgp.up{color:var(--good-ink);}
+@media(max-width:560px){.xprow{grid-template-columns:22px 1fr auto auto;}.xpbar{display:none;}}

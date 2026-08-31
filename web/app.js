@@ -1397,6 +1397,26 @@ function crossTargets() {
   return out.sort((a, b) => b.gap - a.gap);
 }
 
+// 収益性ランキング（横断）: 直近確定月の 客単価(=売上/客数) と 粗利率(=1-原価率)。
+// 既存データ（monthly・covers・cost_rate）から算出。店長会資料DLの代替を全店に展開。
+function crossProfit() {
+  const crAt = (c, m) => (DATA.cost_rate[c] || {})[m];
+  return (DATA.stores || []).map(s => {
+    const code = s.code;
+    const ls = latestWith(code, salesAt);
+    let kt = null;
+    if (ls) {
+      const cov = coversAt(code, ls.m);
+      if (typeof cov === "number" && cov > 0) kt = ls.v / cov;
+    }
+    const lcr = latestWith(code, crAt);
+    return {
+      code, name: s.name, brand_name: s.brand_name,
+      kt, gp: lcr ? 1 - lcr.v : null,
+    };
+  }).filter(x => x.kt != null || x.gp != null);
+}
+
 function renderCross() {
   const brands = crossByBrand();
   const nStores = crossStores().length;
@@ -1460,6 +1480,27 @@ function renderCross() {
         ${targetBlock}
       </div>
     </section>
+    ${(() => {
+      const prof = crossProfit().filter(x => x.kt != null).sort((a, b) => b.kt - a.kt);
+      if (!prof.length) return "";
+      const maxKt = Math.max(1, ...prof.map(x => x.kt));
+      const rows = prof.map((x, i) => `
+        <li class="xprow" data-store="${x.code}">
+          <span class="xpno">${i + 1}</span>
+          <span class="xpname">${esc(x.name)}<small>${esc(x.brand_name || "")}</small></span>
+          <span class="xpbar"><span class="xpfill" style="width:${Math.max(4, Math.round(x.kt / maxKt * 100))}%"></span></span>
+          <span class="xpkt">${yen(x.kt)}<small>客単価</small></span>
+          <span class="xpgp ${x.gp != null && x.gp >= 0.65 ? "up" : ""}">${x.gp != null ? pct(x.gp) : "—"}<small>粗利率</small></span>
+        </li>`).join("");
+      return `
+    <section class="block">
+      <div class="bhead"><h2>収益性ランキング（横断）</h2>
+        <span class="bnote">直近確定月の 客単価 × 粗利率　${prof.length}店</span></div>
+      <div class="panel"><ul class="xplist">${rows}</ul>
+        <div class="bnote" style="margin-top:8px">客単価＝売上÷客数、粗利率＝100−原価率（ABC部門）。行タップで店舗詳細へ。</div>
+      </div>
+    </section>`;
+    })()}
     <section class="block">
       <div class="bhead"><h2>部門構成マトリクス</h2><span class="bnote">${legend}</span></div>
       <div class="panel xmatrix">${brandBlocks}</div>
