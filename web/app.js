@@ -1692,6 +1692,7 @@ function renderStore(code) {
       ${kpis}
       ${storeTargetChip(code)}
     </section>
+    ${renderProfitability(code)}
     <section class="block">
       <div class="bhead"><h2>この店の販促</h2>
         <span class="bnote">${myCamps.length}件</span></div>
@@ -1760,6 +1761,85 @@ function renderDepartments(code) {
       <div class="bhead"><h2>部門構成</h2>
         <span class="bnote">コース/ランチ/アラカルト/飲み放題/食べ放題${monthLbl}　合計 ${yen(total)}</span></div>
       <div class="panel"><ul class="dlist">${rows}</ul>${rawBlock}</div>
+    </section>`;
+}
+
+// ── 収益性・客単価（既存データから算出）───────────────────────────────────
+// 店長会資料DL（空テンプレで取込不可）の代替。既にある売上/客数/原価率/部門から
+// 客単価・粗利率・部門別原価率を1枚にまとめる。値が無い指標は自然に省く。
+const salesAt = (code, m) => ((DATA.monthly[code] || {})[m] || {}).sales;
+// 直近の確定月で、指定アクセサが数値を返す最新月を探す
+function latestWith(code, fn) {
+  for (let i = DATA.months.length - 1; i >= 0; i--) {
+    const m = DATA.months[i];
+    if (m >= CURRENT_MONTH) continue;
+    const v = fn(code, m);
+    if (typeof v === "number" && !Number.isNaN(v)) return { m, v };
+  }
+  return null;
+}
+function renderProfitability(code) {
+  const crAt = (c, m) => (DATA.cost_rate[c] || {})[m];   // 分数(0-1)
+  const ls = latestWith(code, salesAt);
+  const lcr = latestWith(code, crAt);
+  const d = deptFor(code);
+  const deptCr = d && d.buckets ? d.buckets.filter(b => b.cost_rate != null) : [];
+  if (!ls && !lcr && !deptCr.length) return "";      // 出せる材料が無ければ節ごと省く
+
+  const cards = [];
+  // 客単価（売上÷客数）＋前年同月比
+  if (ls) {
+    const cov = coversAt(code, ls.m);
+    if (typeof cov === "number" && cov > 0) {
+      const kt = ls.v / cov;
+      const [y, mo] = ls.m.split("-");
+      const pm = `${+y - 1}-${mo}`;
+      const ps = salesAt(code, pm), pc = coversAt(code, pm);
+      let delta = "前年比 ―";
+      if (typeof ps === "number" && typeof pc === "number" && pc > 0) {
+        const p = (kt / (ps / pc) - 1) * 100;
+        delta = `<span class="${p >= 0 ? "up" : "down"}">前年比 ${signed(p)}%</span>`;
+      }
+      cards.push(`<div class="kpi"><div class="lbl">客単価（${ls.m}）</div>
+        <div class="big">${yen(kt)}</div>
+        <div class="delta">${delta}・${man(ls.v)}円÷${nin(cov)}</div></div>`);
+    }
+  }
+  // 原価率 → 粗利率
+  if (lcr) {
+    cards.push(`<div class="kpi"><div class="lbl">原価率（${lcr.m}）</div>
+      <div class="big ${lcr.v <= 0.35 ? "up" : "down"}">${pct(lcr.v)}</div>
+      <div class="delta">粗利率 ${pct(1 - lcr.v)}</div></div>`);
+  }
+  // 粗利（推計）＝売上×粗利率。売上と原価率がそろう最新月で
+  if (ls && lcr) {
+    const grM = latestWith(code, (c, m) =>
+      (typeof salesAt(c, m) === "number" && typeof crAt(c, m) === "number") ? salesAt(c, m) : undefined);
+    if (grM) {
+      const cr = crAt(code, grM.m);
+      cards.push(`<div class="kpi"><div class="lbl">粗利（推計・${grM.m}）</div>
+        <div class="big">${man(grM.v * (1 - cr))}<span class="unit">円</span></div>
+        <div class="delta">売上 ${man(grM.v)}円 × 粗利率 ${pct(1 - cr)}</div></div>`);
+    }
+  }
+  if (!cards.length && !deptCr.length) return "";
+  // 部門別 原価率→粗利率（bucket.cost_rate は % 単位）
+  const deptChips = deptCr.length
+    ? `<div class="prof-depts">${deptCr
+        .slice()
+        .sort((a, b) => b.sales - a.sales)
+        .map(b => `<span class="pchip" style="--dc:${DEPT_COLORS[b.name] || "var(--ink-3)"}">
+          <i>${esc(b.name)}</i>原価${b.cost_rate}%<b>→粗利${(100 - b.cost_rate).toFixed(0)}%</b></span>`)
+        .join("")}</div>`
+    : "";
+  return `
+    <section class="block">
+      <div class="bhead"><h2>収益性・客単価</h2>
+        <span class="bnote">既存データ（売上・客数・ABC原価率）から算出</span></div>
+      <div class="panel">
+        <div class="kpis">${cards.join("")}</div>
+        ${deptChips}
+      </div>
     </section>`;
 }
 
