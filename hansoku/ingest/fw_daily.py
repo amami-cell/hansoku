@@ -432,17 +432,45 @@ def probe_uriage_suii(artifacts: Path, month: str = "2024-03") -> int:
         for s in controls["selects"][:12]:
             print(f"   select name='{s['name']}' opts={s['opts']}")
 
-        # 日付レンジ入力があれば対象月へ動かして再検索、グリッドが遡れるか確認
-        ok = _set_date_range(session, d_from, d_to)
-        print(f"[売上推移probe] _set_date_range({d_from}〜{d_to})={ok}")
-        if ok:
-            _click_search(session)
-            time.sleep(1.5)
+        # 対象月フィールド(YYYY年MM月)を設定 → どのボタンで再照会されるかを総当りで特定。
+        buttons = session.page.evaluate(
+            r"""() => {
+                const out = [];
+                const nodes = document.querySelectorAll("button, input[type=button], input[type=submit], a");
+                for (const b of nodes) {
+                    if (!b.offsetParent) continue;
+                    const t = (b.tagName === 'INPUT' ? (b.value||'') : (b.innerText||'')).replace(/\s+/g,' ').trim();
+                    if (t) out.push(t.slice(0, 16));
+                }
+                return [...new Set(out)];
+            }"""
+        )
+        print(f"[売上推移probe] ボタン {len(buttons)}件: {buttons[:30]}")
+        target_year = month[:4]
+        for label in ["検索", "検 索", "表示する", "表示", "再表示", "更新", "集計", "実行"]:
+            set_ok = _set_uriage_month(session, month)
+            pressed = session.page.evaluate(
+                r"""(label) => {
+                    const nodes = document.querySelectorAll("button, input[type=button], input[type=submit], a");
+                    for (const b of nodes) {
+                        if (!b.offsetParent) continue;
+                        const t = (b.tagName === 'INPUT' ? (b.value||'') : (b.innerText||'')).replace(/\s+/g,' ').trim();
+                        if (t === label) { b.click(); return true; }
+                    }
+                    return false;
+                }""",
+                label,
+            )
+            if not pressed:
+                continue
+            time.sleep(1.8)
             after = [m["period"] for m in _extract_month_grid(session)]
             span_a = f"{after[-1]}〜{after[0]}" if after else "-"
-            print(f"[売上推移probe] 変更後グリッド {len(after)}ヶ月 span={span_a}")
-            reached = any(p.startswith(month[:4]) for p in after)
-            print(f"[売上推移probe] 対象年{month[:4]}に到達: {reached}")
+            reached = any(p.startswith(target_year) for p in after)
+            print(f"[売上推移probe] set={set_ok} 押下『{label}』→ {len(after)}ヶ月 span={span_a} / {target_year}到達={reached}")
+            if reached:
+                print(f"[売上推移probe] ★『{label}』で対象月が効く（この手順でバックフィル可能）")
+                break
         session.snapshot("uriage_probe")
     return 0
 
