@@ -708,6 +708,28 @@ tbody tr:last-child td{border-bottom:0;}
   border-radius:4px;padding:0 4px;}
 .cdiv{font-variant-numeric:tabular-nums;color:var(--ink-2);white-space:nowrap;}
 
+/* 施策詳細の月次テーブル（campDeptCardMonthly） */
+.cdmonblk{border-top:1px solid var(--line);padding-top:8px;margin-top:8px;}
+.cdmonblk:first-child{border-top:none;padding-top:0;margin-top:0;}
+.cdscroll{overflow-x:auto;}
+table.cdmon{border-collapse:collapse;width:100%;font-size:12.5px;min-width:340px;}
+table.cdmon th,table.cdmon td{padding:4px 8px;text-align:left;border-bottom:1px solid var(--line);
+  white-space:nowrap;}
+table.cdmon th{font-size:11px;color:var(--ink-3);font-weight:600;}
+table.cdmon td.num,table.cdmon th.num{text-align:right;font-variant-numeric:tabular-nums;}
+table.cdmon .up{color:var(--good-ink);}table.cdmon .down{color:var(--warning-ink);}
+.cdmon-m{margin:6px 0 0 4px;}
+.cdmm{font-size:11px;font-weight:700;color:var(--ink-3);}
+
+/* 横断 忘新年会・宴会まとめ（crossBanquet） */
+.bqsum{font-size:13px;color:var(--ink-2);margin-bottom:8px;}
+.bqsum b{color:var(--ink);font-size:15px;}
+table.bqtbl tbody tr{cursor:pointer;}
+table.bqtbl tbody tr:hover{background:color-mix(in srgb,var(--ink-1) 6%,transparent);}
+.bqname{font-weight:600;}
+.bqname small{color:var(--ink-3);font-weight:400;margin-left:6px;font-size:11px;}
+.bqm{color:var(--ink-3);font-size:11px;}
+
 /* 店舗詳細トップの「販促の狙いどころ」 */
 .stargets{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;}

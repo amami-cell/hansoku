@@ -272,6 +272,135 @@ METRICS = [
 ]
 
 
+def _assemble_departments(depts: dict[str, dict]) -> dict:
+    """1店・1ヶ月ぶんの生部門（{部門名:{sales,qty,rate}}）を、標準バケット構成
+    （コース/ランチ/アラカルト/飲み放題/食べ放題）＋生部門 raw に組み立てる。
+    店舗詳細・施策詳細・月次シリーズで共用する。"""
+    total = sum(d["sales"] for d in depts.values()) or 1.0
+    buckets: dict[str, dict] = {}
+    alacarte_split = {"フード": 0.0, "ドリンク": 0.0}
+    raw_list = []
+    for name, d in depts.items():
+        bucket = dept_bucket(name)
+        cost = d["sales"] * (d["rate"] / 100.0) if d["rate"] is not None else 0.0
+        b = buckets.setdefault(bucket, {"sales": 0.0, "qty": 0.0, "cost": 0.0})
+        b["sales"] += d["sales"]
+        b["qty"] += d["qty"]
+        b["cost"] += cost
+        if bucket == "アラカルト":
+            key = "ドリンク" if is_drink_dept(name) else "フード"
+            alacarte_split[key] += d["sales"]
+        raw_list.append(
+            {
+                "name": name,
+                "bucket": bucket,
+                "sales": round(d["sales"]),
+                "qty": round(d["qty"]),
+                "cost_rate": round(d["rate"], 1) if d["rate"] is not None else None,
+            }
+        )
+    bucket_list = []
+    for name in DEPT_BUCKETS:
+        if name not in buckets:
+            continue
+        b = buckets[name]
+        bucket_list.append(
+            {
+                "name": name,
+                "sales": round(b["sales"]),
+                "qty": round(b["qty"]),
+                "share": round(b["sales"] / total, 4),
+                "cost_rate": round(b["cost"] / b["sales"] * 100, 1) if b["sales"] else None,
+            }
+        )
+    raw_list.sort(key=lambda r: r["sales"], reverse=True)
+    return {
+        "total_sales": round(total),
+        "buckets": bucket_list,
+        "alacarte": {k: round(v) for k, v in alacarte_split.items()},
+        "raw": raw_list,
+    }
+
+
+def _build_abc_by_month(
+    warehouse: Warehouse, master: StoreMaster, date_from: date, date_to: date
+) -> tuple[dict, dict]:
+    """FW ABC（部門・商品）を月ごとに組み立てる。返り値 (departments_monthly,
+    products_monthly)＝各 {店コード: {"YYYY-MM": ...}}。月次で蓄積したABC（毎月取込）を
+    施策詳細で月ごとに並べる／前年同月と比べるために使う。当月分しか無くても成立する。"""
+    codes = list(master.active_codes)
+    # 部門売上（店×月×部門×原価率）
+    dept_raw: dict[str, dict[str, dict[str, dict]]] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_DEPT_SALES],
+            store_codes=codes,
+            group_by=("store_code", "date", "product_name", "product_category"),
+        )
+    ):
+        m = row["date"].strftime("%Y-%m")
+        try:
+            rate = float(row["product_category"]) if row["product_category"] else None
+        except (TypeError, ValueError):
+            rate = None
+        d = (
+            dept_raw.setdefault(row["store_code"], {})
+            .setdefault(m, {})
+            .setdefault(row["product_name"], {"sales": 0.0, "qty": 0.0, "rate": rate})
+        )
+        d["sales"] += row["value"]
+        if rate is not None:
+            d["rate"] = rate
+    # 部門数量（店×月×部門）
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_DEPT_QTY],
+            store_codes=codes,
+            group_by=("store_code", "date", "product_name"),
+        )
+    ):
+        m = row["date"].strftime("%Y-%m")
+        store = dept_raw.get(row["store_code"], {}).get(m)
+        if store and row["product_name"] in store:
+            store[row["product_name"]]["qty"] += row["value"]
+    departments_monthly: dict[str, dict[str, dict]] = {}
+    for code, months in dept_raw.items():
+        for m, depts in months.items():
+            departments_monthly.setdefault(code, {})[m] = _assemble_departments(depts)
+    # 商品売上（店×月×商品）
+    prod_tmp: dict[str, dict[str, list]] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_PRODUCT_SALES],
+            store_codes=codes,
+            group_by=("store_code", "date", "product_name", "product_category"),
+        )
+    ):
+        m = row["date"].strftime("%Y-%m")
+        prod_tmp.setdefault(row["store_code"], {}).setdefault(m, []).append(
+            {
+                "name": row["product_name"],
+                "sales": round(row["value"]),
+                "rank": row["product_category"],
+            }
+        )
+    products_monthly: dict[str, dict[str, list]] = {}
+    for code, months in prod_tmp.items():
+        for m, items in months.items():
+            items.sort(key=lambda p: p["sales"], reverse=True)
+            products_monthly.setdefault(code, {})[m] = items[:PRODUCTS_TOP_N]
+    return departments_monthly, products_monthly
+
+
 def build(
     warehouse: Warehouse,
     master: StoreMaster,
@@ -453,52 +582,9 @@ def build(
         if store and row["product_name"] in store:
             store[row["product_name"]]["qty"] += row["value"]
 
-    departments: dict[str, dict] = {}
-    for code, depts in dept_raw.items():
-        total = sum(d["sales"] for d in depts.values()) or 1.0
-        buckets: dict[str, dict] = {}
-        alacarte_split = {"フード": 0.0, "ドリンク": 0.0}
-        raw_list = []
-        for name, d in depts.items():
-            bucket = dept_bucket(name)
-            cost = d["sales"] * (d["rate"] / 100.0) if d["rate"] is not None else 0.0
-            b = buckets.setdefault(bucket, {"sales": 0.0, "qty": 0.0, "cost": 0.0})
-            b["sales"] += d["sales"]
-            b["qty"] += d["qty"]
-            b["cost"] += cost
-            if bucket == "アラカルト":
-                key = "ドリンク" if is_drink_dept(name) else "フード"
-                alacarte_split[key] += d["sales"]
-            raw_list.append(
-                {
-                    "name": name,
-                    "bucket": bucket,
-                    "sales": round(d["sales"]),
-                    "qty": round(d["qty"]),
-                    "cost_rate": round(d["rate"], 1) if d["rate"] is not None else None,
-                }
-            )
-        bucket_list = []
-        for name in DEPT_BUCKETS:
-            if name not in buckets:
-                continue
-            b = buckets[name]
-            bucket_list.append(
-                {
-                    "name": name,
-                    "sales": round(b["sales"]),
-                    "qty": round(b["qty"]),
-                    "share": round(b["sales"] / total, 4),
-                    "cost_rate": round(b["cost"] / b["sales"] * 100, 1) if b["sales"] else None,
-                }
-            )
-        raw_list.sort(key=lambda r: r["sales"], reverse=True)
-        departments[code] = {
-            "total_sales": round(total),
-            "buckets": bucket_list,
-            "alacarte": {k: round(v) for k, v in alacarte_split.items()},
-            "raw": raw_list,
-        }
+    departments: dict[str, dict] = {
+        code: _assemble_departments(depts) for code, depts in dept_raw.items()
+    }
 
     for row in warehouse.aggregate(
         AggregateQuery(
@@ -529,6 +615,12 @@ def build(
             # lower_better の原価率で「達成」に見えてしまう。
             if value.value:
                 cost_rates.setdefault(value.store_code, {})[month] = round(value.value, 4)
+
+    # FW ABC（部門・商品）の月次シリーズ。毎月ABCを取り込むと月ごとに積み上がり、
+    # 施策詳細で ケーキ/ジェラート/パフェ・食べ放題・宴会コース を月ごとに並べられる。
+    departments_monthly, products_monthly = _build_abc_by_month(
+        warehouse, master, date_from, date_to
+    )
 
     # エリア（大阪/東京/…）と、それぞれに属する稼働店コード
     regions = [
@@ -576,6 +668,10 @@ def build(
         # 部門内訳（FW ABC 分類=部門・店舗別）。コース/ランチ/アラカルト/飲み放題/食べ放題の
         # 構成比＋生の部門。abc-store-ingest で店を1つずつ焼くと入る。空でも画面は成立する。
         "departments": departments,
+        # FW ABC の月次シリーズ（店×月）。毎月ABCを取り込むと積み上がる。施策詳細で
+        # 商品/部門を「1ヵ月毎」に並べ、前年同月と比べるのに使う。空でも画面は成立する。
+        "departments_monthly": departments_monthly,
+        "products_monthly": products_monthly,
         # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
         "campaigns": campaigns or [],
         # 制作物ギャラリー（config/creatives.yaml 由来）。空でも画面は成立する。

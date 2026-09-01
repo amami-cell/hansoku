@@ -965,11 +965,106 @@ const bucketOf = (code, name) => {
   return d ? (d.buckets || []).find(b => b.name === name) || null : null;
 };
 
-// 施策×データ紐づけ: 種類または台帳指定に応じて「関連部門の実績＋構成比」
-// 「商品内訳（表示で開く）」「売れ筋上位」を出す。
+// ── FW ABC 月次シリーズ（departments_monthly / products_monthly）アクセサ ───────
+// 毎月ABCを取り込むと積み上がる。無ければ空＝旧・最新1ヶ月版にフォールバック。
+function abcMonths(code) {
+  const a = Object.keys((DATA.departments_monthly || {})[code] || {});
+  const b = Object.keys((DATA.products_monthly || {})[code] || {});
+  return [...new Set([...a, ...b])].sort().reverse();
+}
+const prevYearM = m => { const [y, mo] = m.split("-"); return `${+y - 1}-${mo}`; };
+const deptBucketAtM = (code, m, name) => {
+  const d = ((DATA.departments_monthly || {})[code] || {})[m];
+  return d ? (d.buckets || []).find(b => b.name === name) || null : null;
+};
+const prodsAtM = (code, m) => ((DATA.products_monthly || {})[code] || {})[m] || [];
+
+// 施策×データ紐づけ（ディスパッチャ）: 月次ABCがあれば「1ヵ月毎＋前年比」で、
+// 無ければ最新1ヶ月版（campDeptCardSnapshot）で出す。
 // bucket: 明示部門（コース/食べ放題/ランチ等）。無ければ種類から推定（lunch→ランチ・bounenkai→コース）。
-// items: 商品名キーワード配列。該当商品の実績＋部門内構成比を「表示」で開く内訳として出す。
+// items: 商品名キーワード配列。該当商品の実績＋部門内構成比を出す。
+const ABC_MONTHS_SHOWN = 12;
 function campDeptCard(c) {
+  const hasMonthly = c.stores.some(code => abcMonths(code).length);
+  return hasMonthly ? campDeptCardMonthly(c) : campDeptCardSnapshot(c);
+}
+
+// 月次版: 部門(bucket)を 月×(売上/構成比/前年比)、商品内訳(items)を「表示」で月×商品。
+function campDeptCardMonthly(c) {
+  const bname = c.bucket || campKindBucket(c.kind);
+  const items = c.items || [];
+  const sections = [];
+
+  // ① 関連部門の月次（売上・構成比・前年比）
+  if (bname) {
+    const blocks = c.stores.map(code => {
+      const ms = abcMonths(code).filter(m => deptBucketAtM(code, m, bname)).slice(0, ABC_MONTHS_SHOWN);
+      if (!ms.length) return "";
+      const rows = ms.map(m => {
+        const b = deptBucketAtM(code, m, bname);
+        const share = Math.round((b.share || 0) * 100);
+        const py = deptBucketAtM(code, prevYearM(m), bname);
+        const yoy = (py && py.sales)
+          ? `<span class="${b.sales >= py.sales ? "up" : "down"}">${signed((b.sales / py.sales - 1) * 100)}%</span>`
+          : `<span class="muted">―</span>`;
+        const q = b.qty ? `${b.qty.toLocaleString("ja-JP")}点` : "";
+        return `<tr><td>${m}</td><td class="num"><b>${yen(b.sales)}</b></td><td class="num">${share}%</td><td class="num">${q}</td><td class="num">${yoy}</td></tr>`;
+      }).join("");
+      return `<div class="cdmonblk"><div class="cdih" data-store="${code}">${storeName(code)}</div>
+        <div class="cdscroll"><table class="cdmon">
+          <thead><tr><th>月</th><th class="num">売上</th><th class="num">構成比</th><th class="num">点数</th><th class="num">前年比</th></tr></thead>
+          <tbody>${rows}</tbody></table></div></div>`;
+    }).filter(Boolean).join("");
+    if (blocks) sections.push(`<section class="block">
+      <div class="bhead"><h2>関連部門の実績（${esc(bname)}・月次）</h2>
+        <span class="bnote">FW ABC 部門・1ヵ月毎／前年同月比</span></div>
+      <div class="panel">${blocks}
+        <div class="cdnote">${esc(bname)}の売上・構成比を月ごとに。前年比は前年同月のABCがある月のみ。</div></div>
+    </section>`);
+  }
+
+  // ② 商品内訳（items）＝「表示」で 月×商品（部門内構成比・前年比つき）
+  if (items.length) {
+    const blocks = c.stores.map(code => {
+      const ms = abcMonths(code).slice(0, ABC_MONTHS_SHOWN);
+      const monthRows = ms.map(m => {
+        const b = bname ? deptBucketAtM(code, m, bname) : null;
+        const denom = (b && b.sales) ? b.sales : (((DATA.departments_monthly || {})[code] || {})[m] || {}).total_sales || 0;
+        const matched = prodsAtM(code, m).filter(p => items.some(kw => (p.name || "").includes(kw)));
+        if (!matched.length) return "";
+        const py = prodsAtM(code, prevYearM(m));
+        const lis = matched.sort((a, b2) => b2.sales - a.sales).map(p => {
+          const sh = denom ? `・${Math.round(p.sales / denom * 100)}%` : "";
+          const pv = py.find(q => q.name === p.name);
+          const yoy = (pv && pv.sales) ? `・<span class="${p.sales >= pv.sales ? "up" : "down"}">${signed((p.sales / pv.sales - 1) * 100)}%</span>` : "";
+          return `<li><span class="cdinm">${esc(p.name)}</span><span class="cdiv">${yen(p.sales)}${sh}${yoy}</span></li>`;
+        }).join("");
+        return `<div class="cdmon-m"><div class="cdmm">${m}</div><ul class="cdilist">${lis}</ul></div>`;
+      }).filter(Boolean).join("");
+      if (!monthRows) return "";
+      return `<div class="cditem"><div class="cdih" data-store="${code}">${storeName(code)}</div>${monthRows}</div>`;
+    }).filter(Boolean).join("");
+    const kw = items.map(esc).join("・");
+    sections.push(`<section class="block">
+      <div class="bhead"><h2>商品内訳（月次）</h2>
+        <span class="bnote">FW ABC 商品・キーワード: ${kw}</span></div>
+      <div class="panel">${blocks
+        ? `<details class="cddet"><summary>商品ごとの実績を月次で表示</summary>
+            <div class="cditems">${blocks}</div>
+            <div class="cdnote">${bname ? esc(bname) + "内" : "部門内"}構成比＝商品売上÷部門売上。前年比は前年同月のABCがある月のみ。</div>
+          </details>`
+        : `<p class="muted">該当商品がまだABCに計上されていません（開始前／POS未登録／名称不一致）。名称が分かれば items を調整します。</p>`}
+      </div>
+    </section>`);
+  }
+
+  // ③ どちらも無指定で osusume/gm → 最新月の売れ筋（スナップショット版に委譲）
+  if (!bname && !items.length) return campDeptCardSnapshot(c);
+  return sections.join("");
+}
+
+// 最新1ヶ月版（月次ABCが無い時のフォールバック）。
+function campDeptCardSnapshot(c) {
   const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
   const bname = c.bucket || campKindBucket(c.kind);
   const items = c.items || [];
@@ -1596,6 +1691,24 @@ function costTrend(code) {
   return { cur, prev, curV: cr[cur], prevV: cr[prev], deltaPt: (cr[cur] - cr[prev]) * 100 };
 }
 
+// 全店の宴会（=コース部門）まとめ。各店の直近ABC月のコース売上・構成比・前年比。
+// 月次ABCがあれば前年同月比、無ければ最新スナップショット（前年比―）。
+function crossBanquet() {
+  return (DATA.stores || []).map(s => {
+    const code = s.code;
+    let cur = null, curM = null;
+    for (const m of abcMonths(code)) {
+      const b = deptBucketAtM(code, m, "コース");
+      if (b && b.sales) { cur = b; curM = m; break; }
+    }
+    if (!cur) { const b = bucketOf(code, "コース"); if (b && b.sales) cur = b; }
+    if (!cur) return null;
+    let yoy = null;
+    if (curM) { const py = deptBucketAtM(code, prevYearM(curM), "コース"); if (py && py.sales) yoy = (cur.sales / py.sales - 1) * 100; }
+    return { code, name: s.name, brand_name: s.brand_name, sales: cur.sales, share: cur.share, cost_rate: cur.cost_rate, month: curM, yoy };
+  }).filter(Boolean).sort((a, b) => b.sales - a.sales);
+}
+
 // 原価率が前月比 +th pt 以上に悪化した店（悪化幅の大きい順）。TOPタイルと横断アラートで共用。
 const COST_ALERT_TH = 1.0;
 function costAlerts(th = COST_ALERT_TH) {
@@ -1734,6 +1847,41 @@ function renderCross() {
         <span class="bnote">前月比で原価率が +${COST_ALERT_TH.toFixed(1)}pt 以上に悪化した店　${rows.length}店</span></div>
       <div class="panel"><ul class="ctlist">${items}</ul>
         <div class="bnote" style="margin-top:8px">直近確定月とその前月のABC原価率を比較。上昇＝利益を圧迫。行タップで店舗詳細（部門別の原価率）へ。</div>
+      </div>
+    </section>`;
+    })()}
+    ${(() => {
+      // 全店 忘新年会/宴会（＝コース部門）まとめ
+      const bq = crossBanquet();
+      if (!bq.length) return "";
+      const tot = bq.reduce((a, x) => a + x.sales, 0);
+      const withYoy = bq.filter(x => x.yoy != null);
+      const rows = bq.map((x, i) => {
+        const share = Math.round((x.share || 0) * 100);
+        const yoy = x.yoy != null
+          ? `<span class="${x.yoy >= 0 ? "up" : "down"}">${signed(x.yoy)}%</span>`
+          : `<span class="muted">―</span>`;
+        const cr = x.cost_rate != null ? `原価${x.cost_rate}%` : "";
+        return `<tr data-store="${x.code}">
+          <td>${i + 1}</td>
+          <td class="bqname">${esc(x.name)}<small>${esc(x.brand_name || "")}</small></td>
+          <td class="num"><b>${yen(x.sales)}</b></td>
+          <td class="num">${share}%</td>
+          <td class="num">${cr}</td>
+          <td class="num">${yoy}</td>
+          <td class="bqm">${x.month || ""}</td></tr>`;
+      }).join("");
+      return `
+    <section class="block" id="cross-banquet">
+      <div class="bhead"><h2>忘新年会・宴会まとめ（全店）</h2>
+        <span class="bnote">宴会=コース部門の 売上・構成比・前年比　${bq.length}店</span></div>
+      <div class="panel">
+        <div class="bqsum">全店 宴会（コース）売上 合計 <b>${yen(tot)}</b>
+          ${withYoy.length ? `・前年比の取れた店 ${withYoy.length}店` : "・前年比は前年同月ABCの蓄積後に表示"}</div>
+        <div class="cdscroll"><table class="cdmon bqtbl">
+          <thead><tr><th>#</th><th>店舗</th><th class="num">宴会売上</th><th class="num">構成比</th><th class="num">原価率</th><th class="num">前年比</th><th>月</th></tr></thead>
+          <tbody>${rows}</tbody></table></div>
+        <div class="bnote" style="margin-top:8px">行タップで店舗詳細へ。忘新年会コースの商品内訳は、各店の忘年会施策に items（コース名）を足すと「宴会内 構成比」付きで並びます。</div>
       </div>
     </section>`;
     })()}
