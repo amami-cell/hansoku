@@ -187,6 +187,22 @@ function campStatus(c) {
   if (TODAY > c.end) return { k: "done", label: "終了" };
   return { k: "live", label: "実施中" };
 }
+// 期間の進み具合（0-100）。予定=0／終了=100／実施中は start〜end の経過割合。
+function campProgress(c) {
+  const k = campStatus(c).k;
+  if (k === "soon") return 0;
+  if (k === "done") return 100;
+  const span = daysBetween(c.start, c.end) || 1;
+  return Math.max(0, Math.min(100, Math.round(daysBetween(c.start, TODAY) / span * 100)));
+}
+// 目標達成率（確定分の実績合計÷目標）。目標や実績が無ければ null。
+function campGoalRate(c) {
+  const t = targetOf(c);
+  if (t == null || !t) return null;
+  const sum = campaignSummary(c);
+  if (!sum || !sum.stores || !sum.cur) return null;
+  return { rate: sum.cur / t * 100, cur: sum.cur, target: t };
+}
 // 施策期間の効果（月次・確定分のみ）。施策が掛かる確定月の値を、前年同月と比べる。
 // 月次データしか無いので月単位の概算。当月（暫定）と未来月は含めない。
 // accessor(code, month) で「売上」でも「客数」でも同じ計算を使い回す。
@@ -413,6 +429,49 @@ function viewToggle(active) {
   return `<div class="viewtabs">${t("schedule", "タイムライン")}${t("calendar", "カレンダー")}</div>`;
 }
 
+// ── 進捗＆振り返りサマリ（TOP最上部・アプリの主眼を一目で）──────────────
+// 「今どれだけ動いていて（進捗）／結果はどうで（判定）／やりっぱなしが無いか（振り返り）」
+// を4タイルで示す。タップで施策の効果へ。数値はすべて既存の判定・効果から算出。
+function reviewProgressStrip() {
+  const camps = DATA.campaigns || [];
+  if (!camps.length) return "";
+  const live = camps.filter(c => campStatus(c).k === "live");
+  const done = camps.filter(c => campStatus(c).k === "done");
+  const soon = camps.filter(c => campStatus(c).k === "soon");
+  // 判定内訳（実施中＋終了で計測できたもの）
+  let good = 0, warn = 0;
+  [...live, ...done].forEach(c => {
+    const t = campVerdict(c).tone;
+    if (t === "good") good++; else if (t === "warn") warn++;
+  });
+  // 目標達成（実施中で目標入り）
+  const goals = live.map(campGoalRate).filter(Boolean);
+  const achieved = goals.filter(g => g.rate >= 100).length;
+  const avgRate = goals.length ? Math.round(goals.reduce((a, g) => a + g.rate, 0) / goals.length) : null;
+  // 振り返り（終了のうち記入済み）
+  const needs = done.filter(needsReview).length;
+  const reviewed = done.length - needs;
+  const rvPct = done.length ? Math.round(reviewed / done.length * 100) : null;
+
+  const tile = (view, big, lbl, sub, tone) => `
+    <button class="rptile${tone ? " " + tone : ""}" data-view="${view}">
+      <div class="rpv">${big}</div><div class="rpl">${lbl}</div>
+      ${sub ? `<div class="rps">${sub}</div>` : ""}</button>`;
+  return `
+    <section class="rpstrip">
+      ${tile("campaigns", `${live.length}<small>件</small>`, "実施中の施策", soon.length ? `予定 ${soon.length}・終了 ${done.length}` : `終了 ${done.length}`)}
+      ${tile("campaigns", `<span class="up">${good}</span> / <span class="down">${warn}</span>`, "判定 効果あり/要改善", `計測できた施策の結果`)}
+      ${tile("campaigns",
+        goals.length ? `${achieved}<small>/${goals.length}</small>` : "―",
+        "目標達成（実施中）",
+        goals.length ? `平均達成率 ${avgRate}%` : "目標未入力", goals.length && avgRate < 100 ? "warn" : "")}
+      ${tile("campaigns",
+        done.length ? `${rvPct}<small>%</small>` : "―",
+        "振り返り記入率", needs ? `未記入 ${needs}件が残っています` : (done.length ? "やりっぱなし ゼロ" : "終了施策なし"),
+        needs ? "warn" : "")}
+    </section>`;
+}
+
 // ── 直近のアクション（TOPの一番上・人がやることを促す）──────────────────
 const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 86400000);
 function actionPanel() {
@@ -533,6 +592,7 @@ function renderSchedule() {
     : "";
 
   return `
+    ${reviewProgressStrip()}
     ${actionPanel()}
     ${viewToggle("schedule")}
     <section class="block">
@@ -768,7 +828,8 @@ function renderCampaigns() {
   const STORD = { live: 0, soon: 1, done: 2 };
   const all = (DATA.campaigns || []).map(c => ({ c, s: campStatus(c), sum: campaignSummary(c) }));
   const rows = all.filter(r =>
-    (CAMP_FILTER.status === "all" || r.s.k === CAMP_FILTER.status) &&
+    (CAMP_FILTER.status === "all" || r.s.k === CAMP_FILTER.status
+      || (CAMP_FILTER.status === "review" && needsReview(r.c))) &&
     (CAMP_FILTER.kind === "all" || r.c.kind === CAMP_FILTER.kind));
   rows.sort((a, b) => {
     const d = STORD[a.s.k] - STORD[b.s.k];
@@ -804,6 +865,17 @@ function renderCampaigns() {
     }
     const goalHtml = tgt != null
       ? `<span class="cgtag">目標 ${man(tgt)}円</span>` : "";
+    // 判定バッジ（PDCA）・期間進捗バー（実施中）・目標達成率（スコアボード化）
+    const v = campVerdict(c);
+    const vBadge = `<span class="rvbadge ${v.tone}">${v.label}</span>`;
+    const prog = campProgress(c);
+    const progHtml = s.k === "live"
+      ? `<div class="cprog" title="期間の進捗 ${prog}%"><span style="width:${prog}%"></span></div>` : "";
+    const gr = campGoalRate(c);
+    const goalLine = gr
+      ? `<div class="cgoalline ${gr.rate >= 100 ? "up" : "down"}">目標達成 ${gr.rate.toFixed(0)}%<span class="sub">（実績 ${man(gr.cur)}／目標 ${man(gr.target)}円）</span></div>`
+      : "";
+    const reviewTag = needsReview(c) ? `<span class="rvneed">⚠ 要振り返り</span>` : "";
     const memo = memoOf(c);
     const memoHtml = memo
       ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${c.id}" title="メモを編集">✎</button></div>`
@@ -812,9 +884,11 @@ function renderCampaigns() {
       <span class="kchip" style="--kc:${k.color}">${k.label}</span>
       <div class="cbody">
         <div class="ctitle">${c.title}<span class="tagx">${scope}</span>
-          <span class="cstat ${s.k}">${s.label}</span>${goalHtml}</div>
+          <span class="cstat ${s.k}">${s.label}</span>${vBadge}${goalHtml}${reviewTag}</div>
         ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
+        ${progHtml}
         <div class="ceff">${effHtml}</div>
+        ${goalLine}
         ${campHeadline(c)}
         ${memoHtml}
         <div class="cgo">詳細を確認 →</div>
@@ -828,7 +902,9 @@ function renderCampaigns() {
 
   const chip = (dim, val, label) =>
     `<button class="fchip${CAMP_FILTER[dim] === val ? " on" : ""}" data-cfilter="${dim}:${val}">${label}</button>`;
-  const statusChips = [["all", "すべて"], ["live", "実施中"], ["soon", "予定"], ["done", "終了"]]
+  const needReviewN = all.filter(r => needsReview(r.c)).length;
+  const statusChips = [["all", "すべて"], ["live", "実施中"], ["soon", "予定"], ["done", "終了"],
+    ["review", `要振り返り${needReviewN ? " " + needReviewN : ""}`]]
     .map(([v, l]) => chip("status", v, l)).join("");
   const kindChips = [chip("kind", "all", "すべて")]
     .concat(Object.entries(KIND).map(([k, v]) => chip("kind", k, v.label))).join("");

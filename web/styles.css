@@ -737,3 +737,29 @@ tbody tr:last-child td{border-bottom:0;}
   background:color-mix(in srgb,var(--warning-ink) 14%,transparent);
   border-radius:999px;padding:1px 7px;white-space:nowrap;}
 b.warn{color:var(--warning-ink);}
+
+/* 進捗＆振り返りサマリ（TOP・reviewProgressStrip） */
+.rpstrip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:0 0 14px;}
+.rptile{text-align:left;border:1px solid var(--line);border-radius:12px;padding:12px 14px;
+  background:var(--surface-1);cursor:pointer;transition:border-color .15s,transform .05s;}
+.rptile:hover{border-color:var(--line-strong);}
+.rptile:active{transform:translateY(1px);}
+.rptile.warn{border-color:color-mix(in srgb,var(--warning-ink) 45%,var(--line));
+  background:color-mix(in srgb,var(--warning-ink) 6%,var(--surface-1));}
+.rpv{font-size:26px;font-weight:800;line-height:1.1;font-variant-numeric:tabular-nums;}
+.rpv small{font-size:13px;font-weight:600;color:var(--ink-3);margin-left:2px;}
+.rpv .up{color:var(--good-ink);}.rpv .down{color:var(--warning-ink);}
+.rpl{font-size:12px;font-weight:600;color:var(--ink-2);margin-top:3px;}
+.rps{font-size:11px;color:var(--ink-3);margin-top:2px;}
+@media(max-width:720px){.rpstrip{grid-template-columns:repeat(2,1fr);}}
+
+/* 施策スコアボードの進捗バー・目標達成・要振り返りタグ（renderCampaigns） */
+.cprog{height:6px;border-radius:999px;background:color-mix(in srgb,var(--ink-1) 10%,transparent);
+  overflow:hidden;margin:6px 0 2px;max-width:320px;}
+.cprog>span{display:block;height:100%;border-radius:999px;background:var(--accent);}
+.cgoalline{font-size:12.5px;font-weight:700;margin-top:3px;}
+.cgoalline.up{color:var(--good-ink);}.cgoalline.down{color:var(--warning-ink);}
+.cgoalline .sub{font-weight:400;color:var(--ink-3);margin-left:4px;}
+.rvneed{font-size:10.5px;font-weight:700;color:var(--warning-ink);
+  background:color-mix(in srgb,var(--warning-ink) 14%,transparent);
+  border-radius:999px;padding:1px 8px;margin-left:6px;white-space:nowrap;}
