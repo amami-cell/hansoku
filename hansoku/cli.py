@@ -647,7 +647,7 @@ def build_parser() -> argparse.ArgumentParser:
                  "hourly", "hourly-dry", "abc", "abc-dry", "abc-store-probe",
                  "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
-                 "abc-dom-probe"],
+                 "abc-dom-probe", "uriage-probe"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument("--month", default=None, help="hourly の対象月（YYYY-MM、既定は前月）")
