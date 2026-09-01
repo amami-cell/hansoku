@@ -331,6 +331,9 @@ def ingest_monthly(
                 print(f"[売上推移] 店舗選択に失敗: {name} ({value})")
                 continue
             if end_month:
+                # probeで確定した順序: まず通常検索でグリッドを確定→対象月セット→『検 索』。
+                _click_search(session)
+                time.sleep(1.0)
                 ok = _set_uriage_month(session, end_month)
                 pressed = _click_uriage_search(session)  # 『検 索』で対象月を反映
                 if value == targets[0][0]:
