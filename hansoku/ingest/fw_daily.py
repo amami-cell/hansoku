@@ -382,6 +382,64 @@ def ingest_monthly(
     return 0
 
 
+def probe_uriage_suii(artifacts: Path, month: str = "2024-03") -> int:
+    """月別日別売上推移に「過去期間セレクタ」があるかを調べる診断。
+    1店を選んで既定グリッドの月レンジを見たあと、日付レンジ入力/年セレクトを
+    列挙し、対象月(既定2024-03)へ移動を試みてグリッドが遡れるかを印字する。
+    取得可否をこの1回で確定させる（DB書き込みはしない）。"""
+    from .fw_budget import _click_search, _combo_options, _select_combo
+
+    d_from, d_to = _month_bounds(month)
+    with fw_session(artifacts) as session:
+        _open_uriage_suii(session)
+        options = _combo_options(session)
+        print(f"[売上推移probe] 店舗コンボ {len(options)}件")
+        if options:
+            _select_combo(session, options[0]["value"])
+            _click_search(session)
+            time.sleep(1.2)
+        before = [m["period"] for m in _extract_month_grid(session)]
+        span_b = f"{before[-1]}〜{before[0]}" if before else "-"
+        print(f"[売上推移probe] 既定グリッド {len(before)}ヶ月 span={span_b}")
+
+        # 画面上の入力/セレクトを列挙（期間・年の手掛かりを探す）
+        controls = session.page.evaluate(
+            r"""() => {
+                const out = {inputs: [], selects: []};
+                for (const i of document.querySelectorAll('input')) {
+                    if (!i.offsetParent) continue;
+                    out.inputs.push({type: i.type||'', value: (i.value||'').slice(0,20),
+                                     name: i.name||'', ph: i.placeholder||''});
+                }
+                for (const s of document.querySelectorAll('select')) {
+                    if (!s.offsetParent) continue;
+                    const opts = [...s.options].slice(0,20).map(o => (o.textContent||'').trim());
+                    out.selects.push({name: s.name||'', opts});
+                }
+                return out;
+            }"""
+        )
+        print(f"[売上推移probe] inputs={len(controls['inputs'])} selects={len(controls['selects'])}")
+        for i in controls["inputs"][:20]:
+            print(f"   input type={i['type']} value='{i['value']}' name='{i['name']}' ph='{i['ph']}'")
+        for s in controls["selects"][:12]:
+            print(f"   select name='{s['name']}' opts={s['opts']}")
+
+        # 日付レンジ入力があれば対象月へ動かして再検索、グリッドが遡れるか確認
+        ok = _set_date_range(session, d_from, d_to)
+        print(f"[売上推移probe] _set_date_range({d_from}〜{d_to})={ok}")
+        if ok:
+            _click_search(session)
+            time.sleep(1.5)
+            after = [m["period"] for m in _extract_month_grid(session)]
+            span_a = f"{after[-1]}〜{after[0]}" if after else "-"
+            print(f"[売上推移probe] 変更後グリッド {len(after)}ヶ月 span={span_a}")
+            reached = any(p.startswith(month[:4]) for p in after)
+            print(f"[売上推移probe] 対象年{month[:4]}に到達: {reached}")
+        session.snapshot("uriage_probe")
+    return 0
+
+
 # ── 時間帯別売上（販売管理→店舗業務）からの時間帯プロファイル取り込み ──────
 #
 # 画面（URL 末尾 jknburpr）は EJS TreeGrid で、選んだ期間（日付 from〜to）を

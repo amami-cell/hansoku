@@ -255,6 +255,10 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
 
     if args.mode == "probe":
         return probe(Path(args.artifacts))
+    if args.mode == "uriage-probe":
+        from .ingest.fw_daily import probe_uriage_suii
+
+        return probe_uriage_suii(Path(args.artifacts), month=args.month or "2024-03")
     if args.mode == "abc-store-probe":
         from .ingest.fw_daily import probe_abc_store
 
