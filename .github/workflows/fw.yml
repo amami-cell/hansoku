@@ -153,7 +153,12 @@ jobs:
             elif [ "${{ inputs.mode }}" = "monthly-dry" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode monthly-dry --limit 2 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "monthly-ingest" ]; then
-              xvfb-run -a python -m hansoku.cli fw-daily --mode monthly --artifacts fw-artifacts
+              M="${{ inputs.abc_ingest_month }}"
+              if [ -n "$M" ]; then
+                xvfb-run -a python -m hansoku.cli fw-daily --mode monthly --month "$M" --artifacts fw-artifacts
+              else
+                xvfb-run -a python -m hansoku.cli fw-daily --mode monthly --artifacts fw-artifacts
+              fi
             elif [ "${{ inputs.mode }}" = "hourly-dry" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode hourly-dry --limit 1 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "hourly-ingest" ]; then

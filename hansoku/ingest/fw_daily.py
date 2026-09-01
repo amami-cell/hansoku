@@ -282,11 +282,14 @@ def ingest_monthly(
     artifacts: Path,
     store_limit: int | None = None,
     dry_run: bool = False,
+    end_month: str | None = None,
 ) -> int:
     """月別日別売上推移から各店の月次「売上・客数」を（前年ぶんも含めて）取り込む。
 
     画面は1店ずつ直近12ヶ月を表示。前年実績・客数前年実績の列を使い、
     前年の同月ぶんも同時に書くので、1スクレイプで約24ヶ月が揃う。
+    end_month（YYYY-MM）を渡すと『対象月』を設定し、その月を末尾とする12ヶ月＋前年を
+    引く（過去年のバックフィル用。冪等キーが月単位なので既存月と共存する）。
     """
     from datetime import date as _date
     from datetime import datetime, timezone
@@ -327,6 +330,10 @@ def ingest_monthly(
             if not _select_combo(session, value):
                 print(f"[売上推移] 店舗選択に失敗: {name} ({value})")
                 continue
+            if end_month:
+                ok = _set_uriage_month(session, end_month)
+                if value == targets[0][0]:
+                    print(f"[売上推移] 対象月={end_month} 設定={ok}（末尾月にして12ヶ月＋前年を引く）")
             _click_search(session)
             time.sleep(1.2)
             grid = _extract_month_grid(session)
@@ -477,6 +484,35 @@ def _set_date_range(session, d_from: str, d_to: str) -> bool:
         return false;
     }""",
             [d_from, d_to],
+        )
+    )
+
+
+def _set_uriage_month(session, month: str) -> bool:
+    """月別日別売上推移の『対象月』入力を設定する（値は〈YYYY年MM月〉表示・placeholder=YYYYMM）。
+    その月を末尾とする直近12ヶ月＋前年が引ける。best-effort。"""
+    y, m = month[:4], month[5:7]
+    kanji = f"{y}年{m}月"
+    yyyymm = f"{y}{m}"
+    return bool(
+        session.page.evaluate(
+            r"""([kanji, yyyymm]) => {
+        const set = (el, v) => {
+            el.focus(); el.value = v;
+            el.dispatchEvent(new Event('input', {bubbles: true}));
+            el.dispatchEvent(new Event('change', {bubbles: true}));
+            el.dispatchEvent(new KeyboardEvent('keyup', {key: 'Enter', bubbles: true}));
+            el.blur();
+        };
+        const ins = [...document.querySelectorAll('input')].filter(i => i.offsetParent);
+        let t = ins.find(i => /^\d{4}年\s*\d{1,2}月$/.test((i.value || '').trim()));
+        const kanjiField = !!t;
+        if (!t) t = ins.find(i => (i.placeholder || '').toUpperCase().includes('YYYYMM'));
+        if (!t) return false;
+        set(t, kanjiField ? kanji : yyyymm);
+        return true;
+    }""",
+            [kanji, yyyymm],
         )
     )
 
