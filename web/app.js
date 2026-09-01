@@ -965,18 +965,24 @@ const bucketOf = (code, name) => {
   return d ? (d.buckets || []).find(b => b.name === name) || null : null;
 };
 
-// 施策×データ紐づけ: 種類に応じて「関連部門の直近実績」または「売れ筋」を出す。
-// lunch→ランチ部門、bounenkai→コース部門、osusume/gm→売れ筋上位。dev は環境効果(別)。
+// 施策×データ紐づけ: 種類または台帳指定に応じて「関連部門の実績＋構成比」
+// 「商品内訳（表示で開く）」「売れ筋上位」を出す。
+// bucket: 明示部門（コース/食べ放題/ランチ等）。無ければ種類から推定（lunch→ランチ・bounenkai→コース）。
+// items: 商品名キーワード配列。該当商品の実績＋部門内構成比を「表示」で開く内訳として出す。
 function campDeptCard(c) {
   const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
-  const bname = campKindBucket(c.kind);
+  const bname = c.bucket || campKindBucket(c.kind);
+  const items = c.items || [];
+  const sections = [];
+
+  // ① 関連部門の実績＋構成比
   if (bname) {
     const rows = c.stores.map(code => {
       const d = deptFor(code);
       if (!d) return "";
       const b = bucketOf(code, bname);
       if (!b || (!b.sales && !b.qty)) return `<li class="cdrow is-muted"><span class="cdnm">${storeName(code)}</span>
-        <span class="sub">${bname}の計上なし</span></li>`;
+        <span class="sub">${esc(bname)}の計上なし</span></li>`;
       const share = Math.round((b.share || 0) * 100);
       const cr = b.cost_rate != null ? `<span class="cdcr">原価${b.cost_rate}%</span>` : "";
       const q = b.qty ? `・${b.qty.toLocaleString("ja-JP")}点` : "";
@@ -984,30 +990,65 @@ function campDeptCard(c) {
         <span class="cdnm">${storeName(code)}</span>
         <span class="cdmet"><b>${yen(b.sales)}</b>　構成比 ${share}%${q}　${cr}</span></li>`;
     }).filter(Boolean).join("");
-    if (!rows) return "";
-    return `<section class="block">
-      <div class="bhead"><h2>関連部門の実績（${bname}）</h2>
+    if (rows) sections.push(`<section class="block">
+      <div class="bhead"><h2>関連部門の実績（${esc(bname)}）</h2>
         <span class="bnote">FW ABC 部門${monthLbl}・この施策が効く区分</span></div>
       <div class="panel"><ul class="cdlist">${rows}</ul>
-        <div class="cdnote">${bname}の売上・構成比が施策後に伸びているかを、確定月ごとに追ってください。</div></div>
-    </section>`;
+        <div class="cdnote">${esc(bname)}の売上・構成比が施策後に伸びているかを、確定月ごとに追ってください。</div></div>
+    </section>`);
   }
-  if (c.kind === "osusume" || c.kind === "gm") {
+
+  // ② 商品内訳（items 指定時）＝「表示」を押すと該当商品の実績＋部門内構成比を開く
+  if (items.length) {
+    const blocks = c.stores.map(code => {
+      const prods = (DATA.products || {})[code] || [];
+      const b = bname ? bucketOf(code, bname) : null;
+      const denom = (b && b.sales) ? b.sales : ((deptFor(code) || {}).total_sales || 0);
+      const matched = prods.filter(p => items.some(kw => (p.name || "").includes(kw)));
+      if (!matched.length) return "";
+      const lis = matched.sort((a, b2) => b2.sales - a.sales).map(p => {
+        const sh = denom ? `・${bname ? esc(bname) + "内 " : ""}${Math.round(p.sales / denom * 100)}%` : "";
+        const rk = p.rank ? `<span class="cdrk">${esc(p.rank)}</span>` : "";
+        return `<li><span class="cdinm">${esc(p.name)}</span>${rk}<span class="cdiv">${yen(p.sales)}${sh}</span></li>`;
+      }).join("");
+      return `<div class="cditem"><div class="cdih" data-store="${code}">${storeName(code)}</div>
+        <ul class="cdilist">${lis}</ul></div>`;
+    }).filter(Boolean).join("");
+    const kw = items.map(esc).join("・");
+    if (blocks) {
+      sections.push(`<section class="block">
+      <div class="bhead"><h2>商品内訳</h2>
+        <span class="bnote">FW ABC 商品${monthLbl}・キーワード: ${kw}</span></div>
+      <div class="panel"><details class="cddet"><summary>商品ごとの実績を表示</summary>
+        <div class="cditems">${blocks}</div>
+        <div class="cdnote">${bname ? esc(bname) + "内の構成比" : "部門内の構成比"}は 商品売上÷部門売上。月次で並べるには月次ABC蓄積が必要です。</div>
+      </details></div>
+    </section>`);
+    } else {
+      sections.push(`<section class="block">
+      <div class="bhead"><h2>商品内訳</h2><span class="bnote">キーワード: ${kw}</span></div>
+      <div class="panel"><p class="muted">該当商品がまだABCに計上されていません（開始前／POS未登録／名称不一致）。名称が分かれば items を調整します。</p></div>
+    </section>`);
+    }
+  }
+
+  // ③ 部門も商品も未指定で osusume/gm → 売れ筋上位（フェア/改定の主役候補）
+  if (!bname && !items.length && (c.kind === "osusume" || c.kind === "gm")) {
     const rows = c.stores.map(code => {
-      const items = ((DATA.products || {})[code] || []).slice(0, 3);
-      if (!items.length) return "";
-      const chips = items.map((p, i) => `<span class="cdtop">${i + 1}. ${esc(p.name)} ${yen(p.sales)}</span>`).join("");
+      const its = ((DATA.products || {})[code] || []).slice(0, 3);
+      if (!its.length) return "";
+      const chips = its.map((p, i) => `<span class="cdtop">${i + 1}. ${esc(p.name)} ${yen(p.sales)}</span>`).join("");
       return `<li class="cdrow" data-store="${code}"><span class="cdnm">${storeName(code)}</span>
         <span class="cdtops">${chips}</span></li>`;
     }).filter(Boolean).join("");
-    if (!rows) return "";
-    return `<section class="block">
+    if (rows) sections.push(`<section class="block">
       <div class="bhead"><h2>売れ筋（対象店）</h2>
         <span class="bnote">FW ABC 商品${monthLbl}・フェア/改定の主役候補</span></div>
       <div class="panel"><ul class="cdlist">${rows}</ul></div>
-    </section>`;
+    </section>`);
   }
-  return "";
+
+  return sections.join("");
 }
 
 function renderCampaign(id) {

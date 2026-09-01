@@ -690,6 +690,24 @@ tbody tr:last-child td{border-bottom:0;}
   border-radius:999px;padding:2px 9px;}
 .cdnote{margin-top:12px;font-size:12px;color:var(--ink-3);}
 
+/* 施策詳細の商品内訳（「表示」で開く・campDeptCard items） */
+.cddet>summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--accent);
+  list-style:none;padding:4px 0;user-select:none;}
+.cddet>summary::-webkit-details-marker{display:none;}
+.cddet>summary::before{content:"▸ ";color:var(--ink-3);}
+.cddet[open]>summary::before{content:"▾ ";}
+.cditems{display:flex;flex-direction:column;gap:12px;margin-top:8px;}
+.cditem{border-top:1px solid var(--line);padding-top:8px;}
+.cditem:first-child{border-top:none;padding-top:0;}
+.cdih{font-size:12px;font-weight:700;color:var(--ink-2);margin-bottom:4px;cursor:pointer;}
+.cdih:hover{color:var(--accent);}
+.cdilist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;}
+.cdilist li{display:flex;align-items:baseline;gap:8px;font-size:12.5px;}
+.cdinm{flex:1;color:var(--ink);}
+.cdrk{font-size:10px;font-weight:700;color:var(--ink-3);border:1px solid var(--line);
+  border-radius:4px;padding:0 4px;}
+.cdiv{font-variant-numeric:tabular-nums;color:var(--ink-2);white-space:nowrap;}
+
 /* 店舗詳細トップの「販促の狙いどころ」 */
 .stargets{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;}

@@ -164,12 +164,32 @@ def load_schedule(
                 "start": start,
                 "end": end,
                 "note": str(camp.get("note", "")) if camp.get("note") else "",
+                # 施策が効くFW ABC部門（コース/食べ放題/ランチ等）。書くと施策詳細に
+                # その部門の実績＋構成比を出す。未設定は None（種類から自動推定）。
+                "bucket": str(camp.get("bucket")).strip() if camp.get("bucket") else None,
+                # 商品内訳のキーワード（部分一致）。書くと該当商品の実績＋部門内構成比を
+                # 施策詳細に「表示」で出す。文字列でも配列でも可。未設定は空配列。
+                "items": _parse_items(camp.get("items")),
                 # 販促の目標数値（売上・円）。アプリ内で入力していく。未設定は None。
                 "target": _parse_target(camp.get("target")),
                 # 要因メモ（アプリ内で入力・Neon共有）。書き出し時に焼き込む。未設定は空。
                 "memo": "",
             }
         )
+    return out
+
+
+def _parse_items(value) -> list[str]:
+    """商品内訳キーワードを文字列リストに正規化する。文字列単体・配列どちらも可。"""
+    if value is None or value == "":
+        return []
+    if isinstance(value, str):
+        value = [value]
+    out: list[str] = []
+    for v in value:
+        s = str(v).strip()
+        if s:
+            out.append(s)
     return out
 
 
