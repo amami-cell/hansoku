@@ -404,7 +404,7 @@ function render() {
   app.querySelectorAll("[data-lunch]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "lunch", code: el.dataset.lunch }); }));
   app.querySelectorAll("[data-view]").forEach(el =>
-    el.addEventListener("click", () => go({ kind: el.dataset.view })));
+    el.addEventListener("click", () => go({ kind: el.dataset.view }, el.dataset.scroll)));
   app.querySelectorAll("[data-cal]").forEach(el =>
     el.addEventListener("click", () => { CAL_MONTH = addMonth(CAL_MONTH, el.dataset.cal === "next" ? 1 : -1); render(); }));
   app.querySelectorAll("[data-year]").forEach(el =>
@@ -421,7 +421,14 @@ function render() {
     }));
   wireEmphasis(app);
 }
-function go(v) { VIEW = v; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+function go(v, scroll) {
+  VIEW = v; render();
+  if (scroll) {
+    const el = document.getElementById(scroll);
+    if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
+  }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
 
 // タイムライン⇄カレンダーの切替
 function viewToggle(active) {
@@ -453,8 +460,11 @@ function reviewProgressStrip() {
   const reviewed = done.length - needs;
   const rvPct = done.length ? Math.round(reviewed / done.length * 100) : null;
 
-  const tile = (view, big, lbl, sub, tone) => `
-    <button class="rptile${tone ? " " + tone : ""}" data-view="${view}">
+  // 原価アラート（前月比で原価率が悪化した店）
+  const alerts = costAlerts();
+
+  const tile = (view, big, lbl, sub, tone, scroll) => `
+    <button class="rptile${tone ? " " + tone : ""}" data-view="${view}"${scroll ? ` data-scroll="${scroll}"` : ""}>
       <div class="rpv">${big}</div><div class="rpl">${lbl}</div>
       ${sub ? `<div class="rps">${sub}</div>` : ""}</button>`;
   return `
@@ -469,6 +479,11 @@ function reviewProgressStrip() {
         done.length ? `${rvPct}<small>%</small>` : "―",
         "振り返り記入率", needs ? `未記入 ${needs}件が残っています` : (done.length ? "やりっぱなし ゼロ" : "終了施策なし"),
         needs ? "warn" : "")}
+      ${tile("cross",
+        `${alerts.length}<small>店</small>`,
+        "原価アラート",
+        alerts.length ? `前月比+${COST_ALERT_TH.toFixed(1)}pt以上の悪化 → 確認` : "悪化店なし",
+        alerts.length ? "warn" : "", "cost-alert")}
     </section>`;
 }
 
@@ -1540,6 +1555,15 @@ function costTrend(code) {
   return { cur, prev, curV: cr[cur], prevV: cr[prev], deltaPt: (cr[cur] - cr[prev]) * 100 };
 }
 
+// 原価率が前月比 +th pt 以上に悪化した店（悪化幅の大きい順）。TOPタイルと横断アラートで共用。
+const COST_ALERT_TH = 1.0;
+function costAlerts(th = COST_ALERT_TH) {
+  return (DATA.stores || [])
+    .map(s => ({ s, t: costTrend(s.code) }))
+    .filter(x => x.t && x.t.deltaPt >= th)
+    .sort((a, b) => b.t.deltaPt - a.t.deltaPt);
+}
+
 function renderCross() {
   const brands = crossByBrand();
   const nStores = crossStores().length;
@@ -1649,11 +1673,7 @@ function renderCross() {
     })()}
     ${(() => {
       // 原価率の前月比トレンド悪化アラート（+1.0pt以上を悪化として名指し）
-      const TH = 1.0;
-      const rows = (DATA.stores || [])
-        .map(s => ({ s, t: costTrend(s.code) }))
-        .filter(x => x.t && x.t.deltaPt >= TH)
-        .sort((a, b) => b.t.deltaPt - a.t.deltaPt);
+      const rows = costAlerts();
       if (!rows.length) return "";
       const items = rows.map(({ s, t }) => {
         const t3 = deptCostTargets(s.code, 2);
@@ -1668,9 +1688,9 @@ function renderCross() {
         </li>`;
       }).join("");
       return `
-    <section class="block">
+    <section class="block" id="cost-alert">
       <div class="bhead"><h2>原価率トレンド悪化アラート</h2>
-        <span class="bnote">前月比で原価率が +${TH.toFixed(1)}pt 以上に悪化した店　${rows.length}店</span></div>
+        <span class="bnote">前月比で原価率が +${COST_ALERT_TH.toFixed(1)}pt 以上に悪化した店　${rows.length}店</span></div>
       <div class="panel"><ul class="ctlist">${items}</ul>
         <div class="bnote" style="margin-top:8px">直近確定月とその前月のABC原価率を比較。上昇＝利益を圧迫。行タップで店舗詳細（部門別の原価率）へ。</div>
       </div>
@@ -1994,6 +2014,36 @@ function latestWith(code, fn) {
   }
   return null;
 }
+// 原価率の直近推移ミニ折れ線（確定月・最大n ヶ月）。2点未満は出さない。
+function costSpark(code, n = 6) {
+  const cr = DATA.cost_rate[code] || {};
+  const pts = [];
+  for (const m of DATA.months) {
+    if (m >= CURRENT_MONTH) continue;
+    if (typeof cr[m] === "number") pts.push({ m, v: cr[m] });
+  }
+  const series = pts.slice(-n);
+  if (series.length < 2) return "";
+  const vs = series.map(p => p.v);
+  const min = Math.min(...vs), max = Math.max(...vs);
+  const span = (max - min) || 0.01;
+  const W = 280, H = 46, padX = 6, padY = 8;
+  const x = i => padX + i * (W - 2 * padX) / (series.length - 1);
+  const y = v => padY + (1 - (v - min) / span) * (H - 2 * padY);
+  const line = series.map((p, i) => `${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+  const last = series[series.length - 1], prev = series[series.length - 2];
+  const cls = last.v > prev.v ? "down" : (last.v < prev.v ? "up" : "");   // 上昇＝悪化=down色
+  const dots = series.map((p, i) =>
+    `<circle cx="${x(i).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="${i === series.length - 1 ? 3 : 2}"/>`).join("");
+  return `
+    <div class="cspark ${cls}">
+      <div class="cshead"><span>原価率の推移</span><span class="csrange">${series[0].m}〜${last.m}</span></div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="cssvg" aria-hidden="true">
+        <polyline points="${line}" fill="none"/>${dots}</svg>
+      <div class="csfoot"><span>最小 ${pct(min)}</span><span>最大 ${pct(max)}</span>
+        <span class="cscur ${cls}">直近 ${pct(last.v)}</span></div>
+    </div>`;
+}
 function renderProfitability(code) {
   const crAt = (c, m) => (DATA.cost_rate[c] || {})[m];   // 分数(0-1)
   const ls = latestWith(code, salesAt);
@@ -2062,6 +2112,7 @@ function renderProfitability(code) {
         <span class="bnote">既存データ（売上・客数・ABC原価率）から算出</span></div>
       <div class="panel">
         <div class="kpis">${cards.join("")}</div>
+        ${costSpark(code)}
         ${deptChips}
       </div>
     </section>`;

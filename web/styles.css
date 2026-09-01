@@ -762,7 +762,8 @@ b.warn{color:var(--warning-ink);}
 .ctaim{grid-column:1/-1;font-size:11px;color:var(--ink-2);}
 
 /* 進捗＆振り返りサマリ（TOP・reviewProgressStrip） */
-.rpstrip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:0 0 14px;}
+.rpstrip{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:0 0 14px;}
+@media(max-width:1000px){.rpstrip{grid-template-columns:repeat(3,1fr);}}
 .rptile{text-align:left;border:1px solid var(--line);border-radius:12px;padding:12px 14px;
   background:var(--surface-1);cursor:pointer;transition:border-color .15s,transform .05s;}
 .rptile:hover{border-color:var(--line-strong);}
@@ -786,3 +787,20 @@ b.warn{color:var(--warning-ink);}
 .rvneed{font-size:10.5px;font-weight:700;color:var(--warning-ink);
   background:color-mix(in srgb,var(--warning-ink) 14%,transparent);
   border-radius:999px;padding:1px 8px;margin-left:6px;white-space:nowrap;}
+
+/* 原価率の推移ミニ折れ線（店舗詳細・costSpark） */
+.cspark{margin:10px 0 2px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;
+  background:var(--surface-1);max-width:320px;--sc:var(--ink-3);}
+.cspark.up{--sc:var(--good-ink);}
+.cspark.down{--sc:var(--warning-ink);}
+.cshead{display:flex;justify-content:space-between;align-items:baseline;
+  font-size:12px;font-weight:600;color:var(--ink-2);}
+.cshead .csrange{font-weight:400;color:var(--ink-3);font-size:10.5px;}
+.cssvg{display:block;width:100%;height:46px;margin:4px 0 2px;overflow:visible;}
+.cssvg polyline{stroke:var(--sc);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;
+  vector-effect:non-scaling-stroke;}
+.cssvg circle{fill:var(--sc);}
+.csfoot{display:flex;justify-content:space-between;gap:8px;
+  font-size:10.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+.cscur{font-weight:700;color:var(--ink-2);}
+.cscur.up{color:var(--good-ink);}.cscur.down{color:var(--warning-ink);}
