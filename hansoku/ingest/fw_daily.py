@@ -336,11 +336,19 @@ def ingest_monthly(
                 time.sleep(1.0)
                 ok = _set_uriage_month(session, end_month)
                 pressed = _click_uriage_search(session)  # 『検 索』で対象月を反映
+                # グリッド再描画はFW負荷で遅れるので、対象年の行が出るまで最大10秒待つ
+                target_y = end_month[:4]
+                shifted = False
+                for _ in range(10):
+                    time.sleep(1.0)
+                    if any(m["period"].startswith(target_y) for m in _extract_month_grid(session)):
+                        shifted = True
+                        break
                 if value == targets[0][0]:
-                    print(f"[売上推移] 対象月={end_month} 設定={ok}/検索={pressed}（末尾月にして12ヶ月＋前年）")
+                    print(f"[売上推移] 対象月={end_month} 設定={ok}/検索={pressed}/{target_y}到達={shifted}")
             else:
                 _click_search(session)
-            time.sleep(1.4)
+                time.sleep(1.4)
             grid = _extract_month_grid(session)
             if not grid:
                 session.snapshot(f"nogrid_{store.store_code}")
