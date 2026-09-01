@@ -332,10 +332,12 @@ def ingest_monthly(
                 continue
             if end_month:
                 ok = _set_uriage_month(session, end_month)
+                pressed = _click_uriage_search(session)  # 『検 索』で対象月を反映
                 if value == targets[0][0]:
-                    print(f"[売上推移] 対象月={end_month} 設定={ok}（末尾月にして12ヶ月＋前年を引く）")
-            _click_search(session)
-            time.sleep(1.2)
+                    print(f"[売上推移] 対象月={end_month} 設定={ok}/検索={pressed}（末尾月にして12ヶ月＋前年）")
+            else:
+                _click_search(session)
+            time.sleep(1.4)
             grid = _extract_month_grid(session)
             if not grid:
                 session.snapshot(f"nogrid_{store.store_code}")
@@ -541,6 +543,23 @@ def _set_uriage_month(session, month: str) -> bool:
         return true;
     }""",
             [kanji, yyyymm],
+        )
+    )
+
+
+def _click_uriage_search(session) -> bool:
+    """月別日別売上推移の『検 索』ボタン（間にスペース有り）を押す。対象月の反映に必須。"""
+    return bool(
+        session.page.evaluate(
+            r"""() => {
+        const nodes = document.querySelectorAll("button, input[type=button], input[type=submit], a");
+        for (const b of nodes) {
+            if (!b.offsetParent) continue;
+            const t = (b.tagName === 'INPUT' ? (b.value || '') : (b.innerText || '')).replace(/\s+/g, '');
+            if (t === '検索') { b.click(); return true; }
+        }
+        return false;
+    }"""
         )
     )
 
