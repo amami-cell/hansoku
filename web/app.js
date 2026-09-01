@@ -960,10 +960,21 @@ function campTimeProgress(c) {
 function campKindBucket(kind) {
   return kind === "lunch" ? "ランチ" : kind === "bounenkai" ? "コース" : null;
 }
-const bucketOf = (code, name) => {
-  const d = deptFor(code);
-  return d ? (d.buckets || []).find(b => b.name === name) || null : null;
-};
+// 部門解決: まず標準バケット（コース/ランチ/…）を完全一致で。無ければ FW生部門を
+// 名前の部分一致で集約（パフェ/ケーキ/テイクアウトジェラート 等の個別部門に対応）。
+function resolveDept(d, name) {
+  if (!d || !name) return null;
+  const b = (d.buckets || []).find(x => x.name === name);
+  if (b) return b;
+  const rs = (d.raw || []).filter(r => (r.name || "").includes(name));
+  if (!rs.length) return null;
+  const sales = rs.reduce((a, r) => a + (r.sales || 0), 0);
+  const qty = rs.reduce((a, r) => a + (r.qty || 0), 0);
+  const cost = rs.reduce((a, r) => a + (r.cost_rate != null ? r.sales * r.cost_rate / 100 : 0), 0);
+  const tot = d.total_sales || 1;
+  return { name, sales, qty, share: sales / tot, cost_rate: sales ? +(cost / sales * 100).toFixed(1) : null };
+}
+const bucketOf = (code, name) => resolveDept(deptFor(code), name);
 
 // ── FW ABC 月次シリーズ（departments_monthly / products_monthly）アクセサ ───────
 // 毎月ABCを取り込むと積み上がる。無ければ空＝旧・最新1ヶ月版にフォールバック。
@@ -973,10 +984,8 @@ function abcMonths(code) {
   return [...new Set([...a, ...b])].sort().reverse();
 }
 const prevYearM = m => { const [y, mo] = m.split("-"); return `${+y - 1}-${mo}`; };
-const deptBucketAtM = (code, m, name) => {
-  const d = ((DATA.departments_monthly || {})[code] || {})[m];
-  return d ? (d.buckets || []).find(b => b.name === name) || null : null;
-};
+const deptBucketAtM = (code, m, name) =>
+  resolveDept(((DATA.departments_monthly || {})[code] || {})[m], name);
 const prodsAtM = (code, m) => ((DATA.products_monthly || {})[code] || {})[m] || [];
 
 // 施策×データ紐づけ（ディスパッチャ）: 月次ABCがあれば「1ヵ月毎＋前年比」で、
