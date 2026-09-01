@@ -1,0 +1,115 @@
+name: 月次ABCを取り込む
+
+# 毎月1回、全稼働店の 商品ABC＋部門内訳 を FW から取り込み、Neon に月ごとに蓄積する。
+# 冪等キー (source, grain, date) は月単位なので、毎月回すと月が積み上がる（前向き蓄積）。
+# ⚠ FW ABC は過去月の商品明細を返さないため、前年比は蓄積が1年たってから出る。
+#
+# 施策詳細の「1ヵ月毎」表示（ケーキ/ジェラート/パフェ・食べ放題・宴会コース）と
+# 横断「忘新年会・宴会まとめ」の土台。取り込んだら deploy.yml で画面へ反映する。
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: '対象月 YYYY-MM（空欄なら前月）'
+        required: false
+        default: ''
+  schedule:
+    # 毎月6日 05:20 JST (= 前日 20:20 UTC)。前月ぶんが締まった頃に前月ABCを取り込む。
+    - cron: '20 20 5 * *'
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  # 稼働店コードを config/stores.yaml から動的に取り出し、matrix の入力にする。
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      stores: ${{ steps.gen.outputs.stores }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 依存（PyYAMLのみ）
+        run: pip install pyyaml
+      - id: gen
+        name: 稼働店コードを列挙
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, yaml
+          data = yaml.safe_load(open("config/stores.yaml")) or {}
+          codes = [str(s["store_code"]) for s in data.get("stores", []) if s.get("active")]
+          print("stores=" + json.dumps(codes))
+          PY
+
+  # 1店ずつ ABC を取り込む。FWは同時ログインに耐えるので数店ずつ並行で回す。
+  ingest:
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        store: ${{ fromJSON(needs.matrix.outputs.stores) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: Secrets の確認
+        env:
+          FW_USER: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FW_PASS: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+          NEON: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          miss=""
+          [ -z "$FW_USER" ] && miss="$miss FOODIST_JOURNAL_USER_ID"
+          [ -z "$FW_PASS" ] && miss="$miss FOODIST_JOURNAL_PASSWORD"
+          [ -z "$NEON" ]    && miss="$miss NEON_DATABASE_URL"
+          if [ -n "$miss" ]; then
+            echo "::error::未設定のSecrets:$miss"
+            exit 1
+          fi
+
+      - name: ABC取込（1店・前月）
+        env:
+          FOODIST_JOURNAL_USER_ID: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FOODIST_JOURNAL_PASSWORD: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          M="${{ inputs.month }}"
+          {
+            echo "## 月次ABC 取込 ${{ matrix.store }}"
+            echo ''
+            echo '```'
+            if [ -n "$M" ]; then
+              xvfb-run -a python -m hansoku.cli fw-daily --mode abc-store-ingest \
+                --abc-store "${{ matrix.store }}" --month "$M" --artifacts fw-artifacts
+            else
+              xvfb-run -a python -m hansoku.cli fw-daily --mode abc-store-ingest \
+                --abc-store "${{ matrix.store }}" --artifacts fw-artifacts
+            fi
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: 記録をアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: abc-monthly-${{ matrix.store }}
+          path: fw-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore
