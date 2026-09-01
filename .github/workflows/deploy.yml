@@ -60,9 +60,10 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
-          # 直近2年分。表示中のどの月でも前年同月が窓内に居るように、25ヶ月遡る
-          # （13ヶ月だと最新月しか前年比が出ず、少し前の施策の前年比が空になる）。
-          FROM=$(date -d '-25 months' +%Y-%m-01)
+          # 2025年の各月に前年比(=2024同月)を出すには2024年頭までデータが要る。
+          # さらに2024年自身の前年比(=2023)や年間販促の複数年比較も見込み、37ヶ月遡る
+          # （＝約3年。当年-前年-前々年が窓内に居る）。DBに無い月は自然に空になるだけ。
+          FROM=$(date -d '-37 months' +%Y-%m-01)
           TO=$(date +%Y-%m-%d)
           python -m hansoku.cli export-web --date-from "$FROM" --date-to "$TO" --out web/data
           ls -la web/data
