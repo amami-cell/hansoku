@@ -1514,6 +1514,32 @@ function crossProfit() {
   }).filter(x => x.kt != null || x.gp != null);
 }
 
+// 原価改善の狙い目部門：原価額(=売上×原価率)の大きい順にTOP n。bucket.cost_rate は % 単位。
+function deptCostTargets(code, n = 3) {
+  const d = deptFor(code);
+  if (!d || !d.buckets) return [];
+  return d.buckets
+    .filter(b => b.cost_rate != null && typeof b.sales === "number" && b.sales > 0)
+    .map(b => ({ name: b.name, cost_rate: b.cost_rate, sales: b.sales, cost: b.sales * b.cost_rate / 100 }))
+    .sort((a, b) => b.cost - a.cost)
+    .slice(0, n);
+}
+
+// 原価率の前月比トレンド。直近確定月と、その一つ前（確定・cost_rateあり）を比較。
+// deltaPt は pt差（+＝原価率上昇＝悪化）。材料が2ヶ月分なければ null。
+function costTrend(code) {
+  const cr = DATA.cost_rate[code] || {};
+  const ms = [];
+  for (let i = DATA.months.length - 1; i >= 0 && ms.length < 2; i--) {
+    const m = DATA.months[i];
+    if (m >= CURRENT_MONTH) continue;
+    if (typeof cr[m] === "number") ms.push(m);
+  }
+  if (ms.length < 2) return null;
+  const [cur, prev] = ms;
+  return { cur, prev, curV: cr[cur], prevV: cr[prev], deltaPt: (cr[cur] - cr[prev]) * 100 };
+}
+
 function renderCross() {
   const brands = crossByBrand();
   const nStores = crossStores().length;
@@ -1589,6 +1615,15 @@ function renderCross() {
       const rows = prof.map((x, i) => {
         const isWorst = worst.has(x.code);
         const gpCls = x.gp != null && x.gp >= 0.65 ? "up" : (x.gp != null && x.gp < 0.60 ? "warn" : "");
+        // ワースト店は原価改善の狙い目部門TOP3を名指し（原価額の大きい順）
+        let aim = "";
+        if (isWorst) {
+          const t = deptCostTargets(x.code, 3);
+          aim = t.length
+            ? `<span class="xpaim"><em>狙い目</em>${t.map(b =>
+                `<span class="xpaimc" style="--dc:${DEPT_COLORS[b.name] || "var(--ink-3)"}">${esc(b.name)}<b>原価${b.cost_rate}%</b><small>${man(b.cost)}円</small></span>`).join("")}</span>`
+            : `<span class="xpaim muted">部門データ未取得（abc-store-ingest で回収）</span>`;
+        }
         return `
         <li class="xprow${isWorst ? " xpworst" : ""}" data-store="${x.code}">
           <span class="xpno">${i + 1}</span>
@@ -1596,10 +1631,11 @@ function renderCross() {
           <span class="xpbar"><span class="xpfill" style="width:${Math.max(4, Math.round(x.kt / maxKt * 100))}%"></span></span>
           <span class="xpkt">${yen(x.kt)}<small>客単価</small></span>
           <span class="xpgp ${gpCls}">${x.gp != null ? pct(x.gp) : "—"}<small>粗利率</small></span>
+          ${aim}
         </li>`;
       }).join("");
       const worstNote = worst.size
-        ? `<div class="bnote" style="margin-top:8px"><b class="warn">原価改善の狙い目</b>＝粗利率60%未満（原価率40%超）の下位${worst.size}店。ABC部門で原価の高い区分を確認 → 値付け/レシピ/仕入れの見直し余地。</div>`
+        ? `<div class="bnote" style="margin-top:8px"><b class="warn">原価改善の狙い目</b>＝粗利率60%未満（原価率40%超）の下位${worst.size}店。各行の<b>狙い目</b>は原価額（売上×原価率）が大きい部門TOP3＝ここを直すと効きます（値付け/レシピ/仕入れ）。</div>`
         : "";
       return `
     <section class="block">
@@ -1608,6 +1644,35 @@ function renderCross() {
       <div class="panel"><ul class="xplist">${rows}</ul>
         <div class="bnote" style="margin-top:8px">客単価＝売上÷客数、粗利率＝100−原価率（ABC部門）。行タップで店舗詳細へ。</div>
         ${worstNote}
+      </div>
+    </section>`;
+    })()}
+    ${(() => {
+      // 原価率の前月比トレンド悪化アラート（+1.0pt以上を悪化として名指し）
+      const TH = 1.0;
+      const rows = (DATA.stores || [])
+        .map(s => ({ s, t: costTrend(s.code) }))
+        .filter(x => x.t && x.t.deltaPt >= TH)
+        .sort((a, b) => b.t.deltaPt - a.t.deltaPt);
+      if (!rows.length) return "";
+      const items = rows.map(({ s, t }) => {
+        const t3 = deptCostTargets(s.code, 2);
+        const aim = t3.length
+          ? `<span class="ctaim">重い部門: ${t3.map(b => `${esc(b.name)}(原価${b.cost_rate}%)`).join("・")}</span>`
+          : "";
+        return `<li class="ctrow" data-store="${s.code}">
+          <span class="ctname">${esc(s.name)}<small>${esc(s.brand_name || "")}</small></span>
+          <span class="ctmove"><b class="warn">+${t.deltaPt.toFixed(1)}pt</b>
+            <small>${pct(t.prevV)}（${t.prev}）→ ${pct(t.curV)}（${t.cur}）</small></span>
+          ${aim}
+        </li>`;
+      }).join("");
+      return `
+    <section class="block">
+      <div class="bhead"><h2>原価率トレンド悪化アラート</h2>
+        <span class="bnote">前月比で原価率が +${TH.toFixed(1)}pt 以上に悪化した店　${rows.length}店</span></div>
+      <div class="panel"><ul class="ctlist">${items}</ul>
+        <div class="bnote" style="margin-top:8px">直近確定月とその前月のABC原価率を比較。上昇＝利益を圧迫。行タップで店舗詳細（部門別の原価率）へ。</div>
       </div>
     </section>`;
     })()}
@@ -1956,11 +2021,19 @@ function renderProfitability(code) {
         <div class="delta">${delta}・${man(ls.v)}円÷${nin(cov)}</div></div>`);
     }
   }
-  // 原価率 → 粗利率
+  // 原価率 → 粗利率（＋前月比トレンド）
   if (lcr) {
+    const tr = costTrend(code);
+    let trend = `粗利率 ${pct(1 - lcr.v)}`;
+    if (tr) {
+      const up = tr.deltaPt > 0;
+      const cls = tr.deltaPt >= 1.0 ? "down" : (tr.deltaPt <= -1.0 ? "up" : "");
+      const arrow = up ? "▲" : (tr.deltaPt < 0 ? "▼" : "→");
+      trend += `・<span class="${cls}">前月比 ${arrow}${signed(tr.deltaPt)}pt</span>`;
+    }
     cards.push(`<div class="kpi"><div class="lbl">原価率（${lcr.m}）</div>
       <div class="big ${lcr.v <= 0.35 ? "up" : "down"}">${pct(lcr.v)}</div>
-      <div class="delta">粗利率 ${pct(1 - lcr.v)}</div></div>`);
+      <div class="delta">${trend}</div></div>`);
   }
   // 粗利（推計）＝売上×粗利率。売上と原価率がそろう最新月で
   if (ls && lcr) {
