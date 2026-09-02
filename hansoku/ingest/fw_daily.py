@@ -1595,6 +1595,7 @@ def ingest_abc_store(
     month: str | None = None,
     top_n: int = _ABC_TOP_N,
     dry_run: bool = False,
+    budget_minutes: float = 70.0,
 ) -> int:
     """1店舗の商品ABC（売れ筋・上位）＋部門内訳（ランチ/ドリンク等）を取り込む。
 
@@ -1606,6 +1607,13 @@ def ingest_abc_store(
     month は複数指定できる（"2025-11,2025-12" / "2024-09..2026-07"）。FW ABC は
     過去月も引けるので、過去分をまとめて遡れる。1店1ログインで月を回すため、
     23ヶ月でもログインは1回で済む。
+
+    書き込みは月ごとに行う。冪等キーが source×grain×date で source は店ごとに
+    分かれているため、1ヶ月ぶんだけ差し替えても他の月・他の店に触らない。
+    途中で落ちても、そこまでの月は残る（以前は最後にまとめて書いていたため、
+    23ヶ月まわした挙句にジョブがタイムアウトすると全部消えていた）。
+    budget_minutes を超えたら、残りの月を告げて打ち切る。取れた月は残るので、
+    残りの月だけを指定して流し直せばよい。
     """
     import re as _re
     import sys as _sys
@@ -1650,7 +1658,20 @@ def ingest_abc_store(
     code, name = st.store_code, st.store_name
     source = f"fw_abc_{code}"
     ingested_at = datetime.now(timezone.utc)
+    # 月ごとに書くので、collected は「その月ぶん」。書けた件数は total_loaded に積む。
     collected: list[ActualRow] = []
+    total_loaded = 0
+    written_months: list[str] = []
+
+    def _flush(month_: str) -> None:
+        """その月ぶんを warehouse に書く。冪等キーが source×grain×date で source は
+        店ごとに分かれているため、1ヶ月だけ差し替えても他の月・他の店に触らない。"""
+        nonlocal total_loaded
+        if dry_run or not collected:
+            return
+        total_loaded += warehouse.replace_actuals(collected)
+        written_months.append(month_)
+
     hdr = _re.compile(r"^(.+?)\s\|\s(\d+\.\d+)%\s\|\s([\d,]+)\s\|\s([\d,]+)")
     num = lambda s: int(s.replace(",", ""))  # noqa: E731
 
@@ -1685,7 +1706,19 @@ def ingest_abc_store(
             session.snapshot(f"abc_store_ingest_nostore_{code}")
             return 0
 
-        for month in months:
+        if not dry_run:
+            warehouse.ensure_schema()
+        deadline = t0 + budget_minutes * 60
+        skipped: list[str] = []
+        for i, month in enumerate(months):
+            if time.time() > deadline:
+                skipped = months[i:]
+                print(
+                    f"[ABC店] {code} 時間切れ（{budget_minutes:.0f}分）。"
+                    f"残り{len(skipped)}ヶ月は取らずに終わります: {skipped[0]}〜{skipped[-1]}"
+                )
+                break
+            collected.clear()
             d_from, d_to = _month_bounds(month)
             rep_date = _date(int(month[:4]), int(month[5:7]), 1)
             _set_date_range(session, d_from, d_to)  # _month_bounds は既に YYYY/MM/DD
@@ -1731,7 +1764,13 @@ def ingest_abc_store(
             # （フード/ドリンク/コース…の粗い区分・最も安定して出る）へフォールバックする。
             drows: list[list[str]] = []
             used_level = "部門"
-            for level in ("部門", "グループ"):
+            # FW側で商品に部門が紐付いていない店（stores.yaml の abc_dept: false）は
+            # 何度切り替えてもきれいな部門行が出ない。1ヶ月あたり2区分×3回の粘りを
+            # 空振りし続けるだけなので、最初から飛ばす。
+            levels = ("部門", "グループ") if getattr(st, "abc_dept", True) else ()
+            if not levels:
+                used_level = "部門なし"
+            for level in levels:
                 for dtry in range(3):
                     try:
                         session.page.mouse.wheel(0, -3000)  # 条件パネルを可視域へ
@@ -1791,9 +1830,11 @@ def ingest_abc_store(
             elif dept_total:
                 seen_totals[dept_total] = month
             mark = " ⚠同額" if dup else ""
+            _flush(month)
             print(
                 f"[ABC店] {code} {month} [{used_level}] 商品{len(products)}品→{n_prod}行"
-                f"（1位 {top}） 部門{n_dept}件 合計{dept_total:,}{mark} (+{time.time() - t0:.0f}s)"
+                f"（1位 {top}） 部門{n_dept}件 合計{dept_total:,}{mark}"
+                f" 累計{total_loaded}行 (+{time.time() - t0:.0f}s)"
             )
 
     if empty:
@@ -1802,13 +1843,17 @@ def ingest_abc_store(
         # 取り込みは止めない（同額でも本当に同額な可能性は残る）が、必ず目に付くよう出す。
         print(f"[ABC店] ⚠ {code} 部門合計が他の月と一致: {suspect}")
         print("[ABC店] ⚠ 日付が反映されていない疑い。query.yml の dept_sales で月別に検算すること。")
-    print(f"[ABC店] 収集 {len(collected)} 行（{len(months)}ヶ月）")
     if dry_run:
         print("[ABC店] dry-run のため書き込みはしません")
         return 0
-    warehouse.ensure_schema()
-    loaded = warehouse.replace_actuals(collected)
-    print(f"[ABC店] warehouse へ {loaded} 件 書き込みました（source={source}）")
+    print(
+        f"[ABC店] warehouse へ {total_loaded} 件 書き込みました"
+        f"（source={source} / {len(written_months)}ヶ月ぶん）"
+    )
+    if skipped:
+        # 取れた月は既に入っている。残りだけ流し直せばよいので、そのまま貼れる形で出す。
+        print(f"[ABC店] 取り残し: --abc-store {code} --month {','.join(skipped)}")
+        return 1
     return 0
 
 
