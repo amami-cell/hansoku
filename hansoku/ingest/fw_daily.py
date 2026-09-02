@@ -1383,12 +1383,19 @@ def probe_abc_dom(artifacts: Path, *, store: str) -> int:
 
 
 def report_monthly_coverage(
-    warehouse, master, *, date_from: str = "2024-01", date_to: str = "2026-08"
+    warehouse,
+    master,
+    *,
+    date_from: str = "2024-01",
+    date_to: str = "2026-08",
+    metric: str | None = None,
 ) -> int:
-    """月次売上（grain=MONTH / metric=sales）が店×月でどこまで埋まっているかを出す。
+    """指定指標（既定=月次売上）が店×月でどこまで埋まっているかを出す。
 
     「どの店のどの月が無いのか」を1回のDB照会で一覧にする。FWログイン不要。
     バックフィルの前後で回して、埋まったか・どこが穴かを確かめるための道具。
+    metric に dept_sales / product_sales を渡すと、ABCの取りこぼし月を洗い出せる
+    （FWのグリッドは稀に埋まりきる前に読まれ、その月だけ0件になることがある）。
     """
     import sys as _sys
     from datetime import date as _date
@@ -1412,6 +1419,7 @@ def report_monthly_coverage(
                 y, m = y + 1, 1
         return out
 
+    metric = metric or METRIC_SALES
     want = _months(date_from, date_to)
     d_from = _date(int(date_from[:4]), int(date_from[5:7]), 1)
     last_y, last_m = int(date_to[:4]), int(date_to[5:7])
@@ -1423,7 +1431,7 @@ def report_monthly_coverage(
             date_from=d_from,
             date_to=d_to,
             grain=GRAIN_MONTH,
-            metrics=[METRIC_SALES],
+            metrics=[metric],
             store_codes=master.active_codes,
             group_by=("store_code", "date"),
         )
@@ -1435,14 +1443,14 @@ def report_monthly_coverage(
     # FW未連動の店は「取り漏れ」ではないので、理由を添えて別扱いにする。
     pos_label = {"uleji": "uレジ管理", "dainy": "ダイニー管理アプリ"}
 
-    print(f"=== 月次売上カバレッジ {date_from}〜{date_to}（{len(want)}ヶ月） ===")
+    print(f"=== 月次カバレッジ [{metric}] {date_from}〜{date_to}（{len(want)}ヶ月） ===")
     full, partial, empty, other_pos = [], [], [], []
     for st in master.active:
         got = have.get(st.store_code, set())
         miss = [m for m in want if m not in got]
         head = f"  {st.store_code} {st.store_name[:16]:<16} {len(want) - len(miss):>2}/{len(want)}"
         pos = getattr(st, "pos", "fw")
-        if pos != "fw" and not got:
+        if metric == METRIC_SALES and pos != "fw" and not got:
             other_pos.append(st.store_code)
             print(f"― {head}  FW未連動（実績は{pos_label.get(pos, pos)}から）")
         elif not miss:

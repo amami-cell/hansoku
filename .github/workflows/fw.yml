@@ -78,6 +78,10 @@ on:
         description: 'abc-totals-probe: 期間 ラベル:from:to,... (YYYY-MM-DD)'
         required: false
         default: '基準:2026-08-01:2026-08-14,eタバコ後:2026-08-15:2026-08-16,空調後:2026-08-17:2026-08-23,新ランチ後:2026-08-24:2026-08-26'
+      coverage_metric:
+        description: 'monthly-coverage: 数える指標（sales / dept_sales / product_sales）'
+        required: false
+        default: 'sales'
       abc_ingest_month:
         description: 'abc-store-ingest: 対象月 YYYY-MM（既定は前月）。--abc-store に店コード or 店名'
         required: false
@@ -212,6 +216,7 @@ jobs:
               python -m hansoku.cli fw-daily --mode monthly-coverage \
                 --abc-from "${{ inputs.abc_from }}" \
                 --abc-to "${{ inputs.abc_to }}" \
+                --metric "${{ inputs.coverage_metric }}" \
                 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "abc-coverage" ]; then
               python -m hansoku.cli fw-daily --mode abc-coverage \

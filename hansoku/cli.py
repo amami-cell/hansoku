@@ -289,6 +289,7 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 master,
                 date_from=args.abc_from or "2024-01",
                 date_to=args.abc_to or "2026-08",
+                metric=args.metric,
             )
     if args.mode == "abc-coverage":
         from .ingest.fw_daily import report_abc_coverage
@@ -688,6 +689,11 @@ def build_parser() -> argparse.ArgumentParser:
                          help="hourly-store-probe の期間 'ラベル:from:to,...'（YYYY-MM-DD）")
     fwdaily.add_argument("--abc-ranges", default=None, dest="abc_ranges",
                          help="abc-totals-probe の期間 'ラベル:from:to,...'（YYYY-MM-DD）")
+    fwdaily.add_argument(
+        "--metric",
+        default=None,
+        help="monthly-coverage で数える指標（既定 sales。ABCの穴探しは dept_sales）",
+    )
     fwdaily.add_argument("--menu", default=None, help="report モードで開く帳票名")
     fwdaily.add_argument("--months", type=int, default=2, help="遡る月数")
     fwdaily.add_argument("--limit", type=int, default=None, help="先頭N店だけ（試走用）")
