@@ -1691,6 +1691,9 @@ def ingest_abc_store(
     seen_totals: dict[int, str] = {}
     suspect: list[str] = []
     empty: list[str] = []
+    # 開店前の空月が先頭に続く区間を短く抜けるための目印。
+    seen_any = False
+    empty_streak = 0
 
     with fw_session(artifacts) as session:
         try:
@@ -1725,7 +1728,15 @@ def ingest_abc_store(
 
             # --- 分類=全商品：売れ筋 上位 ---
             _abc_click_radio(session.page, "全商品")
-            _abc_search_and_rows(session)  # グリッド充填まで粘る
+            # まだ1ヶ月もデータが出ていない＝開店前の空月が続いている区間。
+            # 空のグリッドに毎月80秒×2回を使うと、開店が新しい店（2026-04開店なら
+            # 19ヶ月ぶん）だけでジョブの制限時間を使い切る。データが出るまでは
+            # 短く当たり、1ヶ月でも出たら以降は元の粘り方に戻す（開店日以降は
+            # 全ての月にデータがあるので、短いまま取りこぼすことはない）。
+            if seen_any or empty_streak < 2:
+                _abc_search_and_rows(session)  # グリッド充填まで粘る
+            else:
+                _abc_search_and_rows(session, tries=1, waits=8)
             products = _extract_product_grid(session)
             products.sort(
                 key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
@@ -1770,6 +1781,11 @@ def ingest_abc_store(
             levels = ("部門", "グループ") if getattr(st, "abc_dept", True) else ()
             if not levels:
                 used_level = "部門なし"
+            elif not products:
+                # 部門はその月の商品の集計なので、商品が1品も無い月に部門だけ
+                # 出ることはない。空月で部門の切替を粘るのは丸ごと無駄。
+                levels = ()
+                used_level = "商品なし"
             for level in levels:
                 for dtry in range(3):
                     try:
@@ -1823,6 +1839,10 @@ def ingest_abc_store(
 
             if n_dept == 0 and n_prod == 0:
                 empty.append(month)
+                empty_streak += 1
+            else:
+                seen_any = True
+                empty_streak = 0
             # 同じ合計の月が二度出たら、日付が効かず同じグリッドを読んでいる疑い。
             dup = seen_totals.get(dept_total) if dept_total else None
             if dup:
