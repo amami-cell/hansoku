@@ -1,8 +1,9 @@
 name: 月次ABCを取り込む
 
 # 毎月1回、全稼働店の 商品ABC＋部門内訳 を FW から取り込み、Neon に月ごとに蓄積する。
-# 冪等キー (source, grain, date) は月単位なので、毎月回すと月が積み上がる（前向き蓄積）。
-# ⚠ FW ABC は過去月の商品明細を返さないため、前年比は蓄積が1年たってから出る。
+# 冪等キー (source, grain, date) は月単位なので、毎月回すと月が積み上がる。
+# FW ABC は過去月も引けるので、month に範囲を渡せば遡ってまとめて埋められる
+# （1店1ログインで月を回す。23ヶ月でもログインは1回）。
 #
 # 施策詳細の「1ヵ月毎」表示（ケーキ/ジェラート/パフェ・食べ放題・宴会コース）と
 # 横断「忘新年会・宴会まとめ」の土台。取り込んだら deploy.yml で画面へ反映する。
@@ -11,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       month:
-        description: '対象月 YYYY-MM（空欄なら前月）'
+        description: "対象月。空欄=前月／複数可 '2025-11,2025-12'／範囲 '2024-09..2026-07'"
         required: false
         default: ''
   schedule:
@@ -48,7 +49,8 @@ jobs:
   ingest:
     needs: matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 1ヶ月あたり約70秒。23ヶ月の遡り取り込みでも収まるよう長めに取る。
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -80,7 +82,7 @@ jobs:
             exit 1
           fi
 
-      - name: ABC取込（1店・前月）
+      - name: ABC取込（1店・指定月ぶん）
         env:
           FOODIST_JOURNAL_USER_ID: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
           FOODIST_JOURNAL_PASSWORD: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
@@ -92,7 +94,7 @@ jobs:
         run: |
           M="${{ inputs.month }}"
           {
-            echo "## 月次ABC 取込 ${{ matrix.store }}"
+            echo "## 月次ABC 取込 ${{ matrix.store }} / ${M:-前月}"
             echo ''
             echo '```'
             if [ -n "$M" ]; then

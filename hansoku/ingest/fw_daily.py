@@ -1543,6 +1543,31 @@ def report_abc_coverage(warehouse, master, month: str | None = None) -> int:
     return 0
 
 
+def _expand_months(spec: str) -> list[str]:
+    """月の指定を展開する。"2025-12" / "2025-11,2025-12" / "2024-09..2026-07"。
+
+    範囲（..）は両端を含む。バックフィルで23ヶ月などを1行で渡せるようにするため。
+    """
+    out: list[str] = []
+    for chunk in spec.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        if ".." in chunk:
+            a, b = (x.strip() for x in chunk.split("..", 1))
+            y, m = int(a[:4]), int(a[5:7])
+            ey, em = int(b[:4]), int(b[5:7])
+            while (y, m) <= (ey, em):
+                out.append(f"{y}-{m:02d}")
+                m += 1
+                if m == 13:
+                    y, m = y + 1, 1
+        else:
+            out.append(chunk)
+    # 重複は落として時系列に並べる（同じ月を二度焼かない）
+    return sorted(set(out))
+
+
 def ingest_abc_store(
     warehouse,
     master,
@@ -1558,8 +1583,11 @@ def ingest_abc_store(
     店舗選択モーダルで1店だけを選び、分類=全商品で商品別売上の上位、分類=部門で
     部門別の数量・売上（原価率）を取得する。実店舗コードに焼くが、店ごとに
     source=fw_abc_<code> で分けるので、店を1つずつ流しても互いに上書きしない
-    （replace_actuals の冪等キーは source×grain×date）。ナガグツ以外の稼働店を
-    1店ずつ集めていく用途。store は店コードでも店名でも可。
+    （replace_actuals の冪等キーは source×grain×date）。store は店コードでも店名でも可。
+
+    month は複数指定できる（"2025-11,2025-12" / "2024-09..2026-07"）。FW ABC は
+    過去月も引けるので、過去分をまとめて遡れる。1店1ログインで月を回すため、
+    23ヶ月でもログインは1回で済む。
     """
     import re as _re
     import sys as _sys
@@ -1585,8 +1613,10 @@ def ingest_abc_store(
         today = datetime.now(timezone.utc)
         y, m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
         month = f"{y}-{m:02d}"
-    d_from, d_to = _month_bounds(month)
-    rep_date = _date(int(month[:4]), int(month[5:7]), 1)
+    months = _expand_months(month)
+    if not months:
+        print("[ABC店] 対象月が空です。終了。")
+        return 1
 
     # store（コード or 名前）→ 実店舗を解決。モーダルの左リストは店名で一致させる。
     st = None
@@ -1606,8 +1636,23 @@ def ingest_abc_store(
     hdr = _re.compile(r"^(.+?)\s\|\s(\d+\.\d+)%\s\|\s([\d,]+)\s\|\s([\d,]+)")
     num = lambda s: int(s.replace(",", ""))  # noqa: E731
 
+    def _clean_dept(cells: list[str]):
+        m = hdr.match(" | ".join(c for c in cells[:6] if c is not None))
+        if not m:
+            return None
+        dn = m.group(1).strip()
+        # 全商品行（"商品CD | 商品名 | 単価 | 原価"）は名前に '|' を含む→部門ではない
+        return m if "|" not in dn else None
+
     t0 = time.time()
-    print(f"[ABC店] {code} {name} / 対象月 {month}（{d_from}〜{d_to}）上位{top_n}品")
+    print(f"[ABC店] {code} {name} / 対象月 {len(months)}件 {months[0]}〜{months[-1]} 上位{top_n}品")
+    # 前月と部門合計が完全一致したら、日付が反映されず同じグリッドを読んだ疑いが濃い。
+    # （〜2千万円の合計が偶然そろうことは無い）。売上推移で同種の取りこぼしをやったので、
+    # 「取れたつもり」を検知できるようにしておく。
+    seen_totals: dict[int, str] = {}
+    suspect: list[str] = []
+    empty: list[str] = []
+
     with fw_session(artifacts) as session:
         try:
             session.page.set_default_timeout(9000)
@@ -1616,126 +1661,130 @@ def ingest_abc_store(
             pass
         _open_abc(session)
         _select_date_preset(session, _ABC_PRESET_LASTMONTH)
-        _set_date_range(session, d_from, d_to)  # _month_bounds は既に YYYY/MM/DD
         hit = _abc_open_store_modal_and_select_one(session, name)
         if hit is None:
             print(f"[ABC店] 店舗選択に失敗（{name}）。スナップショットを保存し 0件終了。")
             session.snapshot(f"abc_store_ingest_nostore_{code}")
             return 0
 
-        # --- 分類=全商品：売れ筋 上位 ---
-        _abc_click_radio(session.page, "全商品")
-        _abc_search_and_rows(session)  # グリッド充填まで粘る
-        products = _extract_product_grid(session)
-        products.sort(
-            key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
-            reverse=True,
-        )
-        n_prod = 0
-        for prod in products[:top_n]:
-            ints = prod["ints"]
-            if len(ints) <= _ABC_SALES:
-                continue
-            sales = ints[_ABC_SALES]
-            if sales <= 0:
-                continue
-            collected.append(
-                ActualRow(
-                    store_code=code,
-                    date=rep_date,
-                    grain=GRAIN_MONTH,
-                    metric=METRIC_PRODUCT_SALES,
-                    value=float(sales),
-                    product_name=prod["name"][:80],
-                    product_category=prod["rank"],
-                    kind=KIND_FINAL,
-                    source=source,
-                    ingested_at=ingested_at,
-                )
+        for month in months:
+            d_from, d_to = _month_bounds(month)
+            rep_date = _date(int(month[:4]), int(month[5:7]), 1)
+            _set_date_range(session, d_from, d_to)  # _month_bounds は既に YYYY/MM/DD
+
+            # --- 分類=全商品：売れ筋 上位 ---
+            _abc_click_radio(session.page, "全商品")
+            _abc_search_and_rows(session)  # グリッド充填まで粘る
+            products = _extract_product_grid(session)
+            products.sort(
+                key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
+                reverse=True,
             )
-            n_prod += 1
-        top = products[0]["name"][:16] if products else "-"
-        print(f"[ABC店] {code} 商品 {len(products)}品 → {n_prod}行（1位 {top}） (+{time.time() - t0:.0f}s)")
+            n_prod = 0
+            for prod in products[:top_n]:
+                ints = prod["ints"]
+                if len(ints) <= _ABC_SALES:
+                    continue
+                sales = ints[_ABC_SALES]
+                if sales <= 0:
+                    continue
+                collected.append(
+                    ActualRow(
+                        store_code=code,
+                        date=rep_date,
+                        grain=GRAIN_MONTH,
+                        metric=METRIC_PRODUCT_SALES,
+                        value=float(sales),
+                        product_name=prod["name"][:80],
+                        product_category=prod["rank"],
+                        kind=KIND_FINAL,
+                        source=source,
+                        ingested_at=ingested_at,
+                    )
+                )
+                n_prod += 1
+            top = products[0]["name"][:16] if products else "-"
 
-        # --- 分類=部門：ランチ/ドリンク等の内訳（数量・売上・原価率） ---
-        # 部門グリッドは負荷時に埋まりきらず0件になる／部門ラジオに切替らず全商品の
-        # ままになることがある（1069/1137）。「きれいな部門行」（先頭セルが部門名で、
-        # 名前にセル区切り '|' を含まない＝商品CD付きの全商品行ではない）が出るまで
-        # 先頭へスクロール→部門クリック→検索を最大4回粘る。
-        def _clean_dept(cells: list[str]):
-            m = hdr.match(" | ".join(c for c in cells[:6] if c is not None))
-            if not m:
-                return None
-            name = m.group(1).strip()
-            # 全商品行（"商品CD | 商品名 | 単価 | 原価"）は名前に '|' を含む→部門ではない
-            return m if "|" not in name else None
-
-        # まず分類=部門で粘り、それでも切替らない店（1069/1137）は 分類=グループ
-        # （フード/ドリンク/コース…の粗い区分・最も安定して出る）へフォールバックする。
-        drows: list[list[str]] = []
-        used_level = "部門"
-        for level in ("部門", "グループ"):
-            for dtry in range(3):
-                try:
-                    session.page.mouse.wheel(0, -3000)  # 条件パネルを可視域へ
-                except Exception:  # noqa: BLE001
-                    pass
-                _abc_click_radio(session.page, level)
-                time.sleep(1)
-                drows = _abc_search_and_rows(session)
+            # --- 分類=部門：ランチ/ドリンク等の内訳（数量・売上・原価率） ---
+            # 部門グリッドは負荷時に埋まりきらず0件になる／部門ラジオに切替らず全商品の
+            # ままになることがある（1069/1137）。「きれいな部門行」が出るまで
+            # 先頭へスクロール→部門クリック→検索を粘る。
+            # まず分類=部門で粘り、それでも切替らない店（1069/1137）は 分類=グループ
+            # （フード/ドリンク/コース…の粗い区分・最も安定して出る）へフォールバックする。
+            drows: list[list[str]] = []
+            used_level = "部門"
+            for level in ("部門", "グループ"):
+                for dtry in range(3):
+                    try:
+                        session.page.mouse.wheel(0, -3000)  # 条件パネルを可視域へ
+                    except Exception:  # noqa: BLE001
+                        pass
+                    _abc_click_radio(session.page, level)
+                    time.sleep(1)
+                    drows = _abc_search_and_rows(session)
+                    if any(_clean_dept(c) for c in drows):
+                        used_level = level
+                        break
+                    print(f"[ABC店] {code} {month} {level}グリッド未確定（{dtry + 1}回目）。再切替。")
+                    time.sleep(2)
                 if any(_clean_dept(c) for c in drows):
-                    used_level = level
                     break
-                print(f"[ABC店] {code} {level}グリッド未確定（{dtry + 1}回目・全商品のまま/未充填）。再切替。")
-                time.sleep(2)
-            if any(_clean_dept(c) for c in drows):
-                break
-            if level == "部門":
-                print(f"[ABC店] {code} 部門が切替らず。分類=グループへフォールバック。")
-        print(f"[ABC店] {code} 使用した分類={used_level}")
-        n_dept = 0
-        for cells in drows:
-            m = _clean_dept(cells)
-            if not m:
-                continue
-            dname = m.group(1).strip()
-            if dname in _ABC_TOTAL_NAMES or dname in ("部門", "部門名", "分類"):
-                continue
-            cost_rate = m.group(2)  # 原価率 "25.25"
-            qty = num(m.group(3))
-            sales = num(m.group(4))
-            if sales <= 0 and qty <= 0:
-                continue
-            collected.append(
-                ActualRow(
-                    store_code=code, date=rep_date, grain=GRAIN_MONTH,
-                    metric=METRIC_DEPT_SALES, value=float(sales),
-                    product_name=dname[:80], product_category=cost_rate,
-                    kind=KIND_FINAL, source=source, ingested_at=ingested_at,
-                )
-            )
-            collected.append(
-                ActualRow(
-                    store_code=code, date=rep_date, grain=GRAIN_MONTH,
-                    metric=METRIC_DEPT_QTY, value=float(qty),
-                    product_name=dname[:80], product_category=cost_rate,
-                    kind=KIND_FINAL, source=source, ingested_at=ingested_at,
-                )
-            )
-            n_dept += 1
-            # 部門名→バケット分類の監査（コース/ランチ/アラカルト/飲み放題/食べ放題）を
-            # ログに残す。誤分類をログから見つけて分類辞書を直せるようにする。
-            bkt = dept_bucket(dname)
-            print(f"[ABC店部門] {dname:<18} → {bkt:<6} 数量{qty:>6} 売上{sales:>10} 原価{cost_rate}%")
-        if n_dept == 0:
-            # 0件だった店（1069/1137等）の原因切り分け: 部門グリッドの生の視覚行を出す。
-            # データなし（空/読み込み中）か、列レイアウトが違って regex に載らないかを見る。
-            print(f"[ABC店] {code} 部門0件。生の視覚行（先頭15）をダンプ:")
-            for cells in _visual_rows(session)[:15]:
-                print("   [部門raw]", " | ".join(c for c in cells[:10] if c is not None)[:200])
-        print(f"[ABC店] {code} 部門 {n_dept}件 (+{time.time() - t0:.0f}s)")
+                if level == "部門":
+                    print(f"[ABC店] {code} {month} 部門が切替らず。分類=グループへフォールバック。")
 
-    print(f"[ABC店] 収集 {len(collected)} 行")
+            n_dept, dept_total = 0, 0
+            for cells in drows:
+                m = _clean_dept(cells)
+                if not m:
+                    continue
+                dname = m.group(1).strip()
+                if dname in _ABC_TOTAL_NAMES or dname in ("部門", "部門名", "分類"):
+                    continue
+                cost_rate = m.group(2)  # 原価率 "25.25"
+                qty = num(m.group(3))
+                sales = num(m.group(4))
+                if sales <= 0 and qty <= 0:
+                    continue
+                collected.append(
+                    ActualRow(
+                        store_code=code, date=rep_date, grain=GRAIN_MONTH,
+                        metric=METRIC_DEPT_SALES, value=float(sales),
+                        product_name=dname[:80], product_category=cost_rate,
+                        kind=KIND_FINAL, source=source, ingested_at=ingested_at,
+                    )
+                )
+                collected.append(
+                    ActualRow(
+                        store_code=code, date=rep_date, grain=GRAIN_MONTH,
+                        metric=METRIC_DEPT_QTY, value=float(qty),
+                        product_name=dname[:80], product_category=cost_rate,
+                        kind=KIND_FINAL, source=source, ingested_at=ingested_at,
+                    )
+                )
+                n_dept += 1
+                dept_total += sales
+
+            if n_dept == 0 and n_prod == 0:
+                empty.append(month)
+            # 同じ合計の月が二度出たら、日付が効かず同じグリッドを読んでいる疑い。
+            dup = seen_totals.get(dept_total) if dept_total else None
+            if dup:
+                suspect.append(f"{month}={dup}")
+            elif dept_total:
+                seen_totals[dept_total] = month
+            mark = " ⚠同額" if dup else ""
+            print(
+                f"[ABC店] {code} {month} [{used_level}] 商品{len(products)}品→{n_prod}行"
+                f"（1位 {top}） 部門{n_dept}件 合計{dept_total:,}{mark} (+{time.time() - t0:.0f}s)"
+            )
+
+    if empty:
+        print(f"[ABC店] {code} データが無かった月: {empty}")
+    if suspect:
+        # 取り込みは止めない（同額でも本当に同額な可能性は残る）が、必ず目に付くよう出す。
+        print(f"[ABC店] ⚠ {code} 部門合計が他の月と一致: {suspect}")
+        print("[ABC店] ⚠ 日付が反映されていない疑い。query.yml の dept_sales で月別に検算すること。")
+    print(f"[ABC店] 収集 {len(collected)} 行（{len(months)}ヶ月）")
     if dry_run:
         print("[ABC店] dry-run のため書き込みはしません")
         return 0
