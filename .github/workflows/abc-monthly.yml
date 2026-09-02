@@ -41,7 +41,13 @@ jobs:
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json, yaml
           data = yaml.safe_load(open("config/stores.yaml")) or {}
-          codes = [str(s["store_code"]) for s in data.get("stores", []) if s.get("active")]
+          # FW未連動の店（pos が fw 以外）はABCの元データがFWに無い。回しても
+          # 空のグリッドを1ヶ月ずつ待ち続けてジョブのタイムアウトを食うだけなので外す。
+          codes = [
+              str(s["store_code"])
+              for s in data.get("stores", [])
+              if s.get("active") and (s.get("pos") or "fw") == "fw"
+          ]
           print("stores=" + json.dumps(codes))
           PY
 
