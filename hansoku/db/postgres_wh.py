@@ -63,13 +63,22 @@ class PostgresWarehouse(Warehouse):
             return [dict(zip(columns, row)) for row in cur.fetchall()]
 
     # ── 取り込み ──────────────────────────────────────────────────────────
-    def replace_actuals(self, rows: Iterable[ActualRow]) -> int:
+    def replace_actuals(self, rows: Iterable[ActualRow], *, scope_stores: bool = False) -> int:
         materialized = [r.with_ingested_at() if r.ingested_at is None else r for r in rows]
         if not materialized:
             return 0
 
         # 冪等性: この取り込みが覆う (source, grain, date) を先に消してから入れ直す。
-        scopes = sorted({(r.source, r.grain, r.date) for r in materialized})
+        # scope_stores なら店も範囲に含め、流していない店の実績には触れない。
+        if scope_stores:
+            scopes = sorted({(r.source, r.grain, r.date, r.store_code) for r in materialized})
+            delete_sql = (
+                "DELETE FROM f_actuals "
+                "WHERE source = %s AND grain = %s AND date = %s AND store_code = %s"
+            )
+        else:
+            scopes = sorted({(r.source, r.grain, r.date) for r in materialized})
+            delete_sql = "DELETE FROM f_actuals WHERE source = %s AND grain = %s AND date = %s"
 
         buffer = io.StringIO()
         writer = csv.writer(buffer)
@@ -80,10 +89,7 @@ class PostgresWarehouse(Warehouse):
         buffer.seek(0)
 
         with self.conn.cursor() as cur:
-            cur.executemany(
-                "DELETE FROM f_actuals WHERE source = %s AND grain = %s AND date = %s",
-                [list(scope) for scope in scopes],
-            )
+            cur.executemany(delete_sql, [list(scope) for scope in scopes])
             # NULL は空欄で表す。NOT NULL の列（store_code / grain / metric / source）は
             # 取り込み時点で必ず値が入っているため、空文字と NULL を取り違える余地はない。
             with cur.copy(

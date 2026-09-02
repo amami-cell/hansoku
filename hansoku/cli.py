@@ -278,6 +278,18 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
             Path(args.artifacts),
             store=args.abc_store or "ひよこ飯店",
         )
+    if args.mode == "monthly-coverage":
+        from .ingest.fw_daily import report_monthly_coverage
+
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return report_monthly_coverage(
+                warehouse,
+                master,
+                date_from=args.abc_from or "2024-01",
+                date_to=args.abc_to or "2026-08",
+            )
     if args.mode == "abc-coverage":
         from .ingest.fw_daily import report_abc_coverage
 
@@ -389,6 +401,7 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 store_limit=args.limit,
                 dry_run=(args.mode == "monthly-dry" or args.dry_run),
                 end_month=args.month,
+                store_filter=args.abc_store or None,
             )
     if args.mode in ("hourly", "hourly-dry"):
         settings = load_settings()
@@ -648,10 +661,15 @@ def build_parser() -> argparse.ArgumentParser:
                  "hourly", "hourly-dry", "abc", "abc-dry", "abc-store-probe",
                  "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
-                 "abc-dom-probe", "uriage-probe"],
+                 "abc-dom-probe", "uriage-probe", "monthly-coverage"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
-    fwdaily.add_argument("--month", default=None, help="hourly の対象月（YYYY-MM、既定は前月）")
+    fwdaily.add_argument(
+        "--month",
+        default=None,
+        help="hourly/abc の対象月（YYYY-MM、既定は前月）。"
+        "monthly では『対象月』＝末尾の月（カンマ区切りで複数可・過去バックフィル用）",
+    )
     fwdaily.add_argument("--abc-store", default=None, dest="abc_store",
                          help="abc-store-probe/lunch-analyze の対象店名（部分一致）")
     fwdaily.add_argument("--abc-from", default=None, dest="abc_from",

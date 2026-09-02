@@ -34,6 +34,7 @@ on:
           - abc-store-ingest
           - uriage-probe
           - abc-coverage
+          - monthly-coverage
           - abc-dom-probe
           - manager-dl-probe
         default: explore
@@ -46,11 +47,11 @@ on:
         required: false
         default: 'ぎふや 天満橋店'
       abc_from:
-        description: 'abc-store-probe: 開始日 YYYY-MM-DD'
+        description: 'abc-store-probe: 開始日 YYYY-MM-DD / monthly-coverage: 開始月 YYYY-MM'
         required: false
         default: '2026-08-01'
       abc_to:
-        description: 'abc-store-probe: 終了日 YYYY-MM-DD'
+        description: 'abc-store-probe: 終了日 YYYY-MM-DD / monthly-coverage: 終了月 YYYY-MM'
         required: false
         default: '2026-08-25'
       abc_item:
@@ -203,6 +204,11 @@ jobs:
             elif [ "${{ inputs.mode }}" = "uriage-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode uriage-probe \
                 --month "${{ inputs.abc_ingest_month }}" \
+                --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "monthly-coverage" ]; then
+              python -m hansoku.cli fw-daily --mode monthly-coverage \
+                --abc-from "${{ inputs.abc_from }}" \
+                --abc-to "${{ inputs.abc_to }}" \
                 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "abc-coverage" ]; then
               python -m hansoku.cli fw-daily --mode abc-coverage \

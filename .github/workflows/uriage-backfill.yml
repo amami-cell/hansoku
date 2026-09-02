@@ -1,0 +1,129 @@
+name: 月次売上をさかのぼって取り込む
+
+# 月別日別売上推移から、過去の月次「売上・客数」を1店ずつ埋める。
+#
+# 画面は1店につき『対象月』を末尾とする12ヶ月を出し、前年実績の列も持つので、
+# 1回の照会で約24ヶ月ぶんが書ける。対象月を 2025-08 にすると
+#   グリッド 2024-09〜2025-08 ＋ 前年列 2023-09〜2024-08
+# が取れる。既定（対象月なし）の直近12ヶ月と合わせると2023-09以降が揃う。
+#
+# 冪等キーは (source, grain, date) ＋ 店（scope_stores）。1店ずつ流しても
+# 他店の実績は消えないので、matrix で並行に回せる。
+
+on:
+  workflow_dispatch:
+    inputs:
+      months:
+        description: '対象月 YYYY-MM（カンマ区切り。空欄なら直近12ヶ月のみ）'
+        required: false
+        default: '2025-08,2024-08'
+      store:
+        description: '1店だけ試すとき: 店コード or 店名の一部（空欄なら全店）'
+        required: false
+        default: ''
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  # 稼働店コードを config/stores.yaml から動的に取り出し、matrix の入力にする。
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      stores: ${{ steps.gen.outputs.stores }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 依存（PyYAMLのみ）
+        run: pip install pyyaml
+      - id: gen
+        name: 稼働店コードを列挙
+        env:
+          ONLY: ${{ inputs.store }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os, yaml
+          data = yaml.safe_load(open("config/stores.yaml")) or {}
+          stores = [s for s in data.get("stores", []) if s.get("active")]
+          only = (os.environ.get("ONLY") or "").strip()
+          if only:
+              stores = [
+                  s for s in stores
+                  if str(s["store_code"]) == only.lstrip("0")
+                  or only in str(s.get("store_name", ""))
+              ]
+          print("stores=" + json.dumps([str(s["store_code"]) for s in stores]))
+          PY
+
+  ingest:
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        store: ${{ fromJSON(needs.matrix.outputs.stores) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Secrets の確認
+        env:
+          FW_USER: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FW_PASS: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+          NEON: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          miss=""
+          [ -z "$FW_USER" ] && miss="$miss FOODIST_JOURNAL_USER_ID"
+          [ -z "$FW_PASS" ] && miss="$miss FOODIST_JOURNAL_PASSWORD"
+          [ -z "$NEON" ]    && miss="$miss NEON_DATABASE_URL"
+          if [ -n "$miss" ]; then
+            echo "::error::未設定のSecrets:$miss"
+            exit 1
+          fi
+
+      - name: 月次売上を取り込む（1店・対象月ぶん）
+        env:
+          FOODIST_JOURNAL_USER_ID: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FOODIST_JOURNAL_PASSWORD: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          MONTHS: ${{ inputs.months }}
+        run: |
+          {
+            echo "## 月次売上バックフィル ${{ matrix.store }}"
+            echo ''
+            echo '```'
+            if [ -n "$MONTHS" ]; then
+              xvfb-run -a python -m hansoku.cli fw-daily --mode monthly \
+                --abc-store "${{ matrix.store }}" --month "$MONTHS" --artifacts fw-artifacts
+            else
+              xvfb-run -a python -m hansoku.cli fw-daily --mode monthly \
+                --abc-store "${{ matrix.store }}" --artifacts fw-artifacts
+            fi
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: 記録をアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uriage-backfill-${{ matrix.store }}
+          path: fw-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore

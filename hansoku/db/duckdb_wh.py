@@ -57,13 +57,22 @@ class DuckDBWarehouse(Warehouse):
         columns = [d[0] for d in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
-    def replace_actuals(self, rows: Iterable[ActualRow]) -> int:
+    def replace_actuals(self, rows: Iterable[ActualRow], *, scope_stores: bool = False) -> int:
         materialized = [r.with_ingested_at() if r.ingested_at is None else r for r in rows]
         if not materialized:
             return 0
 
         # 冪等性: この取り込みが覆う (source, grain, date) を先に消してから入れ直す。
-        scopes = sorted({(r.source, r.grain, r.date) for r in materialized})
+        # scope_stores なら店も範囲に含め、流していない店の実績には触れない。
+        if scope_stores:
+            scopes = sorted({(r.source, r.grain, r.date, r.store_code) for r in materialized})
+            delete_sql = (
+                "DELETE FROM f_actuals "
+                "WHERE source = ? AND grain = ? AND date = ? AND store_code = ?"
+            )
+        else:
+            scopes = sorted({(r.source, r.grain, r.date) for r in materialized})
+            delete_sql = "DELETE FROM f_actuals WHERE source = ? AND grain = ? AND date = ?"
 
         # 挿入は CSV 経由の一括ロード。1行ずつの INSERT だと 1,000行あたり約2秒かかり、
         # 時間帯別実績（1時間粒度）が入ったときに現実的な時間で終わらなくなる。
@@ -84,10 +93,7 @@ class DuckDBWarehouse(Warehouse):
         try:
             self._conn.execute("BEGIN")
             try:
-                self._conn.executemany(
-                    "DELETE FROM f_actuals WHERE source = ? AND grain = ? AND date = ?",
-                    [list(scope) for scope in scopes],
-                )
+                self._conn.executemany(delete_sql, [list(scope) for scope in scopes])
                 # NULLSTR '' で空欄を NULL として読む。NOT NULL の列（store_code / grain /
                 # metric / source）は取り込み時点で必ず値が入っているため、
                 # 空文字と NULL を取り違える余地はない。

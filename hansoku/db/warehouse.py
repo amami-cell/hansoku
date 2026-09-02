@@ -182,13 +182,16 @@ class Warehouse(ABC):
         """SQL を実行して辞書のリストで返す。"""
 
     @abstractmethod
-    def replace_actuals(self, rows: Iterable[ActualRow]) -> int:
+    def replace_actuals(self, rows: Iterable[ActualRow], *, scope_stores: bool = False) -> int:
         """
         実績を冪等に入れ替える。
 
         渡された行が覆う (source, grain, date) の組み合わせを先に削除してから
         まとめて挿入する。同じ取り込みを何度流しても件数が増えない。
         戻り値は挿入した行数。
+
+        scope_stores=True なら削除範囲に store_code も加える。1店ずつ・一部店だけ
+        流すときに、同じ source と月を共有する他店の実績を巻き添えで消さないため。
         """
 
     @abstractmethod

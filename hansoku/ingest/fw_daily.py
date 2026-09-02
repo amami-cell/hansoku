@@ -283,13 +283,16 @@ def ingest_monthly(
     store_limit: int | None = None,
     dry_run: bool = False,
     end_month: str | None = None,
+    store_filter: str | None = None,
 ) -> int:
     """月別日別売上推移から各店の月次「売上・客数」を（前年ぶんも含めて）取り込む。
 
     画面は1店ずつ直近12ヶ月を表示。前年実績・客数前年実績の列を使い、
     前年の同月ぶんも同時に書くので、1スクレイプで約24ヶ月が揃う。
-    end_month（YYYY-MM）を渡すと『対象月』を設定し、その月を末尾とする12ヶ月＋前年を
-    引く（過去年のバックフィル用。冪等キーが月単位なので既存月と共存する）。
+    end_month（YYYY-MM。カンマ区切りで複数可）を渡すと『対象月』を設定し、
+    その月を末尾とする12ヶ月＋前年を引く（過去年のバックフィル用。冪等キーが
+    月単位なので既存月と共存する）。store_filter（店コード or 店名の一部）を
+    渡すと1店だけを対象にする＝1店=1ランで回せる。
     """
     from datetime import date as _date
     from datetime import datetime, timezone
@@ -307,6 +310,14 @@ def ingest_monthly(
     ingested_at = datetime.now(timezone.utc)
     active_by_code = {s.store_code: s for s in master.active}
     collected: list[ActualRow] = []
+    # None は「対象月を触らない＝直近12ヶ月」。複数指定すると1セッションで順に引く。
+    anchors: list[str | None] = [m.strip() for m in (end_month or "").split(",") if m.strip()]
+    if not anchors:
+        anchors = [None]
+    failures: list[str] = []
+    btn_hint: list[int] = []       # 対象月の再照会に効いた『検 索』ボタン番号
+    dead_anchors: set[str] = set()  # 2店続けて反映できなかった対象月は以降とばす
+    miss_streak: dict[str, int] = {}
 
     def _month_date(period: str) -> _date:
         return _date(int(period[:4]), int(period[5:7]), 1)
@@ -322,82 +333,98 @@ def ingest_monthly(
             if store and store.active:
                 targets.append((opt["value"], store))
         print(f"[売上推移] マスタと一致した稼働店 {len(targets)}件")
+        if store_filter:
+            key = store_filter.strip()
+            targets = [
+                (v, st)
+                for v, st in targets
+                if st.store_code == key.lstrip("0") or key in st.store_name
+            ]
+            if not targets:
+                raise FWError(f"店舗が見つかりません: {store_filter}")
         if store_limit:
             targets = targets[:store_limit]
+        print(f"[売上推移] 対象 {len(targets)}店 × 対象月 {[a or '直近' for a in anchors]}")
 
         for value, store in targets:
             name = store.store_name
-            if not _select_combo(session, value):
-                print(f"[売上推移] 店舗選択に失敗: {name} ({value})")
-                continue
-            if end_month:
-                # probeで確定した順序: まず通常検索でグリッドを確定→対象月セット→『検 索』。
-                _click_search(session)
-                time.sleep(1.0)
-                ok = _set_uriage_month(session, end_month)
-                pressed = _click_uriage_search(session)  # 『検 索』で対象月を反映
-                # グリッド再描画はFW負荷で遅れるので、対象年の行が出るまで最大10秒待つ
-                target_y = end_month[:4]
-                shifted = False
-                for _ in range(10):
-                    time.sleep(1.0)
-                    if any(m["period"].startswith(target_y) for m in _extract_month_grid(session)):
-                        shifted = True
-                        break
-                if value == targets[0][0]:
-                    print(f"[売上推移] 対象月={end_month} 設定={ok}/検索={pressed}/{target_y}到達={shifted}")
-            else:
-                _click_search(session)
-                time.sleep(1.4)
-            grid = _extract_month_grid(session)
-            if not grid:
-                session.snapshot(f"nogrid_{store.store_code}")
-                print(f"  {store.store_code} {name[:14]} グリッドが読めませんでした")
-                continue
-            n_before = len(collected)
-            for month in grid:
-                ints = month["ints"]
-                period = month["period"]
-                if len(ints) <= _INT_COVERS_PRIOR:
+            for anchor in anchors:
+                if anchor and anchor in dead_anchors:
                     continue
-
-                def _add(metric: str, period_str: str, val: int) -> None:
-                    if val <= 0:
-                        return
-                    collected.append(
-                        ActualRow(
-                            store_code=store.store_code,
-                            date=_month_date(period_str),
-                            grain=GRAIN_MONTH,
-                            metric=metric,
-                            value=float(val),
-                            kind=KIND_FINAL,
-                            source=source,
-                            ingested_at=ingested_at,
+                # 対象月は店を選び直すと戻ることがあるので、毎回 選択→検索→対象月 の順に。
+                if not _select_combo(session, value):
+                    print(f"[売上推移] 店舗選択に失敗: {name} ({value})")
+                    failures.append(f"{store.store_code}/{anchor or '直近'}(選択失敗)")
+                    continue
+                _click_search(session)
+                time.sleep(1.2)
+                if anchor:
+                    if not _apply_uriage_month(session, anchor, hint=btn_hint):
+                        latest = _uriage_latest_month(session)
+                        print(
+                            f"  {store.store_code} {name[:14]} 対象月={anchor} を反映できず"
+                            f"（画面の最新月={latest}）→ この月はとばします"
                         )
-                    )
+                        failures.append(f"{store.store_code}/{anchor}")
+                        miss_streak[anchor] = miss_streak.get(anchor, 0) + 1
+                        if miss_streak[anchor] >= 2:
+                            dead_anchors.add(anchor)
+                            print(f"[売上推移] 対象月={anchor} は画面が受け付けません。以降とばします")
+                        continue
+                    miss_streak[anchor] = 0
+                grid = _extract_month_grid(session)
+                if not grid:
+                    session.snapshot(f"nogrid_{store.store_code}")
+                    print(f"  {store.store_code} {name[:14]} グリッドが読めませんでした")
+                    failures.append(f"{store.store_code}/{anchor or '直近'}(グリッド無)")
+                    continue
+                n_before = len(collected)
+                for month in grid:
+                    ints = month["ints"]
+                    period = month["period"]
+                    if len(ints) <= _INT_COVERS_PRIOR:
+                        continue
 
-                _add(METRIC_SALES, period, ints[_INT_SALES])
-                _add(METRIC_COVERS, period, ints[_INT_COVERS])
-                prior = _prior_year(period)
-                _add(METRIC_SALES, prior, ints[_INT_SALES_PRIOR])
-                _add(METRIC_COVERS, prior, ints[_INT_COVERS_PRIOR])
+                    def _add(metric: str, period_str: str, val: int) -> None:
+                        if val <= 0:
+                            return
+                        collected.append(
+                            ActualRow(
+                                store_code=store.store_code,
+                                date=_month_date(period_str),
+                                grain=GRAIN_MONTH,
+                                metric=metric,
+                                value=float(val),
+                                kind=KIND_FINAL,
+                                source=source,
+                                ingested_at=ingested_at,
+                            )
+                        )
 
-            months = [m["period"] for m in grid]
-            span = f"{months[-1]}〜{months[0]}" if months else "-"
-            sample = grid[0]
-            print(
-                f"  {store.store_code} {name[:14]} {len(grid)}ヶ月 {span} "
-                f"（例 {sample['period']}: 売上 {sample['ints'][_INT_SALES]:,} / "
-                f"客数 {sample['ints'][_INT_COVERS]:,}） +{len(collected) - n_before}行"
-            )
+                    _add(METRIC_SALES, period, ints[_INT_SALES])
+                    _add(METRIC_COVERS, period, ints[_INT_COVERS])
+                    prior = _prior_year(period)
+                    _add(METRIC_SALES, prior, ints[_INT_SALES_PRIOR])
+                    _add(METRIC_COVERS, prior, ints[_INT_COVERS_PRIOR])
 
+                months = [m["period"] for m in grid]
+                span = f"{months[-1]}〜{months[0]}" if months else "-"
+                sample = grid[0]
+                print(
+                    f"  {store.store_code} {name[:14]} [{anchor or '直近'}] {len(grid)}ヶ月 {span} "
+                    f"（例 {sample['period']}: 売上 {sample['ints'][_INT_SALES]:,} / "
+                    f"客数 {sample['ints'][_INT_COVERS]:,}） +{len(collected) - n_before}行"
+                )
+
+    if failures:
+        print(f"[売上推移] 取れなかった 店/対象月: {failures}")
     print(f"[売上推移] 収集 {len(collected)} 行")
     if dry_run:
         print("[売上推移] dry-run のため書き込みはしません")
         return 0
     warehouse.ensure_schema()
-    loaded = warehouse.replace_actuals(collected)
+    # 店を絞って流すことがあるので、消す範囲にも店を含める（他店を巻き添えにしない）。
+    loaded = warehouse.replace_actuals(collected, scope_stores=True)
     print(f"[売上推移] warehouse へ {loaded} 件 書き込みました")
     return 0
 
@@ -558,21 +585,75 @@ def _set_uriage_month(session, month: str) -> bool:
     )
 
 
-def _click_uriage_search(session) -> bool:
-    """月別日別売上推移の『検 索』ボタン（間にスペース有り）を押す。対象月の反映に必須。"""
+def _click_uriage_search_nth(session, idx: int) -> bool:
+    """『検 索』（表記ゆれでスペース混じり）ボタンの idx 番目を押す。
+
+    画面には同じ字面のボタンが複数あることがあり、先頭が対象月の再照会とは
+    限らない。押した結果グリッドが動いたかは呼び出し側で確かめる。
+    """
     return bool(
         session.page.evaluate(
-            r"""() => {
+            r"""(idx) => {
         const nodes = document.querySelectorAll("button, input[type=button], input[type=submit], a");
+        const hits = [];
         for (const b of nodes) {
             if (!b.offsetParent) continue;
             const t = (b.tagName === 'INPUT' ? (b.value || '') : (b.innerText || '')).replace(/\s+/g, '');
-            if (t === '検索') { b.click(); return true; }
+            if (t === '検索') hits.push(b);
         }
-        return false;
-    }"""
+        if (idx >= hits.length) return false;
+        hits[idx].click();
+        return true;
+    }""",
+            idx,
         )
     )
+
+
+def _click_uriage_search(session) -> bool:
+    """月別日別売上推移の『検 索』ボタン（間にスペース有り）を押す。対象月の反映に必須。"""
+    return _click_uriage_search_nth(session, 0)
+
+
+def _uriage_latest_month(session) -> str | None:
+    """いま描かれているグリッドの最新月（YYYY-MM）。再描画の判定に使う。"""
+    months = [m["period"] for m in _extract_month_grid(session)]
+    return max(months) if months else None
+
+
+def _apply_uriage_month(
+    session, month: str, *, attempts: int = 2, hint: list[int] | None = None
+) -> bool:
+    """『対象月』を入れて再照会し、グリッドの最新月がその月になるまで待つ。
+
+    「その年の行があるか」では既定グリッド（直近12ヶ月）と見分けが付かない
+    （例: 対象月2025-08 のとき既定にも2025年の行がある）。最新月そのものが
+    一致することを反映の合図にする。ボタン候補を順に押し、実際にグリッドが
+    動いたものだけを採用する（押下＝反映ではない）。hint に効いた番号を残すと
+    2店目以降は一発で当たる。
+    """
+    order = list(range(4))
+    if hint:
+        idx0 = hint[0]
+        if idx0 in order:
+            order.remove(idx0)
+            order.insert(0, idx0)
+    for _ in range(attempts):
+        if not _set_uriage_month(session, month):
+            time.sleep(1.0)
+            continue
+        for idx in order:
+            if not _click_uriage_search_nth(session, idx):
+                continue
+            for _ in range(6):
+                time.sleep(1.0)
+                if _uriage_latest_month(session) == month:
+                    if hint is not None:
+                        hint[:] = [idx]
+                    return True
+            # 効かないボタンだった。対象月が戻っている場合に備えて入れ直す。
+            _set_uriage_month(session, month)
+    return False
 
 
 def _extract_hour_grid(session) -> list[dict]:
@@ -1298,6 +1379,86 @@ def probe_abc_dom(artifacts: Path, *, store: str) -> int:
         for h in html:
             print("   [分類HTML]", h)
         session.snapshot("abc_dom_probe")
+    return 0
+
+
+def report_monthly_coverage(
+    warehouse, master, *, date_from: str = "2024-01", date_to: str = "2026-08"
+) -> int:
+    """月次売上（grain=MONTH / metric=sales）が店×月でどこまで埋まっているかを出す。
+
+    「どの店のどの月が無いのか」を1回のDB照会で一覧にする。FWログイン不要。
+    バックフィルの前後で回して、埋まったか・どこが穴かを確かめるための道具。
+    """
+    import sys as _sys
+    from datetime import date as _date
+
+    from ..db.warehouse import AggregateQuery
+    from ..model import GRAIN_MONTH, METRIC_SALES
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _months(a: str, b: str) -> list[str]:
+        y, m = int(a[:4]), int(a[5:7])
+        ey, em = int(b[:4]), int(b[5:7])
+        out = []
+        while (y, m) <= (ey, em):
+            out.append(f"{y}-{m:02d}")
+            m += 1
+            if m == 13:
+                y, m = y + 1, 1
+        return out
+
+    want = _months(date_from, date_to)
+    d_from = _date(int(date_from[:4]), int(date_from[5:7]), 1)
+    last_y, last_m = int(date_to[:4]), int(date_to[5:7])
+    d_to = _date(last_y + (last_m == 12), 1 if last_m == 12 else last_m + 1, 1)
+
+    have: dict[str, set[str]] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=d_from,
+            date_to=d_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_SALES],
+            store_codes=master.active_codes,
+            group_by=("store_code", "date"),
+        )
+    ):
+        if not row["value"]:
+            continue
+        have.setdefault(row["store_code"], set()).add(row["date"].strftime("%Y-%m"))
+
+    print(f"=== 月次売上カバレッジ {date_from}〜{date_to}（{len(want)}ヶ月） ===")
+    full, partial, empty = [], [], []
+    for st in master.active:
+        got = have.get(st.store_code, set())
+        miss = [m for m in want if m not in got]
+        head = f"  {st.store_code} {st.store_name[:16]:<16} {len(want) - len(miss):>2}/{len(want)}"
+        if not miss:
+            full.append(st.store_code)
+            print(f"✓ {head}  すべて有り")
+        elif len(miss) == len(want):
+            empty.append(st.store_code)
+            print(f"✗ {head}  データ無し")
+        else:
+            partial.append(st.store_code)
+            shown = ",".join(miss[:14]) + (" …" if len(miss) > 14 else "")
+            print(f"△ {head}  欠け: {shown}")
+
+    # 月ごとに「何店ぶん入っているか」も出す。穴が月側か店側かの切り分け用。
+    print("--- 月別に埋まっている店数 ---")
+    n_active = len(master.active)
+    for m in want:
+        n = sum(1 for st in master.active if m in have.get(st.store_code, set()))
+        bar = "■" * round(n / max(n_active, 1) * 20)
+        print(f"  {m}  {n:>2}/{n_active}  {bar}")
+    print(f"=== 完備 {len(full)}店 / 欠けあり {len(partial)}店 / 皆無 {len(empty)}店 ===")
+    if empty:
+        print(f"データ皆無の店: {empty}")
     return 0
 
 

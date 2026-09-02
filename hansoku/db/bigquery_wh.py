@@ -94,7 +94,7 @@ class BigQueryWarehouse(Warehouse):
         return [dict(row) for row in self._client.query(rendered, job_config=config).result()]
 
     # ── 取り込み ──────────────────────────────────────────────────────────
-    def replace_actuals(self, rows: Iterable[ActualRow]) -> int:
+    def replace_actuals(self, rows: Iterable[ActualRow], *, scope_stores: bool = False) -> int:
         materialized = [r.with_ingested_at() if r.ingested_at is None else r for r in rows]
         if not materialized:
             return 0
@@ -102,16 +102,22 @@ class BigQueryWarehouse(Warehouse):
         table = self.table_name("f_actuals")
 
         # 1) この取り込みが覆う (source, grain, date) を消す（パーティション単位の入れ替え）。
-        scopes: dict[tuple[str, str], set] = {}
+        # scope_stores なら店も範囲に含め、流していない店の実績には触れない。
+        scopes: dict[tuple[str, str, str | None], set] = {}
         for row in materialized:
-            scopes.setdefault((row.source, row.grain), set()).add(row.date)
-        for (source, grain), dates in scopes.items():
+            key = (row.source, row.grain, row.store_code if scope_stores else None)
+            scopes.setdefault(key, set()).add(row.date)
+        for (source, grain, store_code), dates in scopes.items():
+            store_sql = " AND store_code = :store_code" if store_code is not None else ""
+            params = {"source": source, "grain": grain, "dates": sorted(dates)}
+            if store_code is not None:
+                params["store_code"] = store_code
             self.query(
                 f"""
                 DELETE FROM {table}
-                WHERE source = :source AND grain = :grain AND date IN UNNEST(:dates)
+                WHERE source = :source AND grain = :grain AND date IN UNNEST(:dates){store_sql}
                 """,
-                {"source": source, "grain": grain, "dates": sorted(dates)},
+                params,
             )
 
         # 2) 入れ直す。
