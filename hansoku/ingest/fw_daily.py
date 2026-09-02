@@ -1687,6 +1687,20 @@ def ingest_abc_store(
         # 全商品行（"商品CD | 商品名 | 単価 | 原価"）は名前に '|' を含む→部門ではない
         return m if "|" not in dn else None
 
+    def _countable_dept(cells: list[str]) -> bool:
+        """後段で実際に数える部門行かどうか。グリッドの受け入れ判定に使う。
+
+        「部門らしい行が1つでもあるか」で受け入れると、合計行しか出ていない
+        グリッドを『取れた』と見なして部門0件のまま抜けてしまう（1111/1151/1168 で
+        再試行のログすら出ずに0件になっていた）。数えられる行が出るまで粘る。"""
+        m = _clean_dept(cells)
+        if not m:
+            return False
+        dname = m.group(1).strip()
+        if dname in _ABC_TOTAL_NAMES or dname in ("部門", "部門名", "分類"):
+            return False
+        return num(m.group(3)) > 0 or num(m.group(4)) > 0
+
     t0 = time.time()
     print(f"[ABC店] {code} {name} / 対象月 {len(months)}件 {months[0]}〜{months[-1]} 上位{top_n}品")
     # 前月と部門合計が完全一致したら、日付が反映されず同じグリッドを読んだ疑いが濃い。
@@ -1800,12 +1814,12 @@ def ingest_abc_store(
                     _abc_click_radio(session.page, level)
                     time.sleep(1)
                     drows = _abc_search_and_rows(session)
-                    if any(_clean_dept(c) for c in drows):
+                    if any(_countable_dept(c) for c in drows):
                         used_level = level
                         break
                     print(f"[ABC店] {code} {month} {level}グリッド未確定（{dtry + 1}回目）。再切替。")
                     time.sleep(2)
-                if any(_clean_dept(c) for c in drows):
+                if any(_countable_dept(c) for c in drows):
                     break
                 if level == "部門":
                     print(f"[ABC店] {code} {month} 部門が切替らず。分類=グループへフォールバック。")
