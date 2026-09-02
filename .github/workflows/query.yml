@@ -18,6 +18,9 @@ on:
           - food_theory_cost
           - drink_theory_cost
           - cost_rate
+          - dept_sales
+          - dept_qty
+          - product_sales
         default: sales
       date_from:
         description: '開始日 YYYY-MM-DD'
