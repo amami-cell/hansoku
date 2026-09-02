@@ -1691,7 +1691,9 @@ def ingest_abc_store(
     seen_totals: dict[int, str] = {}
     suspect: list[str] = []
     empty: list[str] = []
-    # 開店前の空月が先頭に続く区間を短く抜けるための目印。
+    # 新しい月から古い月へ降順で回す。データのある月に先に当たるので、
+    # 「一度データが出た後に空月が続く＝開店前」と判断して打ち切れる。
+    months = sorted(months, reverse=True)
     seen_any = False
     empty_streak = 0
 
@@ -1702,7 +1704,12 @@ def ingest_abc_store(
         except Exception:  # noqa: BLE001
             pass
         _open_abc(session)
+        # 日付欄を2つ出すために先月プリセットを当ててから、対象月のレンジを入れる。
+        # 店舗選択より「先に」日付を入れること。順序を逆にすると、店によっては
+        # グリッドが全月0品で返る（1137・1728以降の新しい店で確認。同じ店・同じ月でも
+        # probe の順＝日付→店舗選択 なら取れる）。
         _select_date_preset(session, _ABC_PRESET_LASTMONTH)
+        _set_date_range(session, *_month_bounds(months[0]))
         hit = _abc_open_store_modal_and_select_one(session, name)
         if hit is None:
             print(f"[ABC店] 店舗選択に失敗（{name}）。スナップショットを保存し 0件終了。")
@@ -1728,15 +1735,7 @@ def ingest_abc_store(
 
             # --- 分類=全商品：売れ筋 上位 ---
             _abc_click_radio(session.page, "全商品")
-            # まだ1ヶ月もデータが出ていない＝開店前の空月が続いている区間。
-            # 空のグリッドに毎月80秒×2回を使うと、開店が新しい店（2026-04開店なら
-            # 19ヶ月ぶん）だけでジョブの制限時間を使い切る。データが出るまでは
-            # 短く当たり、1ヶ月でも出たら以降は元の粘り方に戻す（開店日以降は
-            # 全ての月にデータがあるので、短いまま取りこぼすことはない）。
-            if seen_any or empty_streak < 2:
-                _abc_search_and_rows(session)  # グリッド充填まで粘る
-            else:
-                _abc_search_and_rows(session, tries=1, waits=8)
+            _abc_search_and_rows(session)  # グリッド充填まで粘る
             products = _extract_product_grid(session)
             products.sort(
                 key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
@@ -1856,6 +1855,14 @@ def ingest_abc_store(
                 f"（1位 {top}） 部門{n_dept}件 合計{dept_total:,}{mark}"
                 f" 累計{total_loaded}行 (+{time.time() - t0:.0f}s)"
             )
+            # 降順で回しているので、データのある月より古い側で空月が続いたら開店前。
+            # これ以上さかのぼっても出ないので止める。
+            if seen_any and empty_streak >= 3 and months[i + 1 :]:
+                print(
+                    f"[ABC店] {code} 開店前と判断して打ち切り"
+                    f"（残り{len(months[i + 1:])}ヶ月は取りません）"
+                )
+                break
 
     if empty:
         print(f"[ABC店] {code} データが無かった月: {empty}")
