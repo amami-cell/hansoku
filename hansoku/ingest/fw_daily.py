@@ -1432,13 +1432,20 @@ def report_monthly_coverage(
             continue
         have.setdefault(row["store_code"], set()).add(row["date"].strftime("%Y-%m"))
 
+    # FW未連動の店は「取り漏れ」ではないので、理由を添えて別扱いにする。
+    pos_label = {"uleji": "uレジ管理", "dainy": "ダイニー管理アプリ"}
+
     print(f"=== 月次売上カバレッジ {date_from}〜{date_to}（{len(want)}ヶ月） ===")
-    full, partial, empty = [], [], []
+    full, partial, empty, other_pos = [], [], [], []
     for st in master.active:
         got = have.get(st.store_code, set())
         miss = [m for m in want if m not in got]
         head = f"  {st.store_code} {st.store_name[:16]:<16} {len(want) - len(miss):>2}/{len(want)}"
-        if not miss:
+        pos = getattr(st, "pos", "fw")
+        if pos != "fw" and not got:
+            other_pos.append(st.store_code)
+            print(f"― {head}  FW未連動（実績は{pos_label.get(pos, pos)}から）")
+        elif not miss:
             full.append(st.store_code)
             print(f"✓ {head}  すべて有り")
         elif len(miss) == len(want):
@@ -1456,9 +1463,14 @@ def report_monthly_coverage(
         n = sum(1 for st in master.active if m in have.get(st.store_code, set()))
         bar = "■" * round(n / max(n_active, 1) * 20)
         print(f"  {m}  {n:>2}/{n_active}  {bar}")
-    print(f"=== 完備 {len(full)}店 / 欠けあり {len(partial)}店 / 皆無 {len(empty)}店 ===")
+    print(
+        f"=== 完備 {len(full)}店 / 欠けあり {len(partial)}店 / 皆無 {len(empty)}店"
+        f" / FW未連動 {len(other_pos)}店 ==="
+    )
     if empty:
-        print(f"データ皆無の店: {empty}")
+        print(f"データ皆無の店（FW連動済みなのに0件＝要調査）: {empty}")
+    if other_pos:
+        print(f"FW未連動の店（別POSから取る）: {other_pos}")
     return 0
 
 

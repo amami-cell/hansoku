@@ -15,6 +15,10 @@
 # source_name  : FW共有シートB列に現れる生の値（コード付き）
 # infomart_code: インフォマート側の店舗コード。未出店・未登録なら空
 # brand        : ブランドコード。スケジュール画面の色分けの単位
+# pos          : 実績の出どころ。既定 fw（Foodist Journal 連動済み）。
+#                FW未連動の店は uleji（uレジ管理）/ dainy（ダイニー管理アプリ）。
+#                取り込み処理は変えないが、カバレッジ確認で
+#                「FWでは取れない店」と「取り漏れ」を分けるために使う。
 # is_shared_facility : 商業施設内の共営店舗フラグ
 # active       : 閉店・休止で false にすると集約ループから外れる
 #
@@ -249,6 +253,8 @@ stores:
     region: "福岡"
     brand: "GIFUYA"
     brand_name: "ぎふや"
+    # FWへの連動が未実施。実績は uレジ管理から取る（FWを掘っても出てこない）。
+    pos: "uleji"
     is_shared_facility: false
     active: true
   - store_code: "2004"

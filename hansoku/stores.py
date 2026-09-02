@@ -35,6 +35,10 @@ class Store:
     file_prefix: str
     is_shared_facility: bool
     active: bool
+    # 実績の出どころ。既定は "fw"（FW=Foodist Journal に連動済み）。
+    # FW未連動の店は "uleji"（uレジ管理）/"dainy"（ダイニー管理アプリ）を入れる。
+    # 取り込みは触らないが、カバレッジ確認で「取れないのか・取り漏れか」を分ける。
+    pos: str = "fw"
 
 
 class UnknownStoreError(LookupError):
@@ -89,6 +93,7 @@ class StoreMaster:
                 file_prefix=row.get("file_prefix", ""),
                 is_shared_facility=bool(row.get("is_shared_facility", False)),
                 active=bool(row.get("active", True)),
+                pos=str(row.get("pos", "") or "fw"),
             )
             for row in data.get("stores", [])
         ]
