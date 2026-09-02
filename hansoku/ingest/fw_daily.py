@@ -1401,7 +1401,7 @@ def report_monthly_coverage(
     from datetime import date as _date
 
     from ..db.warehouse import AggregateQuery
-    from ..model import GRAIN_MONTH, METRIC_SALES
+    from ..model import GRAIN_MONTH, METRIC_DEPT_SALES, METRIC_SALES
 
     try:
         _sys.stdout.reconfigure(line_buffering=True)
@@ -1440,8 +1440,18 @@ def report_monthly_coverage(
             continue
         have.setdefault(row["store_code"], set()).add(row["date"].strftime("%Y-%m"))
 
-    # FW未連動の店は「取り漏れ」ではないので、理由を添えて別扱いにする。
+    # 「そもそもFWでは取れない」店は取り漏れではないので、理由を添えて別扱いにする。
+    # ①FW未連動（実績が別POSにある） ②FWのABCに部門が無い（商品と部門が未紐付け）。
     pos_label = {"uleji": "uレジ管理", "dainy": "ダイニー管理アプリ"}
+
+    def _cannot(st) -> str | None:
+        """この店がこの指標をFWから取れない理由。取れるなら None。"""
+        pos = getattr(st, "pos", "fw")
+        if pos != "fw":
+            return f"FW未連動（実績は{pos_label.get(pos, pos)}から）"
+        if metric == METRIC_DEPT_SALES and not getattr(st, "abc_dept", True):
+            return "FWのABCに部門が無い（商品と部門が未紐付け）"
+        return None
 
     print(f"=== 月次カバレッジ [{metric}] {date_from}〜{date_to}（{len(want)}ヶ月） ===")
     full, partial, empty, other_pos = [], [], [], []
@@ -1449,10 +1459,10 @@ def report_monthly_coverage(
         got = have.get(st.store_code, set())
         miss = [m for m in want if m not in got]
         head = f"  {st.store_code} {st.store_name[:16]:<16} {len(want) - len(miss):>2}/{len(want)}"
-        pos = getattr(st, "pos", "fw")
-        if metric == METRIC_SALES and pos != "fw" and not got:
+        cannot = _cannot(st)
+        if cannot and not got:
             other_pos.append(st.store_code)
-            print(f"― {head}  FW未連動（実績は{pos_label.get(pos, pos)}から）")
+            print(f"― {head}  {cannot}")
         elif not miss:
             full.append(st.store_code)
             print(f"✓ {head}  すべて有り")
@@ -1473,12 +1483,12 @@ def report_monthly_coverage(
         print(f"  {m}  {n:>2}/{n_active}  {bar}")
     print(
         f"=== 完備 {len(full)}店 / 欠けあり {len(partial)}店 / 皆無 {len(empty)}店"
-        f" / FW未連動 {len(other_pos)}店 ==="
+        f" / FWでは取れない {len(other_pos)}店 ==="
     )
     if empty:
-        print(f"データ皆無の店（FW連動済みなのに0件＝要調査）: {empty}")
+        print(f"データ皆無の店（取れるはずなのに0件＝要調査）: {empty}")
     if other_pos:
-        print(f"FW未連動の店（別POSから取る）: {other_pos}")
+        print(f"FWでは取れない店（理由は上の ― 行）: {other_pos}")
     return 0
 
 

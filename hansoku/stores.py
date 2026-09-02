@@ -39,6 +39,9 @@ class Store:
     # FW未連動の店は "uleji"（uレジ管理）/"dainy"（ダイニー管理アプリ）を入れる。
     # 取り込みは触らないが、カバレッジ確認で「取れないのか・取り漏れか」を分ける。
     pos: str = "fw"
+    # FWのABCで部門（分類）が取れるか。FW側で商品に部門が紐付いていない店は
+    # 何度取り込んでも部門0件になる。取込の不具合と区別するために持つ。
+    abc_dept: bool = True
 
 
 class UnknownStoreError(LookupError):
@@ -94,6 +97,7 @@ class StoreMaster:
                 is_shared_facility=bool(row.get("is_shared_facility", False)),
                 active=bool(row.get("active", True)),
                 pos=str(row.get("pos", "") or "fw"),
+                abc_dept=bool(row.get("abc_dept", True)),
             )
             for row in data.get("stores", [])
         ]

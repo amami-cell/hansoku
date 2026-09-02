@@ -19,6 +19,9 @@
 #                FW未連動の店は uleji（uレジ管理）/ dainy（ダイニー管理アプリ）。
 #                取り込み処理は変えないが、カバレッジ確認で
 #                「FWでは取れない店」と「取り漏れ」を分けるために使う。
+# abc_dept     : FWのABCで部門（分類）が取れるか。既定 true。
+#                FW側で商品に部門が紐付いていない店は false。
+#                カバレッジ確認で「取れない店」と「取り漏れ」を分ける。
 # is_shared_facility : 商業施設内の共営店舗フラグ
 # active       : 閉店・休止で false にすると集約ループから外れる
 #
@@ -55,6 +58,8 @@ stores:
     brand_name: "ひよこ飯店"
     is_shared_facility: false
     active: true
+    # FW側で商品に部門が紐付いていないため、ABCの部門は常に0件。
+    abc_dept: false
   - store_code: "1097"
     store_name: "ARATA"
     source_name: "0001097_ARATA"
@@ -105,6 +110,8 @@ stores:
     brand_name: "料理と酒 たいだい"
     is_shared_facility: false
     active: true
+    # FW側で商品に部門が紐付いていないため、ABCの部門は常に0件。
+    abc_dept: false
   - store_code: "1151"
     store_name: "NagaGutsu"
     source_name: "0001151_NagaGutsu"
