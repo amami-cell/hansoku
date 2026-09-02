@@ -1665,11 +1665,15 @@ def ingest_abc_store(
 
     def _flush(month_: str) -> None:
         """その月ぶんを warehouse に書く。冪等キーが source×grain×date で source は
-        店ごとに分かれているため、1ヶ月だけ差し替えても他の月・他の店に触らない。"""
+        店ごとに分かれているため、1ヶ月だけ差し替えても他の月・他の店に触らない。
+
+        指標も削除範囲に入れる（scope_metrics）。商品は取れたが部門が取れなかった月に、
+        既に入っている前回の部門を消してしまわないため。取れなかった指標は行が0件なので
+        削除の対象にも入らず、前の値がそのまま残る。"""
         nonlocal total_loaded
         if dry_run or not collected:
             return
-        total_loaded += warehouse.replace_actuals(collected)
+        total_loaded += warehouse.replace_actuals(collected, scope_metrics=True)
         written_months.append(month_)
 
     hdr = _re.compile(r"^(.+?)\s\|\s(\d+\.\d+)%\s\|\s([\d,]+)\s\|\s([\d,]+)")
@@ -1696,6 +1700,8 @@ def ingest_abc_store(
     months = sorted(months, reverse=True)
     seen_any = False
     empty_streak = 0
+    # 部門が取れるはずの店で、商品は取れたのに部門が0件だった月。読み取り失敗の疑い。
+    no_dept: list[str] = []
 
     with fw_session(artifacts) as session:
         try:
@@ -1842,6 +1848,8 @@ def ingest_abc_store(
             else:
                 seen_any = True
                 empty_streak = 0
+                if n_dept == 0 and getattr(st, "abc_dept", True):
+                    no_dept.append(month)
             # 同じ合計の月が二度出たら、日付が効かず同じグリッドを読んでいる疑い。
             dup = seen_totals.get(dept_total) if dept_total else None
             if dup:
@@ -1866,6 +1874,11 @@ def ingest_abc_store(
 
     if empty:
         print(f"[ABC店] {code} データが無かった月: {empty}")
+    if no_dept:
+        # 部門が取れるはずの店なのに0件＝その月の読み取りが失敗している。
+        # 既存の部門は消していない（scope_metrics）ので、この月だけ流し直せばよい。
+        print(f"[ABC店] ⚠ {code} 商品は取れたが部門が0件の月: {no_dept}")
+        print(f"[ABC店] 入れ直し: --abc-store {code} --month {','.join(no_dept)}")
     if suspect:
         # 取り込みは止めない（同額でも本当に同額な可能性は残る）が、必ず目に付くよう出す。
         print(f"[ABC店] ⚠ {code} 部門合計が他の月と一致: {suspect}")

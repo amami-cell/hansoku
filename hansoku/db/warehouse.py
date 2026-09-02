@@ -182,7 +182,13 @@ class Warehouse(ABC):
         """SQL を実行して辞書のリストで返す。"""
 
     @abstractmethod
-    def replace_actuals(self, rows: Iterable[ActualRow], *, scope_stores: bool = False) -> int:
+    def replace_actuals(
+        self,
+        rows: Iterable[ActualRow],
+        *,
+        scope_stores: bool = False,
+        scope_metrics: bool = False,
+    ) -> int:
         """
         実績を冪等に入れ替える。
 
@@ -192,6 +198,11 @@ class Warehouse(ABC):
 
         scope_stores=True なら削除範囲に store_code も加える。1店ずつ・一部店だけ
         流すときに、同じ source と月を共有する他店の実績を巻き添えで消さないため。
+
+        scope_metrics=True なら削除範囲に metric も加える。1回の取り込みで複数の
+        指標を採る画面（ABCの 商品／部門）では、片方だけ取れなかったときに
+        既に入っているもう片方を消さないため。取れなかった指標は行が0件なので
+        削除の対象にも入らず、前回の値がそのまま残る。
         """
 
     @abstractmethod

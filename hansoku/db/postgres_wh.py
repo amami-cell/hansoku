@@ -63,22 +63,27 @@ class PostgresWarehouse(Warehouse):
             return [dict(zip(columns, row)) for row in cur.fetchall()]
 
     # ── 取り込み ──────────────────────────────────────────────────────────
-    def replace_actuals(self, rows: Iterable[ActualRow], *, scope_stores: bool = False) -> int:
+    def replace_actuals(
+        self,
+        rows: Iterable[ActualRow],
+        *,
+        scope_stores: bool = False,
+        scope_metrics: bool = False,
+    ) -> int:
         materialized = [r.with_ingested_at() if r.ingested_at is None else r for r in rows]
         if not materialized:
             return 0
 
         # 冪等性: この取り込みが覆う (source, grain, date) を先に消してから入れ直す。
-        # scope_stores なら店も範囲に含め、流していない店の実績には触れない。
+        # scope_stores なら店も、scope_metrics なら指標も範囲に含め、
+        # 今回流していない店・取れなかった指標の実績には触れない。
+        keys = ["source", "grain", "date"]
         if scope_stores:
-            scopes = sorted({(r.source, r.grain, r.date, r.store_code) for r in materialized})
-            delete_sql = (
-                "DELETE FROM f_actuals "
-                "WHERE source = %s AND grain = %s AND date = %s AND store_code = %s"
-            )
-        else:
-            scopes = sorted({(r.source, r.grain, r.date) for r in materialized})
-            delete_sql = "DELETE FROM f_actuals WHERE source = %s AND grain = %s AND date = %s"
+            keys.append("store_code")
+        if scope_metrics:
+            keys.append("metric")
+        scopes = sorted({tuple(getattr(r, k) for k in keys) for r in materialized})
+        delete_sql = "DELETE FROM f_actuals WHERE " + " AND ".join(f"{k} = %s" for k in keys)
 
         buffer = io.StringIO()
         writer = csv.writer(buffer)

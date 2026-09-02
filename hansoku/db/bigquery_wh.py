@@ -94,7 +94,13 @@ class BigQueryWarehouse(Warehouse):
         return [dict(row) for row in self._client.query(rendered, job_config=config).result()]
 
     # ── 取り込み ──────────────────────────────────────────────────────────
-    def replace_actuals(self, rows: Iterable[ActualRow], *, scope_stores: bool = False) -> int:
+    def replace_actuals(
+        self,
+        rows: Iterable[ActualRow],
+        *,
+        scope_stores: bool = False,
+        scope_metrics: bool = False,
+    ) -> int:
         materialized = [r.with_ingested_at() if r.ingested_at is None else r for r in rows]
         if not materialized:
             return 0
@@ -102,20 +108,30 @@ class BigQueryWarehouse(Warehouse):
         table = self.table_name("f_actuals")
 
         # 1) この取り込みが覆う (source, grain, date) を消す（パーティション単位の入れ替え）。
-        # scope_stores なら店も範囲に含め、流していない店の実績には触れない。
-        scopes: dict[tuple[str, str, str | None], set] = {}
+        # scope_stores なら店も、scope_metrics なら指標も範囲に含め、
+        # 今回流していない店・取れなかった指標の実績には触れない。
+        scopes: dict[tuple[str, str, str | None, str | None], set] = {}
         for row in materialized:
-            key = (row.source, row.grain, row.store_code if scope_stores else None)
+            key = (
+                row.source,
+                row.grain,
+                row.store_code if scope_stores else None,
+                row.metric if scope_metrics else None,
+            )
             scopes.setdefault(key, set()).add(row.date)
-        for (source, grain, store_code), dates in scopes.items():
+        for (source, grain, store_code, metric), dates in scopes.items():
             store_sql = " AND store_code = :store_code" if store_code is not None else ""
+            metric_sql = " AND metric = :metric" if metric is not None else ""
             params = {"source": source, "grain": grain, "dates": sorted(dates)}
             if store_code is not None:
                 params["store_code"] = store_code
+            if metric is not None:
+                params["metric"] = metric
             self.query(
                 f"""
                 DELETE FROM {table}
-                WHERE source = :source AND grain = :grain AND date IN UNNEST(:dates){store_sql}
+                WHERE source = :source AND grain = :grain
+                  AND date IN UNNEST(:dates){store_sql}{metric_sql}
                 """,
                 params,
             )
