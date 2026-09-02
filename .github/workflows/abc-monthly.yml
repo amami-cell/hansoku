@@ -65,7 +65,10 @@ jobs:
           cache: pip
 
       - name: 依存パッケージをインストール
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          # FWはSPAなのでブラウザが要る。これが無いと取込は起動すらできない。
+          python -m playwright install --with-deps chromium
 
       - name: Secrets の確認
         env:
@@ -92,6 +95,9 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
+          # tee で受けるので、パイプ途中の失敗を step の失敗として扱う。
+          # これが無いと取込がこけても tee の成功で success になる。
+          set -o pipefail
           M="${{ inputs.month }}"
           {
             echo "## 月次ABC 取込 ${{ matrix.store }} / ${M:-前月}"

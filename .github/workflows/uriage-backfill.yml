@@ -105,6 +105,9 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           MONTHS: ${{ inputs.months }}
         run: |
+          # tee で受けるので、パイプ途中の失敗を step の失敗として扱う。
+          # これが無いと取込がこけても tee の成功で success になる。
+          set -o pipefail
           {
             echo "## 月次売上バックフィル ${{ matrix.store }}"
             echo ''

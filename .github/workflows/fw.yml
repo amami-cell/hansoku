@@ -127,6 +127,9 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
+          # tee で受けるので、パイプ途中の失敗を step の失敗として扱う。
+          # これが無いと取込がこけても tee の成功で success になる。
+          set -o pipefail
           args=""
           for p in $(echo "${{ inputs.path }}" | tr ',' ' '); do
             args="$args --path $p"
