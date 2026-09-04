@@ -29,7 +29,7 @@
 campaigns:
   # ── すさび湯 梅田（1006）────────────────────────────
   - { id: r1006-osusume, stores: ["1006"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
-  - { id: r1006-bounenkai, stores: ["1006"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1006-bounenkai, stores: ["1006"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘年会", "新年会"] }
   - { id: r1006-gm, stores: ["1006"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
 
   # ── すさび湯 三宮（1169）────────────────────────────
@@ -57,7 +57,7 @@ campaigns:
 
   # ── GOLD 東通り（1163）─────────────────────────────
   - { id: r1163-osusume, stores: ["1163"], title: 秋おすすめ（新規開発）, kind: osusume, start: "2026-09-01", end: "2026-11-30" }
-  - { id: r1163-bounenkai, stores: ["1163"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1163-bounenkai, stores: ["1163"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘新年会"] }
   - { id: r1163-gm, stores: ["1163"], title: GM改定, kind: gm, start: "2026-11-15", note: 11月中（概算）}
 
   # ── GOLD お初（1729）───────────────────────────────
@@ -70,13 +70,12 @@ campaigns:
 
   # ── ARATA（1097）──────────────────────────────────
   - { id: r1097-osusume, stores: ["1097"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-11-30" }
-  - { id: r1097-bounenkai, stores: ["1097"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
-  - { id: r1097-xmas, stores: ["1097"], title: クリスマスコース（10月下旬打ち出し）, kind: dev, start: "2026-12-01", end: "2026-12-25" }
+  - { id: r1097-bounenkai, stores: ["1097"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘新年会コース"] }
   - { id: r1097-gm, stores: ["1097"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
 
   # ── ひよこ飯店（1069）──────────────────────────────
   - { id: r1069-osusume, stores: ["1069"], title: 秋おすすめ（点心フェア）, kind: osusume, start: "2026-10-01", end: "2026-11-30" }
-  - { id: r1069-bounenkai, stores: ["1069"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1069-bounenkai, stores: ["1069"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘年会"] }
 
   # ── ちゃーちゃん（1111）────────────────────────────
   - { id: r1111-osusume, stores: ["1111"], title: 秋おすすめ（おでん）, kind: osusume, start: "2026-10-01", end: "2026-11-30" }
@@ -112,6 +111,7 @@ campaigns:
   - { id: r1160-osusume, stores: ["1160"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-09-30" }
   # ケーキ/パフェ/ジェラートはFWの"部門"として独立（1160の直近ABCで確認）。bucket=部門名で
   # 部門実績＋構成比を月次表示、items=商品キーワードで「表示」に商品内訳を出す。
+  # 前年2025-12は『クリスマスケーキプレート』¥76,800 が立っている（12月はこれで見る）。
   - { id: r1160-cake, stores: ["1160"], title: ケーキ, kind: dev, bucket: ケーキ,
       items: ["ケーキ", "タルト", "フレジェ", "バスク", "シャルロット", "ベイクドアラスカ", "ミルフィーユ"],
       start: "2026-09-01", end: "2026-09-30", note: "FW部門『ケーキ』。LARGOケーキプレート/白桃のジュエルタルト等" }
@@ -127,7 +127,7 @@ campaigns:
 
   # ── 味のたぬきや（1162）────────────────────────────
   - { id: r1162-osusume, stores: ["1162"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
-  - { id: r1162-bounenkai, stores: ["1162"], title: 忘年会（コース一部変更）, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1162-bounenkai, stores: ["1162"], title: 忘年会（コース一部変更）, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘年会コース"] }
 
   # ── ぎふや パナンテ天満橋（1739）───────────────────
   - { id: r1739-osusume, stores: ["1739"], title: 秋おすすめ（小皿系4〜6品）, kind: osusume, start: "2026-09-20", end: "2026-11-30" }
@@ -136,7 +136,7 @@ campaigns:
 
   # ── すさび湯 河原町三条店（1742）───────────────────
   - { id: r1742-osusume, stores: ["1742"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
-  - { id: r1742-bounenkai, stores: ["1742"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
+  - { id: r1742-bounenkai, stores: ["1742"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘年会コース"] }
   - { id: r1742-gm, stores: ["1742"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
 
   # ── すさび湯 新宿東口店（1743）─────────────────────
@@ -154,11 +154,19 @@ campaigns:
   #   ※「1ヵ月毎（月次で並べる）」はABCの月次蓄積が要る（現状は最新1ヶ月のみ保持）。
   # ----------------------------------------------------------------
   # 全店 忘新年会（宴会）… 各店の bounenkai 施策（上記）で 宴会=コース部門 の実績・構成比が出る。
-  #   忘新年会コースの商品内訳は、対象店の bounenkai 施策に items（コース名キーワード）を足すと
-  #   「宴会内 構成比」付きで表示できる（正式なコース名待ち）。
-  # ARATA クリスマスコース（1097）… 宴会=コース部門。コース内訳は items で（正式名称待ち）。
-  - { id: r1097-xmas, stores: ["1097"], title: クリスマスコース, kind: dev, bucket: コース,
-      start: "2026-12-01", end: "2026-12-25", note: "概算期間。宴会=コース部門で実績/構成比。コース内訳はitemsで（正式名称待ち）" }
+  #   商品内訳の items は、前年2025-12のABC実績（fw.yml の abc-detail）で確認した
+  #   FW上の実際の商品名から引いた。確認できた店だけ入れてある:
+  #     1006 忘年会(刺身)4500円 / 忘年会コース(鍋)4500円 / 新年会(刺身)4500円
+  #     1069 【ﾋﾖｺ】忘年会コース   1097 忘新年会コース5000 / 4500
+  #     1162 忘年会コース)4500円   1163 5500忘新年会コース / 忘新年会飲み放題
+  #     1728 忘年会コース(刺身)    1742 忘年会コース
+  #   それ以外の店は前年に「忘年会」と名の付く商品が無く（通常コースで受けている）、
+  #   items を置くと取りこぼすので bucket=コース の集計だけにしてある。
+  #   今年の名前が決まったら abc-detail で確かめて足すこと（想像で書かない）。
+  - { id: r1097-xmas, stores: ["1097"], title: クリスマスコース（10月下旬打ち出し）, kind: dev,
+      bucket: コース, items: ["クリスマスコース"],
+      start: "2026-12-01", end: "2026-12-25",
+      note: "商品名は前年2025-12のABC実績で確認（クリスマスコース ¥930,000）。期間は概算" }
   # 門真Largo 食べ放題（1713）… 食べ放題部門の実績・構成比を月ごとに追う。
   - { id: r1713-tabehodai, stores: ["1713"], title: 食べ放題（月次追跡）, kind: dev, bucket: 食べ放題,
       start: "2026-09-01", note: "通年想定。食べ放題部門の実績・構成比。月次で並べるには月次ABC蓄積が要る" }
