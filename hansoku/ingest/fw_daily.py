@@ -883,6 +883,38 @@ _ABC_QTY = 1  # 商品名の後ろの整数列での販売数量位置
 _ABC_SALES = 2  # 同・売上金額位置
 # 合計・総計・小計は商品ではないので商品グリッドから除外する
 _ABC_TOTAL_NAMES = {"合計", "総計", "小計", "合 計", "総 計", "小 計", "総合計"}
+
+# ABCの視覚行から「部門行」を見分ける。取込とprobeで同じ判定を使う
+# （別々に書いていたら片方だけ直して食い違った）。
+_ABC_DEPT_ROW = re.compile(r"^(.+?)\s\|\s(\d+\.\d+)%\s\|\s([\d,]+)\s\|\s([\d,]+)")
+
+
+def _abc_dept_match(cells: list[str]):
+    """視覚行が部門行の形なら正規表現マッチを返す。商品行なら None。
+
+    全商品行（"商品CD | 商品名 | 単価 | 原価 | 原価率% | 数量"）も
+    数字の並びは似ているが、部門名にあたる部分に ' | ' が入るので弾ける。
+    """
+    m = _ABC_DEPT_ROW.match(" | ".join(c for c in cells[:6] if c is not None))
+    if not m:
+        return None
+    return m if "|" not in m.group(1) else None
+
+
+def _abc_countable_dept(cells: list[str]) -> bool:
+    """後段で実際に数える部門行か（合計・見出しでなく、数量か売上が正）。
+
+    「部門らしい行が1つでもあるか」で受け入れると、合計行しか出ていない
+    グリッドを『取れた』と見なして部門0件のまま抜ける（1111/1151/1168 で
+    再試行のログすら出ずに0件になっていた）。数えられる行で判定する。
+    """
+    m = _abc_dept_match(cells)
+    if not m:
+        return False
+    name = m.group(1).strip()
+    if name in _ABC_TOTAL_NAMES or name in ("部門", "部門名", "分類"):
+        return False
+    return int(m.group(3).replace(",", "")) > 0 or int(m.group(4).replace(",", "")) > 0
 _ABC_TOP_N = 40  # 取り込む売上上位の商品数
 # 店舗選択で追加する上限（稼働店は約24）。全体は 60 秒の予算と 9 秒の既定タイムアウトで
 # 抑えるので、重い日は途中まででも打ち切って集計に進む。
@@ -1790,30 +1822,10 @@ def ingest_abc_store(
         total_loaded += warehouse.replace_actuals(collected, scope_metrics=True)
         written_months.append(month_)
 
-    hdr = _re.compile(r"^(.+?)\s\|\s(\d+\.\d+)%\s\|\s([\d,]+)\s\|\s([\d,]+)")
     num = lambda s: int(s.replace(",", ""))  # noqa: E731
-
-    def _clean_dept(cells: list[str]):
-        m = hdr.match(" | ".join(c for c in cells[:6] if c is not None))
-        if not m:
-            return None
-        dn = m.group(1).strip()
-        # 全商品行（"商品CD | 商品名 | 単価 | 原価"）は名前に '|' を含む→部門ではない
-        return m if "|" not in dn else None
-
-    def _countable_dept(cells: list[str]) -> bool:
-        """後段で実際に数える部門行かどうか。グリッドの受け入れ判定に使う。
-
-        「部門らしい行が1つでもあるか」で受け入れると、合計行しか出ていない
-        グリッドを『取れた』と見なして部門0件のまま抜けてしまう（1111/1151/1168 で
-        再試行のログすら出ずに0件になっていた）。数えられる行が出るまで粘る。"""
-        m = _clean_dept(cells)
-        if not m:
-            return False
-        dname = m.group(1).strip()
-        if dname in _ABC_TOTAL_NAMES or dname in ("部門", "部門名", "分類"):
-            return False
-        return num(m.group(3)) > 0 or num(m.group(4)) > 0
+    # 部門行の見分けはモジュール共通のヘルパを使う（probeと同じ判定にする）。
+    _clean_dept = _abc_dept_match
+    _countable_dept = _abc_countable_dept
 
     t0 = time.time()
     print(f"[ABC店] {code} {name} / 対象月 {len(months)}件 {months[0]}〜{months[-1]} 上位{top_n}品")
@@ -2199,24 +2211,11 @@ def probe_abc_store(
         KW = ("スープ", "沼", "ランチ", "パスタ", "完熟", "ペペロン", "こくうま", "クリーム", "禁断")
         # グリッドが「部門」に切り替わったのか、全商品のままなのかを1行で判る形にする。
         # 200行ダンプの中から目視で読むのは毎回つらく、取り違えのもとになる。
-        hdr = _re.compile(r"^(.+?)\s\|\s(\d+\.\d+)%\s\|\s([\d,]+)\s\|\s([\d,]+)")
-
-        def _dept_like(cells: list[str]) -> bool:
-            """数えられる部門行（合計行でなく、数量か売上が正）かどうか。"""
-            m = hdr.match(" | ".join(c for c in cells[:6] if c is not None))
-            if not m or "|" in m.group(1):
-                return False
-            name = m.group(1).strip()
-            if name in _ABC_TOTAL_NAMES or name in ("部門", "部門名", "分類"):
-                return False
-            n = lambda x: int(x.replace(",", ""))  # noqa: E731
-            return n(m.group(3)) > 0 or n(m.group(4)) > 0
-
         for level in levels:
             ok = _abc_click_radio(session.page, level)
             print(f"[ABCprobe] 分類ラジオ『{level}』クリック={ok}")
             rows = _abc_search_and_rows(session)
-            n_dept = sum(1 for c in rows if _dept_like(c))
+            n_dept = sum(1 for c in rows if _abc_countable_dept(c))
             verdict = (
                 f"数えられる{level}行 {n_dept}件"
                 if n_dept
