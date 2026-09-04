@@ -2197,10 +2197,32 @@ def probe_abc_store(
         # ランチ部門・沼パスタが下位（行60以降）に埋もれるため、全行を出しつつ
         # ランチ関連キーワード一致行を別途ハイライトする。
         KW = ("スープ", "沼", "ランチ", "パスタ", "完熟", "ペペロン", "こくうま", "クリーム", "禁断")
+        # グリッドが「部門」に切り替わったのか、全商品のままなのかを1行で判る形にする。
+        # 200行ダンプの中から目視で読むのは毎回つらく、取り違えのもとになる。
+        hdr = _re.compile(r"^(.+?)\s\|\s(\d+\.\d+)%\s\|\s([\d,]+)\s\|\s([\d,]+)")
+
+        def _dept_like(cells: list[str]) -> bool:
+            """数えられる部門行（合計行でなく、数量か売上が正）かどうか。"""
+            m = hdr.match(" | ".join(c for c in cells[:6] if c is not None))
+            if not m or "|" in m.group(1):
+                return False
+            name = m.group(1).strip()
+            if name in _ABC_TOTAL_NAMES or name in ("部門", "部門名", "分類"):
+                return False
+            n = lambda x: int(x.replace(",", ""))  # noqa: E731
+            return n(m.group(3)) > 0 or n(m.group(4)) > 0
+
         for level in levels:
             ok = _abc_click_radio(session.page, level)
             print(f"[ABCprobe] 分類ラジオ『{level}』クリック={ok}")
             rows = _abc_search_and_rows(session)
+            n_dept = sum(1 for c in rows if _dept_like(c))
+            verdict = (
+                f"数えられる{level}行 {n_dept}件"
+                if n_dept
+                else f"⚠ 数えられる{level}行が0件（グリッドが全商品のままの疑い）"
+            )
+            print(f"[ABCprobe] 判定 分類={level}: {verdict} / 視覚行 計{len(rows)}")
             print(f"[ABCprobe] === 分類={level} 視覚行（先頭200/計{len(rows)}） ===")
             for cells in rows[:200]:
                 print("   ", " | ".join(cells[:14]))
