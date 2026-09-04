@@ -1601,6 +1601,9 @@ def report_abc_detail(
     d_to = _date(y + (m == 12), 1 if m == 12 else m + 1, 1)
 
     codes = list(master.active_codes)
+    # ワークフローの入力は空欄だと既定値（1店）に化けるので、「全店」で明示的に外せるようにする。
+    if store_filter in ("all", "全店", "*"):
+        store_filter = None
     if store_filter:
         want = {s.store_code for s in master.active if store_filter in (s.store_code, s.store_name)}
         if not want:
