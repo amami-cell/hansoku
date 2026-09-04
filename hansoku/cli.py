@@ -265,11 +265,17 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
         def _slash(d: str | None) -> str:
             return (d or "").replace("-", "/")
 
+        kw = {}
+        if args.abc_levels:
+            # 見たい分類だけに絞る。全部出すとログが千行を超えて、肝心の節が
+            # 埋もれて読めない（部門だけ確かめたい場面が多い）。
+            kw["levels"] = tuple(x.strip() for x in args.abc_levels.split(",") if x.strip())
         return probe_abc_store(
             Path(args.artifacts),
             store=args.abc_store or "ぎふや 天満橋店",
             d_from=_slash(args.abc_from),
             d_to=_slash(args.abc_to),
+            **kw,
         )
     if args.mode == "abc-dom-probe":
         from .ingest.fw_daily import probe_abc_dom
@@ -690,6 +696,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="abc-store-probe の開始日 YYYY-MM-DD")
     fwdaily.add_argument("--abc-to", default=None, dest="abc_to",
                          help="abc-store-probe の終了日 YYYY-MM-DD")
+    fwdaily.add_argument("--abc-levels", default=None, dest="abc_levels",
+                         help="abc-store-probe で出す分類（カンマ区切り。既定=全商品,部門,グループ,メニュー）")
     fwdaily.add_argument("--abc-item", default=None, dest="abc_item",
                          help="lunch-analyze: 開始日検出に使う新商品名の一部（既定=冷やし鶏）")
     fwdaily.add_argument("--abc-month", default=None, dest="abc_month",
