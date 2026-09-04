@@ -229,6 +229,7 @@ jobs:
               python -m hansoku.cli fw-daily --mode abc-detail \
                 --month "${{ inputs.abc_ingest_month }}" \
                 --abc-store "${{ inputs.abc_store }}" \
+                --abc-item "${{ inputs.abc_item }}" \
                 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "abc-coverage" ]; then
               python -m hansoku.cli fw-daily --mode abc-coverage \

@@ -308,6 +308,7 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 master,
                 month=args.month or "2025-12",
                 store_filter=args.abc_store or None,
+                items=args.abc_item or None,
             )
     if args.mode == "abc-coverage":
         from .ingest.fw_daily import report_abc_coverage

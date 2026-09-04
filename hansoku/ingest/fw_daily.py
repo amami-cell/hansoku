@@ -1568,12 +1568,17 @@ def report_abc_detail(
     month: str,
     store_filter: str | None = None,
     top_n: int = 20,
+    items: str | None = None,
 ) -> int:
     """指定月の 部門一覧と売れ筋商品を、店ごとにそのまま印字する。FWログイン不要。
 
     施策台帳の bucket（効く部門）と items（商品名キーワード）に何を書けばよいかを
     決めるための道具。前年同月を指定すれば、去年その施策が実際どの部門・どの商品で
     立っていたかが分かる（例: 忘新年会なら 2025-12）。
+
+    items にカンマ区切りのキーワードを渡すと、一致した商品だけを全店ぶん並べる
+    （部門は出さない）。「忘新年会コース」が各店で実際どういう商品名なのかを
+    一度に見るための形。
     """
     import sys as _sys
     from datetime import date as _date
@@ -1624,6 +1629,25 @@ def report_abc_detail(
         )
     ):
         prods.setdefault(row["store_code"], []).append((row["product_name"], row["value"]))
+
+    keywords = [k.strip() for k in (items or "").split(",") if k.strip()]
+    if keywords:
+        print(f"=== ABC明細 {month} 商品名一致 {keywords} ===")
+        hit_any = False
+        for st in master.active:
+            if st.store_code not in codes:
+                continue
+            p_all = sorted(prods.get(st.store_code, []), key=lambda x: x[1], reverse=True)
+            hits = [(n, v) for n, v in p_all if any(k in n for k in keywords)]
+            if not hits:
+                continue
+            hit_any = True
+            print(f"\n── {st.store_code} {st.store_name} ──")
+            for name, v in hits:
+                print(f"    {int(v):>10,}  {name}")
+        if not hit_any:
+            print("  一致する商品はありませんでした。")
+        return 0
 
     print(f"=== ABC明細 {month} （部門と売れ筋上位{top_n}品） ===")
     for st in master.active:
