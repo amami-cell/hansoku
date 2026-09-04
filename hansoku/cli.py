@@ -291,6 +291,18 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 date_to=args.abc_to or "2026-08",
                 metric=args.metric,
             )
+    if args.mode == "abc-detail":
+        from .ingest.fw_daily import report_abc_detail
+
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return report_abc_detail(
+                warehouse,
+                master,
+                month=args.month or "2025-12",
+                store_filter=args.abc_store or None,
+            )
     if args.mode == "abc-coverage":
         from .ingest.fw_daily import report_abc_coverage
 
@@ -662,7 +674,8 @@ def build_parser() -> argparse.ArgumentParser:
                  "hourly", "hourly-dry", "abc", "abc-dry", "abc-store-probe",
                  "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
-                 "abc-dom-probe", "uriage-probe", "monthly-coverage"],
+                 "abc-dom-probe", "uriage-probe", "monthly-coverage",
+                 "abc-detail"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument(

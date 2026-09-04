@@ -1561,6 +1561,93 @@ def report_abc_coverage(warehouse, master, month: str | None = None) -> int:
     return 0
 
 
+def report_abc_detail(
+    warehouse,
+    master,
+    *,
+    month: str,
+    store_filter: str | None = None,
+    top_n: int = 20,
+) -> int:
+    """指定月の 部門一覧と売れ筋商品を、店ごとにそのまま印字する。FWログイン不要。
+
+    施策台帳の bucket（効く部門）と items（商品名キーワード）に何を書けばよいかを
+    決めるための道具。前年同月を指定すれば、去年その施策が実際どの部門・どの商品で
+    立っていたかが分かる（例: 忘新年会なら 2025-12）。
+    """
+    import sys as _sys
+    from datetime import date as _date
+
+    from ..db.warehouse import AggregateQuery
+    from ..model import (
+        GRAIN_MONTH,
+        METRIC_DEPT_SALES,
+        METRIC_PRODUCT_SALES,
+        dept_bucket,
+    )
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    y, m = int(month[:4]), int(month[5:7])
+    d_from = _date(y, m, 1)
+    d_to = _date(y + (m == 12), 1 if m == 12 else m + 1, 1)
+
+    codes = list(master.active_codes)
+    if store_filter:
+        want = {s.store_code for s in master.active if store_filter in (s.store_code, s.store_name)}
+        if not want:
+            want = {s.store_code for s in master.active if store_filter in s.store_name}
+        if not want:
+            print(f"[ABC明細] 店舗『{store_filter}』をマスタで解決できません。終了。")
+            return 1
+        codes = sorted(want)
+
+    depts: dict[str, list[tuple[str, float]]] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=d_from, date_to=d_to, grain=GRAIN_MONTH,
+            metrics=[METRIC_DEPT_SALES], store_codes=codes,
+            group_by=("store_code", "product_name"),
+        )
+    ):
+        depts.setdefault(row["store_code"], []).append((row["product_name"], row["value"]))
+
+    prods: dict[str, list[tuple[str, float]]] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=d_from, date_to=d_to, grain=GRAIN_MONTH,
+            metrics=[METRIC_PRODUCT_SALES], store_codes=codes,
+            group_by=("store_code", "product_name"),
+        )
+    ):
+        prods.setdefault(row["store_code"], []).append((row["product_name"], row["value"]))
+
+    print(f"=== ABC明細 {month} （部門と売れ筋上位{top_n}品） ===")
+    for st in master.active:
+        if st.store_code not in codes:
+            continue
+        d = sorted(depts.get(st.store_code, []), key=lambda x: x[1], reverse=True)
+        p = sorted(prods.get(st.store_code, []), key=lambda x: x[1], reverse=True)
+        if not d and not p:
+            continue
+        print(f"\n── {st.store_code} {st.store_name} ──")
+        if d:
+            total = sum(v for _, v in d) or 1.0
+            print(f"  [部門] {len(d)}件 合計{int(total):,}")
+            for name, v in d:
+                print(f"    {v / total * 100:5.1f}%  {int(v):>10,}  {name}  → {dept_bucket(name)}")
+        else:
+            print("  [部門] なし")
+        if p:
+            print(f"  [商品] 上位{min(top_n, len(p))}／{len(p)}品")
+            for name, v in p[:top_n]:
+                print(f"    {int(v):>10,}  {name}")
+    return 0
+
+
 def _expand_months(spec: str) -> list[str]:
     """月の指定を展開する。"2025-12" / "2025-11,2025-12" / "2024-09..2026-07"。
 
