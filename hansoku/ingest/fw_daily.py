@@ -2211,6 +2211,10 @@ def probe_abc_store(
         KW = ("スープ", "沼", "ランチ", "パスタ", "完熟", "ペペロン", "こくうま", "クリーム", "禁断")
         # グリッドが「部門」に切り替わったのか、全商品のままなのかを1行で判る形にする。
         # 200行ダンプの中から目視で読むのは毎回つらく、取り違えのもとになる。
+        # 行のダンプは40行まで。以前は200行×4分類でログが千行を超え、肝心の判定が
+        # 埋もれて読めなかった。商品名を一覧したいだけなら abc-detail（DB照会）で足りる。
+        dump_n = 40
+        summary: list[str] = []
         for level in levels:
             ok = _abc_click_radio(session.page, level)
             print(f"[ABCprobe] 分類ラジオ『{level}』クリック={ok}")
@@ -2221,15 +2225,19 @@ def probe_abc_store(
                 if n_dept
                 else f"⚠ 数えられる{level}行が0件（グリッドが全商品のままの疑い）"
             )
-            print(f"[ABCprobe] 判定 分類={level}: {verdict} / 視覚行 計{len(rows)}")
-            print(f"[ABCprobe] === 分類={level} 視覚行（先頭200/計{len(rows)}） ===")
-            for cells in rows[:200]:
+            summary.append(f"  分類={level:<6} {verdict} / 視覚行 計{len(rows)} / ラジオclick={ok}")
+            print(f"[ABCprobe] === 分類={level} 視覚行（先頭{dump_n}/計{len(rows)}） ===")
+            for cells in rows[:dump_n]:
                 print("   ", " | ".join(cells[:14]))
             hits = [c for c in rows if any(k in " ".join(c) for k in KW)]
             if hits:
                 print(f"[ABCprobe] --- {level}: ランチ関連キーワード一致 {len(hits)}行 ---")
                 for cells in hits:
                     print("   *", " | ".join(cells[:14]))
+        # 判定はまとめて最後にもう一度出す。ログの末尾だけ見れば結論が分かるように。
+        print(f"[ABCprobe] === 判定まとめ {store} {d_from}〜{d_to} ===")
+        for line in summary:
+            print(line)
         session.snapshot("abc_store_probe")
     return 0
 
