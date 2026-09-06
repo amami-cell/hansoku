@@ -893,7 +893,11 @@ function renderCampaigns() {
   const body = rows.map(({ c, s, sum }) => {
     const k = kindOf(c.kind);
     const range = c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
-    const scope = c.scope_all ? "全店" : `${sum.total}店`;
+    // 台帳に書いた対象店数を出す。実績のある店数だけ出すと、施策詳細の見出し
+    // （c.stores.length）と食い違って「3店」「2店」が同じ画面に並ぶ。
+    const scope = c.scope_all
+      ? "全店"
+      : `${c.stores.length}店${sum.total < c.stores.length ? `（実績あり ${sum.total}）` : ""}`;
     const tgt = targetOf(c);
     // 効果（確定分の実績合計・前年比）。売上のときだけ意味を持つ
     let effHtml = `<span class="muted">確定待ち</span>`;
@@ -1854,6 +1858,10 @@ function crossProfit() {
     return {
       code, name: s.name, brand_name: s.brand_name,
       kt, gp: lcr ? 1 - lcr.v : null,
+      // 対象月は店ごとに違う（取込の進み方が揃っていない）。同じ表に並べる以上、
+      // どの月の数字なのかを行ごとに出さないと、月をまたいだ順位づけになる。
+      ktM: ls ? ls.m : null,
+      gpM: lcr ? lcr.m : null,
     };
   }).filter(x => x.kt != null || x.gp != null);
 }
@@ -1871,16 +1879,22 @@ function deptCostTargets(code, n = 3) {
 
 // 原価率の前月比トレンド。直近確定月と、その一つ前（確定・cost_rateあり）を比較。
 // deltaPt は pt差（+＝原価率上昇＝悪化）。材料が2ヶ月分なければ null。
+// 原価率の「前月比」。隣り合った2ヶ月でなければ出さない。
+//
+// 以前は「原価率が入っている直近2ヶ月」を拾うだけで、隣接しているか見ていなかった。
+// 原価率は月によって欠けることがあるので、10ヶ月離れた2点の差を「前月比 +x.xpt」と
+// 表示し、そのまま原価アラートを鳴らしていた。
 function costTrend(code) {
   const cr = DATA.cost_rate[code] || {};
-  const ms = [];
-  for (let i = DATA.months.length - 1; i >= 0 && ms.length < 2; i--) {
+  let cur = null;
+  for (let i = DATA.months.length - 1; i >= 0; i--) {
     const m = DATA.months[i];
     if (m >= CURRENT_MONTH) continue;
-    if (typeof cr[m] === "number") ms.push(m);
+    if (typeof cr[m] === "number") { cur = m; break; }
   }
-  if (ms.length < 2) return null;
-  const [cur, prev] = ms;
+  if (!cur) return null;
+  const prev = addMonth(cur, -1);
+  if (typeof cr[prev] !== "number") return null;   // 前月が無ければ前月比は出さない
   return { cur, prev, curV: cr[cur], prevV: cr[prev], deltaPt: (cr[cur] - cr[prev]) * 100 };
 }
 
@@ -2001,8 +2015,8 @@ function renderCross() {
           <span class="xpno">${i + 1}</span>
           <span class="xpname">${esc(x.name)}<small>${esc(x.brand_name || "")}</small>${isWorst ? '<span class="xptag">原価改善の狙い目</span>' : ""}</span>
           <span class="xpbar"><span class="xpfill" style="width:${Math.max(4, Math.round(x.kt / maxKt * 100))}%"></span></span>
-          <span class="xpkt">${yen(x.kt)}<small>客単価</small></span>
-          <span class="xpgp ${gpCls}">${x.gp != null ? pct(x.gp) : "—"}<small>粗利率</small></span>
+          <span class="xpkt">${yen(x.kt)}<small>客単価${x.ktM ? "・" + x.ktM : ""}</small></span>
+          <span class="xpgp ${gpCls}">${x.gp != null ? pct(x.gp) : "—"}<small>理論粗利率${x.gpM ? "・" + x.gpM : ""}</small></span>
           ${aim}
         </li>`;
       }).join("");
@@ -2012,7 +2026,11 @@ function renderCross() {
       return `
     <section class="block">
       <div class="bhead"><h2>収益性ランキング（横断）</h2>
-        <span class="bnote">直近確定月の 客単価 × 粗利率　${prof.length}店</span></div>
+        <span class="bnote">${(() => {
+          const ms = [...new Set(prof.map(x => x.ktM).filter(Boolean))].sort();
+          const span = ms.length > 1 ? `対象月は店により ${ms[0]}〜${ms[ms.length - 1]}` : `対象月 ${ms[0] || "―"}`;
+          return `各店の直近確定月の 客単価 × 理論粗利率　${prof.length}店　${span}`;
+        })()}</span></div>
       <div class="panel"><ul class="xplist">${rows}</ul>
         <div class="bnote" style="margin-top:8px">客単価＝売上÷客数、理論粗利率＝100−FW理論原価率（ロス・棚卸差異は含まない）。行タップで店舗詳細へ。</div>
         ${worstNote}

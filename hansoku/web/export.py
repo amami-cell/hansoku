@@ -603,13 +603,17 @@ def build(
                     if n.store_code != s.store_code and n.store_code in monthly
                 ],
                 "shared_facility": s.is_shared_facility,
+                # 実績がまだ無い店（FW未連動など）も一覧には載せる。落とすと、その店に
+                # 書いた施策が画面から丸ごと消え、書き手は入力ミスと区別できない。
+                # 集計側は hasData で弾いているので、混ざっても数字は動かない。
+                "has_actuals": s.store_code in monthly,
+                "pos": s.pos,
                 # 業態変更（リニューアル）。この月より前は別の店の数字なので、
                 # またぐ前年比には注意書きを出す（数字自体は消さない）。
                 "renewal_month": s.renewal_month or None,
                 "former_name": s.former_name or None,
             }
             for s in master.active
-            if s.store_code in monthly
         ],
         "monthly": monthly,
         "cost_rate": cost_rates,

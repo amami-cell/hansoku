@@ -147,3 +147,16 @@ def test_JSONが小さい(payload):
     # 画面が一瞬で読める大きさに収まっていること（数百KB以内）
     size = len(json.dumps(payload, ensure_ascii=False))
     assert size < 500_000
+
+
+def test_実績の無い店も一覧に載る(payload, master):
+    """FW未連動の店（1766 ぎふや福岡天神・pos: uleji）を落とすと、その店に書いた
+    施策が画面から丸ごと消え、書き手は入力ミスと区別できない。
+    集計側は hasData で弾いているので、混ざっても数字は動かない。"""
+    codes = {s["code"] for s in payload["stores"]}
+    assert codes == set(master.active_codes)
+    # 実績があるかを明示的に持つ（画面が「未取込」と書き分けられるように）。
+    # 値は monthly に居るかどうかと必ず一致する。
+    for s in payload["stores"]:
+        assert s["has_actuals"] == (s["code"] in payload["monthly"])
+        assert s["pos"]

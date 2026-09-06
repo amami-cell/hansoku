@@ -265,5 +265,63 @@ test("台帳の target はもう読まない（目標はアプリに一本化）
   assert.equal(call(ctx, `targetOf(${JSON.stringify(c)})`), null);
 });
 
+console.log("原価率の前月比（costTrend）");
+
+const crBase = (cost_rate, months) => ({
+  ...base,
+  months: months || ["2025-08", "2026-06", "2026-07"],
+  cost_rate: { 1006: cost_rate },
+});
+
+test("隣り合った月なら前月比を出す", () => {
+  const ctx = loadApp(crBase({ "2026-06": 0.30, "2026-07": 0.32 }));
+  const t = call(ctx, `costTrend("1006")`);
+  assert.equal(t.cur, "2026-07");
+  assert.equal(t.prev, "2026-06");
+  assert.ok(Math.abs(t.deltaPt - 2) < 1e-9, String(t.deltaPt));
+});
+
+test("月が飛んでいたら前月比を出さない（10ヶ月差を前月比と呼ばない）", () => {
+  const ctx = loadApp(crBase({ "2025-08": 0.30, "2026-07": 0.32 }));
+  assert.equal(call(ctx, `costTrend("1006")`), null);
+});
+
+test("飛んだ月では原価アラートも鳴らさない", () => {
+  const ctx = loadApp(crBase({ "2025-08": 0.28, "2026-07": 0.36 }));  // 見かけ +8pt
+  assert.equal(call(ctx, `costAlerts().length`), 0);
+});
+
+test("隣接していれば原価アラートは鳴る", () => {
+  const ctx = loadApp(crBase({ "2026-06": 0.28, "2026-07": 0.36 }));
+  assert.equal(call(ctx, `costAlerts().length`), 1);
+});
+
+console.log("横断の収益性ランキング（crossProfit）");
+
+test("行ごとに対象月を持つ（店で直近確定月が違う）", () => {
+  const data = {
+    ...base,
+    months: ["2026-06", "2026-07"],
+    stores: [
+      { code: "1006", name: "A店", region: "大阪", neighbors: [] },
+      { code: "1015", name: "B店", region: "東京", neighbors: [] },
+    ],
+    monthly: {
+      1006: { "2026-07": { sales: 1000000 } },   // 7月まで
+      1015: { "2026-06": { sales: 2000000 } },   // 6月まで
+    },
+    covers: { 1006: { "2026-07": 200 }, 1015: { "2026-06": 500 } },
+    cost_rate: { 1006: { "2026-07": 0.30 } },
+  };
+  const ctx = loadApp(data);
+  const rows = call(ctx, `crossProfit()`);
+  const by = Object.fromEntries(rows.map(r => [r.code, r]));
+  assert.equal(by["1006"].ktM, "2026-07");
+  assert.equal(by["1015"].ktM, "2026-06");
+  // 客単価そのものは各店の対象月で計算される
+  assert.equal(by["1006"].kt, 5000);
+  assert.equal(by["1015"].kt, 4000);
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);
