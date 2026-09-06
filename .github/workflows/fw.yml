@@ -37,6 +37,7 @@ on:
           - monthly-coverage
           - abc-detail
           - data-audit
+          - source-audit
           - abc-dom-probe
           - manager-dl-probe
         default: explore
@@ -224,6 +225,13 @@ jobs:
                 --abc-from "${{ inputs.abc_from }}" \
                 --abc-to "${{ inputs.abc_to }}" \
                 --metric "${{ inputs.coverage_metric }}" \
+                --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "source-audit" ]; then
+              # FWログイン不要。同じ指標を複数の取り込み口が書いていないか調べる。
+              python -m hansoku.cli fw-daily --mode source-audit \
+                --metric "${{ inputs.coverage_metric }}" \
+                --abc-from "${{ inputs.abc_from }}" \
+                --abc-to "${{ inputs.abc_to }}" \
                 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "data-audit" ]; then
               # FWログイン不要。貯まったデータ側からおかしな行を洗い出す。

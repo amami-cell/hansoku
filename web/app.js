@@ -199,7 +199,7 @@ function campProgress(c) {
 function campGoalRate(c) {
   const t = targetOf(c);
   if (t == null || !t) return null;
-  const sum = campaignSummary(c);
+  const sum = campaignSummary(c, salesAt);
   if (!sum || !sum.stores || !sum.cur) return null;
   return { rate: sum.cur / t * 100, cur: sum.cur, target: t };
 }
@@ -826,7 +826,10 @@ function renderList() {
 
 // ── 施策の効果ランキング（施策を全店横断で集計）──────────────────────────
 // 1施策を、対象店それぞれの campEffect（確定月のみ）で合算する。
-function campaignSummary(c) {
+// acc を渡すとその指標で集計する。目標達成率・効果判定は「売上」で固定したいので
+// salesAt を渡す（画面上部の指標セレクトに引きずられると、ドリンク売上や理論原価に
+// 切り替えたときに「目標◯万円→達成◯%」の数字だけが黙って変わってしまう）。
+function campaignSummary(c, acc) {
   let cur = 0, prev = 0, prevOk = true, stores = 0, monthsMax = 0, tot = 0;
   let mom = 0, momOk = true;
   // 集客（客数）も同じ期間で合算する。売上と別枠（DATA.covers）
@@ -834,7 +837,7 @@ function campaignSummary(c) {
   for (const code of c.stores) {
     if (!hasData(code)) continue;
     tot += 1;
-    const e = campEffect(code, c);
+    const e = acc ? effectOver(code, c, acc) : campEffect(code, c);
     if (!e) continue;
     stores += 1; cur += e.cur; monthsMax = Math.max(monthsMax, e.months);
     if (e.prev != null) prev += e.prev; else prevOk = false;
@@ -1204,16 +1207,17 @@ function renderCampaign(id) {
       : `<span class="muted">前年比 ―</span>`;
     const mom = sum.momPct != null
       ? `<span class="${sum.momPct >= 0 ? "up" : "down"}">前月比 ${signed(sum.momPct)}%</span>` : "";
-    const rate = (tgt && sum.cur) ? sum.cur / tgt * 100 : null;
+    // 目標は円（売上）で立てるので、達成率は必ず売上で割る。
+    const gr = campGoalRate(c);
     const goalKpi = tgt != null
-      ? `<div class="kpi"><div class="lbl">目標達成</div>
-          <div class="big ${rate != null && rate >= 100 ? "up" : "down"}">${rate != null ? rate.toFixed(0) + "%" : "―"}</div>
-          <div class="delta">目標 ${man(tgt)} → 実績 ${man(sum.cur)}</div></div>` : "";
+      ? `<div class="kpi"><div class="lbl">目標達成（売上）</div>
+          <div class="big ${gr && gr.rate >= 100 ? "up" : "down"}">${gr ? gr.rate.toFixed(0) + "%" : "―"}</div>
+          <div class="delta">目標 ${man(tgt)} → 売上 ${gr ? man(gr.cur) : "―"}</div></div>` : "";
     const covKpi = (METRIC === "sales" && sum.covers != null)
       ? `<div class="kpi"><div class="lbl">集客（確定分）</div><div class="big">${nin(sum.covers)}</div>
           <div class="delta">${sum.coversPct != null ? `<span class="${sum.coversPct >= 0 ? "up" : "down"}">前年比 ${signed(sum.coversPct)}%</span>` : "前年比 ―"}</div></div>` : "";
     overall = `<div class="kpis">
-      <div class="kpi"><div class="lbl">実績（確定${sum.months}ヶ月・${sum.stores}/${sum.total}店）</div>
+      <div class="kpi"><div class="lbl">${METRIC_LABELS[METRIC]}（確定${sum.months}ヶ月・${sum.stores}/${sum.total}店）</div>
         <div class="big">${man(sum.cur)}<span class="unit">円</span></div>
         <div class="delta">${yoy}　${mom}</div></div>
       ${goalKpi}${covKpi}
@@ -1488,10 +1492,10 @@ function campVerdict(c) {
       return { tone: "flat", label: "様子見", signals: sig };
     }
   }
-  if (METRIC !== "cost_rate") {
-    const sum = campaignSummary(c);
+  {
+    const sum = campaignSummary(c, salesAt);
     if (sum.stores && sum.pct != null) {
-      const sig = [`前年比 ${signed(sum.pct)}%`];
+      const sig = [`売上 前年比 ${signed(sum.pct)}%`];
       if (sum.momPct != null) sig.push(`前月比 ${signed(sum.momPct)}%`);
       return sum.pct >= 0
         ? { tone: "good", label: "効果あり", signals: sig }

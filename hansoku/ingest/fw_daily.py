@@ -1697,6 +1697,106 @@ def report_data_audit(
     return 0
 
 
+def report_source_audit(
+    warehouse,
+    master,
+    *,
+    metric: str = "sales",
+    date_from: str = "2024-09",
+    date_to: str = "2026-08",
+    gap_pct: float = 1.0,
+) -> int:
+    """同じ (店, 月, 指標) を複数の取り込み口が書いていないかを調べる。FWログイン不要。
+
+    月次の売上は fw_sheet（店長会シート・毎日）と fw_uriage_suii（月別日別売上推移・
+    手動バックフィル）の両方が書き得る。入れ替えの範囲は (source, grain, date) なので
+    両方の行が共存し、どちらが採用されるかは ingested_at 任せ。二つの定義が違えば
+    （税込/税抜・純売上/総売上）、バックフィルを流した日から画面の数字が黙って変わる。
+
+    月ごとに「どの source が何店ぶん書いているか」と、同じ (店,月) を複数 source が
+    持っていて値が gap_pct% 以上ずれている件数を出す。
+    """
+    import sys as _sys
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    y, m = int(date_from[:4]), int(date_from[5:7])
+    ly, lm = int(date_to[:4]), int(date_to[5:7])
+    d_from = f"{y:04d}-{m:02d}-01"
+    d_to = f"{ly + (lm == 12):04d}-{1 if lm == 12 else lm + 1:02d}-01"
+    table = warehouse.table_name("f_actuals")
+    rows = warehouse.query(
+        f"""
+        SELECT store_code, date, source, kind, MAX(value) AS value
+        FROM {table}
+        WHERE metric = :metric AND grain = :grain
+          AND date >= :d_from AND date < :d_to
+        GROUP BY store_code, date, source, kind
+        ORDER BY date, store_code, source
+        """,
+        {"metric": metric, "grain": "月", "d_from": d_from, "d_to": d_to},
+    )
+    if not rows:
+        print(f"[出どころ] {metric} の月次データがありません（{date_from}〜{date_to}）")
+        return 0
+
+    name_of = {s.store_code: s.store_name for s in master.active}
+    # 月 → source → 店数、および 月 → 店 → {source: 値}
+    per_month: dict[str, dict[str, int]] = {}
+    per_cell: dict[tuple[str, str], dict[str, float]] = {}
+    for r in rows:
+        month = r["date"].strftime("%Y-%m")
+        src = r["source"]
+        per_month.setdefault(month, {})[src] = per_month.setdefault(month, {}).get(src, 0) + 1
+        per_cell.setdefault((r["store_code"], month), {})[src] = float(r["value"])
+
+    print(f"=== 出どころ別 取り込み状況 metric={metric} / {date_from}〜{date_to} ===\n")
+    print("月ごとの source（店数）:")
+    prev_srcs: set[str] | None = None
+    switches: list[str] = []
+    for month in sorted(per_month):
+        srcs = per_month[month]
+        label = " / ".join(f"{s}:{n}店" for s, n in sorted(srcs.items()))
+        mark = ""
+        if prev_srcs is not None and set(srcs) != prev_srcs:
+            mark = "  ← ここで出どころが変わっています"
+            switches.append(month)
+        print(f"  {month}  {label}{mark}")
+        prev_srcs = set(srcs)
+
+    # 同じ (店,月) を複数 source が持ち、値がずれているもの
+    conflicts = []
+    for (code, month), by_src in sorted(per_cell.items()):
+        if len(by_src) < 2:
+            continue
+        lo, hi = min(by_src.values()), max(by_src.values())
+        if lo and (hi / lo - 1) * 100 >= gap_pct:
+            conflicts.append((code, month, by_src, (hi / lo - 1) * 100))
+
+    print(f"\n同じ (店,月) を複数 source が持ち {gap_pct}% 以上ずれている: {len(conflicts)}件")
+    for code, month, by_src, gap in conflicts[:40]:
+        detail = " / ".join(f"{s}={v:,.0f}" for s, v in sorted(by_src.items()))
+        print(f"  {code} {name_of.get(code, '')[:14]} {month}  差 {gap:.1f}%  {detail}")
+    if len(conflicts) > 40:
+        print(f"  … 他 {len(conflicts) - 40}件")
+
+    if switches:
+        print(
+            "\n⚠ 出どころが切り替わった月があります: "
+            + ", ".join(switches)
+            + "\n  定義（税込/税抜・純売上/総売上）が違えば、その境目をまたぐ前年比が"
+            "まるごとずれます。"
+        )
+    if conflicts or switches:
+        print(f"::error::[出どころ] 切替 {len(switches)}件 / 食い違い {len(conflicts)}件")
+        return 1
+    print("\n出どころは一貫しています。")
+    return 0
+
+
 def report_abc_coverage(warehouse, master, month: str | None = None) -> int:
     """店舗別ABC取込のカバレッジ確認。各稼働店の 商品数・部門数・バケット別売上を印字。
 

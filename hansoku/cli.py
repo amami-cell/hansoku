@@ -297,6 +297,19 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 date_to=args.abc_to or "2026-08",
                 metric=args.metric,
             )
+    if args.mode == "source-audit":
+        from .ingest.fw_daily import report_source_audit
+
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return report_source_audit(
+                warehouse,
+                master,
+                metric=args.metric,
+                date_from=args.abc_from or "2024-09",
+                date_to=args.abc_to or "2026-08",
+            )
     if args.mode == "data-audit":
         from .ingest.fw_daily import report_data_audit
 
@@ -694,7 +707,7 @@ def build_parser() -> argparse.ArgumentParser:
                  "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
                  "abc-dom-probe", "uriage-probe", "monthly-coverage",
-                 "abc-detail", "data-audit"],
+                 "abc-detail", "data-audit", "source-audit"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument(
