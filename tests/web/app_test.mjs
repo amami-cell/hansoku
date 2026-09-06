@@ -196,17 +196,35 @@ test("重なりが無ければその旨を出す", () => {
 
 console.log("目標達成率（campGoalRate）");
 
-test("画面の指標を切り替えても、達成率は売上のまま", () => {
+test("達成率の分子は主指標。店全体の売上で割らない", () => {
+  // コース部門100万に対して目標100万 → 100%。店全体(800万)で割ると800%になる。
   const c = camp({ id: "c1", bucket: "コース" });
   c.key = "c1@2026";
   const ctx = loadApp({ ...base, campaigns: [c] });
-  // 目標はアプリ（Neon）に入る。台帳には書かない。
-  call(ctx, `API_OK = true; SERVER_TARGETS = { "c1@2026": { value: 10000000 } };`);
+  call(ctx, `API_OK = true; SERVER_TARGETS = { "c1@2026": { value: 1000000 } };`);
+  const gr = call(ctx, `campGoalRate(${JSON.stringify(c)})`);
+  assert.equal(gr.cur, 1000000);
+  assert.equal(Math.round(gr.rate), 100);
+  assert.equal(gr.label, "コース");
+});
+
+test("画面の指標を切り替えても、達成率は動かない", () => {
+  const c = camp({ id: "c1", bucket: "コース" });
+  c.key = "c1@2026";
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  call(ctx, `API_OK = true; SERVER_TARGETS = { "c1@2026": { value: 1000000 } };`);
   const before = call(ctx, `campGoalRate(${JSON.stringify(c)}).cur`);
   call(ctx, `METRIC = "drink_sales";`);
-  const after = call(ctx, `campGoalRate(${JSON.stringify(c)}).cur`);
-  assert.equal(before, after);
-  assert.equal(before, 8000000);
+  assert.equal(call(ctx, `campGoalRate(${JSON.stringify(c)}).cur`), before);
+});
+
+test("終了日を書かない施策は「実施中」で、効果は直近まで見る", () => {
+  const c = camp({ id: "gm1", kind: "gm", start: "2026-01-01", end: "2026-01-01" });
+  c.open_ended = true;
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  assert.equal(call(ctx, `campStatus(${JSON.stringify(c)}).label`), "実施中");
+  assert.match(call(ctx, `campRange(${JSON.stringify(c)})`), /継続中/);
+  assert.equal(call(ctx, `campProgress(${JSON.stringify(c)})`), null);
 });
 
 console.log("目標・メモの鍵（回ごとに分ける）");
@@ -263,6 +281,34 @@ test("台帳の target はもう読まない（目標はアプリに一本化）
   const ctx = loadApp({ ...base, campaigns: [c] });
   call(ctx, `API_OK = true; SERVER_TARGETS = {};`);
   assert.equal(call(ctx, `targetOf(${JSON.stringify(c)})`), null);
+});
+
+test("店ごとの主指標を出せる（同じ店の施策が全部同じ数字にならない）", () => {
+  const data = {
+    ...base,
+    stores: [
+      { code: "1006", name: "A店", region: "大阪", neighbors: [] },
+      { code: "1015", name: "B店", region: "大阪", neighbors: [] },
+    ],
+    monthly: {
+      1006: { "2025-01": { sales: 10000000 }, "2026-01": { sales: 8000000 } },
+      1015: { "2025-01": { sales: 10000000 }, "2026-01": { sales: 8000000 } },
+    },
+    departments_monthly: {
+      1006: { "2025-01": bucket("コース", 800000, 10000000), "2026-01": bucket("コース", 1000000, 8000000) },
+      1015: { "2025-01": bucket("コース", 800000, 10000000), "2026-01": bucket("コース", 400000, 8000000) },
+    },
+  };
+  const c = camp({ bucket: "コース", stores: ["1006", "1015"] });
+  const ctx = loadApp({ ...data, campaigns: [c] });
+  const a = call(ctx, `campTargeted(${JSON.stringify(c)}, "1006")`);
+  const b = call(ctx, `campTargeted(${JSON.stringify(c)}, "1015")`);
+  assert.equal(a.cur, 1000000);
+  assert.equal(b.cur, 400000);
+  assert.equal(Math.round(a.pct), 25);
+  assert.equal(Math.round(b.pct), -50);
+  // 店を指定しなければ2店の合計
+  assert.equal(call(ctx, `campTargeted(${JSON.stringify(c)}).cur`), 1400000);
 });
 
 console.log("原価率の前月比（costTrend）");

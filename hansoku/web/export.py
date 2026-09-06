@@ -153,7 +153,12 @@ def load_schedule(
         if kind not in VALID_KINDS:
             kind = "dev"
         start = str(camp["start"])
-        end = str(camp.get("end", start))
+        # 終了日を書かない ＝ 単日ではなく「継続中（終了日未定）」。
+        # GM改定16件・ランチ4件・環境改善4件が end 未記入で、以前は開始翌日に
+        # 「終了」と表示され、効果も開始月の1ヶ月ぶんしか集計されなかった。
+        # グランドメニュー改定やランチ変更は、入れ替えたらそのまま続くもの。
+        open_ended = camp.get("end") in (None, "")
+        end = str(camp.get("end") or start)
         out.append(
             {
                 "id": str(camp.get("id", f"c{index}")),
@@ -167,6 +172,8 @@ def load_schedule(
                 "kind": kind,
                 "start": start,
                 "end": end,
+                # 終了日未定。画面は「実施中」のまま扱い、効果は開始月から直近確定月まで見る。
+                "open_ended": open_ended,
                 "note": str(camp.get("note", "")) if camp.get("note") else "",
                 # 施策が効くFW ABC部門（コース/食べ放題/ランチ等）。書くと施策詳細に
                 # その部門の実績＋構成比を出す。未設定は None（種類から自動推定）。

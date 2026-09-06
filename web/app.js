@@ -105,7 +105,13 @@ const bareId = key => String(key).split("@")[0];
 async function editGoal(id) {
   const t = API_OK ? (SERVER_TARGETS[id] || SERVER_TARGETS[bareId(id)]) : null;
   const cur = API_OK ? (t && t.value) : (id in GOALS ? GOALS[id] : GOALS[bareId(id)]);
-  const v = window.prompt("この販促の目標売上（円）を入力してください（空欄で削除）", cur == null ? "" : String(cur));
+  const c = (DATA.campaigns || []).find(x => campKey(x) === id || x.id === bareId(id));
+  const basis = c ? goalBasisLabel(c) : null;
+  const v = window.prompt(
+    basis
+      ? `目標を入力してください（円・空欄で削除）\n\nこの施策の実績は「${basis}」で見ています。同じものへの目標を入れてください。`
+      : "この販促の目標売上（円）を入力してください（空欄で削除）",
+    cur == null ? "" : String(cur));
   if (v === null) return;
   const cleaned = String(v).replace(/[,，円\s]/g, "");
   let value = null;
@@ -198,30 +204,54 @@ const TODAY = (() => {
 // 施策の状態（今日基準）。予定 / 実施中 / 終了
 function campStatus(c) {
   if (TODAY < c.start) return { k: "soon", label: "予定" };
+  // 終了日を書いていない施策は、始まったらずっと実施中。GM改定やランチ変更は
+  // 入れ替えたらそのまま続くもので、開始翌日に「終了」ではない。
+  if (c.open_ended) return { k: "live", label: "実施中" };
   if (TODAY > c.end) return { k: "done", label: "終了" };
   return { k: "live", label: "実施中" };
 }
+// 効果を見る期間の終わり。終了日未定なら「今」まで（＝直近確定月まで見る）。
+const campEndM = c => (c.open_ended ? CURRENT_MONTH : (c.end || c.start).slice(0, 7));
+// 画面に出す期間の文字。終了日未定は「〜 継続中」。
+const campRange = c =>
+  c.open_ended ? `${c.start} 〜 継続中`
+  : c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
 // 期間の進み具合（0-100）。予定=0／終了=100／実施中は start〜end の経過割合。
 function campProgress(c) {
   const k = campStatus(c).k;
   if (k === "soon") return 0;
+  if (c.open_ended) return null;   // 終わりが決まっていないので進捗率は出せない
   if (k === "done") return 100;
   const span = daysBetween(c.start, c.end) || 1;
   return Math.max(0, Math.min(100, Math.round(daysBetween(c.start, TODAY) / span * 100)));
 }
 // 目標達成率（確定分の実績合計÷目標）。目標や実績が無ければ null。
+// 目標達成率。分母（目標）と分子（実績）は必ず同じものを指すこと。
+//
+// 以前は分子が「店全体の売上」だった。忘年会コースに300万の目標を入れると、
+// 店全体の売上（数千万）÷300万 で達成率が数千%と出る。1回でもそんな数字を
+// 見たら、この画面の数字は二度と信用されない。
+// いまは主指標（その施策が効く部門・商品／GM改定は店全体）で割る。
 function campGoalRate(c) {
   const t = targetOf(c);
   if (t == null || !t) return null;
-  const sum = campaignSummary(c, salesAt);
-  if (!sum || !sum.stores || !sum.cur) return null;
-  return { rate: sum.cur / t * 100, cur: sum.cur, target: t };
+  const tg = campTargeted(c);
+  if (!tg || !tg.cur) return null;
+  return { rate: tg.cur / t * 100, cur: tg.cur, target: t, label: tg.label };
+}
+// 目標を入力してもらうときに「何に対する目標か」を必ず言う。
+function goalBasisLabel(c) {
+  const b = campBasis(c);
+  if (!b) return null;
+  if (b.kind === "store") return "店全体の売上";
+  if (b.kind === "items") return `${b.items.join("・")} の売上`;
+  return `${b.bucket}部門の売上`;
 }
 // 施策期間の効果（月次・確定分のみ）。施策が掛かる確定月の値を、前年同月と比べる。
 // 月次データしか無いので月単位の概算。当月（暫定）と未来月は含めない。
 // accessor(code, month) で「売上」でも「客数」でも同じ計算を使い回す。
 function effectOver(code, c, accessor) {
-  const sM = c.start.slice(0, 7), eM = c.end.slice(0, 7);
+  const sM = c.start.slice(0, 7), eM = campEndM(c);
   let cur = 0, prev = 0, months = 0, prevOk = true;
   for (const m of DATA.months) {
     if (m >= CURRENT_MONTH || m < sM || m > eM) continue;
@@ -892,12 +922,11 @@ function renderCampaigns() {
 
   const body = rows.map(({ c, s, sum }) => {
     const k = kindOf(c.kind);
-    const range = c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
-    // 台帳に書いた対象店数を出す。実績のある店数だけ出すと、施策詳細の見出し
-    // （c.stores.length）と食い違って「3店」「2店」が同じ画面に並ぶ。
-    const scope = c.scope_all
-      ? "全店"
-      : `${c.stores.length}店${sum.total < c.stores.length ? `（実績あり ${sum.total}）` : ""}`;
+    const range = campRange(c);
+    // 対象店は「1店」ではなく店名で出す。90件のうち大半が1店の施策なので、
+    // 件数だけだと一覧を見てもどの店の話か分からない（実際そうなっていた）。
+    // 3店を超えたら数にする（名前を並べても読めないため）。
+    const scope = campScopeLabel(c, sum.total);
     const tgt = targetOf(c);
     // 効果（確定分の実績合計・前年比）。売上のときだけ意味を持つ
     let effHtml = `<span class="muted">確定待ち</span>`;
@@ -1042,6 +1071,18 @@ const deptBucketAtM = (code, m, name) =>
   resolveDept(((DATA.departments_monthly || {})[code] || {})[m], name);
 const prodsAtM = (code, m) => ((DATA.products_monthly || {})[code] || {})[m] || [];
 
+// 施策の対象店の書き方。1〜3店なら店名、それ以上は件数。
+// 「1店」とだけ出しても、どの店の施策か分からない。
+function campScopeLabel(c, withData) {
+  if (c.scope_all) return "全店";
+  const codes = c.stores || [];
+  if (codes.length === 0) return "対象店なし";
+  if (codes.length <= 3) return codes.map(storeName).join("・");
+  const n = typeof withData === "number" && withData < codes.length
+    ? `${codes.length}店（実績あり ${withData}）` : `${codes.length}店`;
+  return n;
+}
+
 // ── 施策の主指標（その施策が効くはずの範囲だけを見る）────────────────────
 // 「効果」を対象店の総売上で見ると、同じ月に重なる施策が全部同じ数字を出す。
 // 実際 1店あたり2〜3件が重なるので、秋おすすめも忘年会もGM改定も同じ前年比になる。
@@ -1059,12 +1100,15 @@ function campBasis(c) {
   return null;
 }
 
-function campTargeted(c) {
+function campTargeted(c, onlyCode) {
   const basis = campBasis(c);
   if (!basis) return null;
+  const stores0 = onlyCode ? [onlyCode] : c.stores;
   if (basis.kind === "store") {
     // 店全体が範囲。ただし重なっている施策の数は必ず添えて読ませる。
-    const sum = campaignSummary(c, salesAt);
+    const sum = onlyCode
+      ? campaignSummary({ ...c, stores: [onlyCode] }, salesAt)
+      : campaignSummary(c, salesAt);
     if (!sum.stores) return null;
     return {
       basis, label: "店全体の売上", storeWide: true,
@@ -1072,10 +1116,10 @@ function campTargeted(c) {
       months: sum.months, stores: sum.stores,
     };
   }
-  const sM = c.start.slice(0, 7), eM = (c.end || c.start).slice(0, 7);
+  const sM = c.start.slice(0, 7), eM = campEndM(c);
   let cur = 0, prev = 0, prevOk = true;
   const months = new Set(), stores = new Set();
-  for (const code of c.stores) {
+  for (const code of stores0) {
     for (const m of abcMonths(code)) {
       // 当月（暫定）と未来月は入れない。店全体の効果と同じ扱い。
       if (m >= CURRENT_MONTH || m < sM || m > eM) continue;
@@ -1113,7 +1157,7 @@ function campTargeted(c) {
 // 同じ店・同じ期間に重なっている他の施策の数。店全体の売上を効果として見せるときは
 // 必ずこれを添える（その数字は重なっている施策すべてに共通のものなので）。
 function campOverlap(c) {
-  const sM = c.start.slice(0, 7), eM = (c.end || c.start).slice(0, 7);
+  const sM = c.start.slice(0, 7), eM = campEndM(c);
   const mine = new Set(c.stores);
   let n = 0;
   for (const o of DATA.campaigns || []) {
@@ -1303,7 +1347,7 @@ function renderCampaign(id) {
     <div class="empty">施策が見つかりません。</div>`;
   const k = kindOf(c.kind);
   const st = campStatus(c);
-  const range = c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
+  const range = campRange(c);
   const sum = campaignSummary(c);
   const tgt = targetOf(c);
   const prog = campTimeProgress(c);
@@ -1327,9 +1371,9 @@ function renderCampaign(id) {
     // 目標は円（売上）で立てるので、達成率は必ず売上で割る。
     const gr = campGoalRate(c);
     const goalKpi = tgt != null
-      ? `<div class="kpi"><div class="lbl">目標達成（売上）</div>
+      ? `<div class="kpi"><div class="lbl">目標達成${gr && gr.label ? `（${esc(gr.label)}）` : ""}</div>
           <div class="big ${gr && gr.rate >= 100 ? "up" : "down"}">${gr ? gr.rate.toFixed(0) + "%" : "―"}</div>
-          <div class="delta">目標 ${man(tgt)} → 売上 ${gr ? man(gr.cur) : "―"}</div></div>` : "";
+          <div class="delta">目標 ${man(tgt)} → 実績 ${gr ? man(gr.cur) : "―"}</div></div>` : "";
     const covKpi = (METRIC === "sales" && sum.covers != null)
       ? `<div class="kpi"><div class="lbl">集客（確定分）</div><div class="big">${nin(sum.covers)}</div>
           <div class="delta">${sum.coversPct != null ? `<span class="${sum.coversPct >= 0 ? "up" : "down"}">前年比 ${signed(sum.coversPct)}%</span>` : "前年比 ―"}</div></div>` : "";
@@ -1754,8 +1798,8 @@ function renderYear() {
     if (!gs.length) return "";
     const items = gs.map(c => {
       const k = kindOf(c.kind), st = campStatus(c);
-      const range = c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
-      const scope = c.scope_all ? "全店" : `${c.stores.length}店`;
+      const range = campRange(c);
+      const scope = campScopeLabel(c);
       return `<li data-camp="${c.id}">
         <span class="kchip" style="--kc:${k.color}">${k.label}</span>
         <div class="cbody">
@@ -2262,17 +2306,25 @@ function renderStore(code) {
   const promoBlock = sortedCamps.length
     ? `<ul class="clist">${sortedCamps.map(c => {
         const k = kindOf(c.kind);
-        const range = c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
+        const range = campRange(c);
         const st = campStatus(c);
+        // この店ぶんの主指標（その施策が効く部門・商品）。店全体の売上を出すと、
+        // 同じ店に重なっている施策が全部そろって同じ数字になる（1728 は6件重なる）。
+        const tgt1 = campTargeted(c, code);
         const eff = campEffect(code, c);
         let effHtml = "";
-        if (eff) {
-          const cmp = eff.pct != null
-            ? `<span class="${eff.pct >= 0 ? "up" : "down"}">前年比 ${signed(eff.pct)}%</span>（前年 ${man(eff.prev)}円）`
+        if (tgt1) {
+          const cmp = tgt1.pct != null
+            ? `<span class="${tgt1.pct >= 0 ? "up" : "down"}">前年比 ${signed(tgt1.pct)}%</span>${tgt1.prev != null ? `（前年 ${man(tgt1.prev)}円）` : ""}`
             : "前年データなし";
-          const mom = eff.momPct != null
-            ? `・<span class="${eff.momPct >= 0 ? "up" : "down"}">前月比 ${signed(eff.momPct)}%</span>` : "";
-          effHtml = `<div class="ceff">期間中の${METRIC_LABELS[METRIC]}（確定${eff.months}ヶ月）<b>${man(eff.cur)}円</b>・${cmp}${mom}</div>`;
+          effHtml = `<div class="ceff">${esc(tgt1.label)}（確定${tgt1.months}ヶ月）<b>${man(tgt1.cur)}円</b>・${cmp}</div>`;
+        } else if (!campBasis(c)) {
+          effHtml = `<div class="ceff muted">効果の測り方が未設定（台帳の bucket / items）</div>`;
+        }
+        if (eff && METRIC !== "sales") {
+          effHtml += `<div class="ceff sub2">店全体の${METRIC_LABELS[METRIC]} ${man(eff.cur)}円<span class="sub">（${esc(overlapNote(c))}）</span></div>`;
+        }
+        if (eff) {
           // 集客（客数）の効果。売上表示のときだけ、同じ期間の客数を前年比・前月比で添える
           if (METRIC === "sales") {
             const cov = campCovers(code, c);
@@ -2291,8 +2343,10 @@ function renderStore(code) {
         const tgt = targetOf(c);
         let goalHtml;
         if (tgt != null) {
-          const actual = eff ? eff.cur : null;
-          const rate = (actual != null && tgt > 0) ? actual / tgt * 100 : null;
+          // 目標は施策ぜんぶに対して立てたもの。店1軒の数字で割らない。
+          const gr1 = campGoalRate(c);
+          const actual = gr1 ? gr1.cur : null;
+          const rate = gr1 ? gr1.rate : null;
           const prog = rate != null
             ? ` ・ 実績(確定) ${man(actual)}円 ・ <span class="${rate >= 100 ? "up" : "down"}">達成 ${rate.toFixed(0)}%</span>`
             : ` ・ <span class="sub">実績は確定月が出てから</span>`;
