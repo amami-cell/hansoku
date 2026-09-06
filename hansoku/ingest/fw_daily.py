@@ -1661,14 +1661,29 @@ def report_data_audit(
     # ③ 部門合計が店の月次売上とかけ離れている
     #    商品計上外（サービス料等）があるので 90〜100% を妥当とみなす。
     print("\n=== ③ 部門合計が月次売上と合わない（90%未満 or 105%超） ===")
+    # 店によって、FWで商品に部門が紐付き始めた月が違う（1111/1151/1168 は 2026-07）。
+    # その最初の月は月の途中から紐付くので部分的にしか出ず、取込の失敗ではない。
+    # 何度入れ直しても同じ値になるので、赤にし続けても直しようがない。
+    # 「部門を取り始めた月」は除外して、別枠で見えるようにする。
+    first_dept_month = {}
+    for (code, mm) in depts:
+        if sum(v for _, v in depts[(code, mm)]):
+            prev = first_dept_month.get(code)
+            first_dept_month[code] = mm if prev is None else min(prev, mm)
+
     off = []
+    starting = []
     for (code, mm), items in sorted(depts.items()):
         d_tot = sum(v for _, v in items)
         s_tot = sales.get((code, mm)) or 0
         if not d_tot or not s_tot:
             continue
         ratio = d_tot / s_tot * 100
-        if ratio < 90 or ratio > 105:
+        if ratio >= 90 and ratio <= 105:
+            continue
+        if first_dept_month.get(code) == mm:
+            starting.append((code, mm, ratio, d_tot, s_tot))
+        else:
             off.append((code, mm, ratio, d_tot, s_tot))
     for code, mm, ratio, d_tot, s_tot in sorted(off, key=lambda x: x[2]):
         print(
@@ -1677,6 +1692,13 @@ def report_data_audit(
         )
     print(f"  → {len(off)}件" if off else "  → なし")
     findings += len(off)
+    if starting:
+        print("  （参考）部門を取り始めた月なので除外。以降の月が正常なら問題ない:")
+        for code, mm, ratio, d_tot, s_tot in sorted(starting):
+            print(
+                f"    {code} {name_of.get(code, ''):<14} {mm}  部門{int(d_tot):>11,}"
+                f" / 売上{int(s_tot):>11,} = {ratio:5.1f}%"
+            )
 
     # ④ 商品が極端に少ない月（グリッドを読み切れていない疑い）
     print("\n=== ④ 商品が5品以下しか入っていない月（売上はある） ===")
