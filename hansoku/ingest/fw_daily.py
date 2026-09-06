@@ -1537,6 +1537,137 @@ def report_monthly_coverage(
     return 0
 
 
+def report_data_audit(
+    warehouse,
+    master,
+    *,
+    date_from: str = "2024-09",
+    date_to: str = "2026-08",
+) -> int:
+    """取り込み済みのデータそのものを疑って、おかしな行を洗い出す。FWログイン不要。
+
+    「取れたつもり」は取込ログだけでは見つからないことが分かったので、貯まった側から
+    調べる。実際に見つかった事故を型として持っている:
+      - 合計行の原価率が商品名として入る（例: 商品名が "25.57%" で ¥2,378,250）
+      - 月をまたいで数字が丸ごと同一（日付が反映されていない）
+      - 部門合計が店の月次売上とかけ離れている（部分的にしか読めていない）
+    """
+    import sys as _sys
+    from datetime import date as _date
+
+    from ..db.warehouse import AggregateQuery
+    from ..model import (
+        GRAIN_MONTH,
+        METRIC_DEPT_SALES,
+        METRIC_PRODUCT_SALES,
+        METRIC_SALES,
+    )
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    y, m = int(date_from[:4]), int(date_from[5:7])
+    d_from = _date(y, m, 1)
+    ly, lm = int(date_to[:4]), int(date_to[5:7])
+    d_to = _date(ly + (lm == 12), 1 if lm == 12 else lm + 1, 1)
+    codes = list(master.active_codes)
+    name_of = {s.store_code: s.store_name for s in master.active}
+
+    def _pull(metric):
+        out: dict[tuple[str, str], list[tuple[str, float]]] = {}
+        for row in warehouse.aggregate(
+            AggregateQuery(
+                date_from=d_from, date_to=d_to, grain=GRAIN_MONTH,
+                metrics=[metric], store_codes=codes,
+                group_by=("store_code", "date", "product_name"),
+            )
+        ):
+            key = (row["store_code"], row["date"].strftime("%Y-%m"))
+            out.setdefault(key, []).append((row["product_name"] or "", row["value"]))
+        return out
+
+    prods = _pull(METRIC_PRODUCT_SALES)
+    depts = _pull(METRIC_DEPT_SALES)
+
+    sales: dict[tuple[str, str], float] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=d_from, date_to=d_to, grain=GRAIN_MONTH,
+            metrics=[METRIC_SALES], store_codes=codes, group_by=("store_code", "date"),
+        )
+    ):
+        sales[(row["store_code"], row["date"].strftime("%Y-%m"))] = row["value"]
+
+    findings = 0
+
+    # ① 商品名が値そのもの（合計行の取り違え）
+    print("=== ① 商品名が数値・パーセントになっている行 ===")
+    bad_name = []
+    for (code, mm), items in sorted(prods.items()):
+        for nm, v in items:
+            if _ABC_NUMLIKE_RE.match(nm.strip()):
+                bad_name.append((code, mm, nm, v))
+    for code, mm, nm, v in sorted(bad_name, key=lambda x: -x[3]):
+        print(f"  {code} {name_of.get(code, ''):<14} {mm}  『{nm}』 {int(v):,}")
+    print(f"  → {len(bad_name)}件" if bad_name else "  → なし")
+    findings += len(bad_name)
+
+    # ② 月をまたいで数字が丸ごと同じ（日付が効いていない）
+    print("\n=== ② 同じ店で、別の月なのに合計が完全一致 ===")
+    dup = []
+    for metric_name, table in (("商品", prods), ("部門", depts)):
+        by_store: dict[str, dict[int, str]] = {}
+        for (code, mm), items in sorted(table.items()):
+            tot = int(sum(v for _, v in items))
+            if not tot:
+                continue
+            seen = by_store.setdefault(code, {})
+            if tot in seen:
+                dup.append((code, metric_name, seen[tot], mm, tot))
+            else:
+                seen[tot] = mm
+    for code, metric_name, a, b, tot in dup:
+        print(f"  {code} {name_of.get(code, ''):<14} {metric_name} {a} と {b} が同額 {tot:,}")
+    print(f"  → {len(dup)}件" if dup else "  → なし")
+    findings += len(dup)
+
+    # ③ 部門合計が店の月次売上とかけ離れている
+    #    商品計上外（サービス料等）があるので 90〜100% を妥当とみなす。
+    print("\n=== ③ 部門合計が月次売上と合わない（90%未満 or 105%超） ===")
+    off = []
+    for (code, mm), items in sorted(depts.items()):
+        d_tot = sum(v for _, v in items)
+        s_tot = sales.get((code, mm)) or 0
+        if not d_tot or not s_tot:
+            continue
+        ratio = d_tot / s_tot * 100
+        if ratio < 90 or ratio > 105:
+            off.append((code, mm, ratio, d_tot, s_tot))
+    for code, mm, ratio, d_tot, s_tot in sorted(off, key=lambda x: x[2]):
+        print(
+            f"  {code} {name_of.get(code, ''):<14} {mm}  部門{int(d_tot):>11,}"
+            f" / 売上{int(s_tot):>11,} = {ratio:5.1f}%"
+        )
+    print(f"  → {len(off)}件" if off else "  → なし")
+    findings += len(off)
+
+    # ④ 商品が極端に少ない月（グリッドを読み切れていない疑い）
+    print("\n=== ④ 商品が5品以下しか入っていない月（売上はある） ===")
+    thin = []
+    for (code, mm), items in sorted(prods.items()):
+        if len(items) <= 5 and (sales.get((code, mm)) or 0) > 0:
+            thin.append((code, mm, len(items), sales.get((code, mm)) or 0))
+    for code, mm, n, s_tot in thin:
+        print(f"  {code} {name_of.get(code, ''):<14} {mm}  商品{n}品 / 売上{int(s_tot):,}")
+    print(f"  → {len(thin)}件" if thin else "  → なし")
+    findings += len(thin)
+
+    print(f"\n=== 要確認 合計 {findings}件（{date_from}〜{date_to}） ===")
+    return 0
+
+
 def report_abc_coverage(warehouse, master, month: str | None = None) -> int:
     """店舗別ABC取込のカバレッジ確認。各稼働店の 商品数・部門数・バケット別売上を印字。
 

@@ -36,6 +36,7 @@ on:
           - abc-coverage
           - monthly-coverage
           - abc-detail
+          - data-audit
           - abc-dom-probe
           - manager-dl-probe
         default: explore
@@ -223,6 +224,12 @@ jobs:
                 --abc-from "${{ inputs.abc_from }}" \
                 --abc-to "${{ inputs.abc_to }}" \
                 --metric "${{ inputs.coverage_metric }}" \
+                --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "data-audit" ]; then
+              # FWログイン不要。貯まったデータ側からおかしな行を洗い出す。
+              python -m hansoku.cli fw-daily --mode data-audit \
+                --abc-from "${{ inputs.abc_from }}" \
+                --abc-to "${{ inputs.abc_to }}" \
                 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "abc-detail" ]; then
               # FWログイン不要。対象月の部門・売れ筋をそのまま出す（台帳の bucket/items 決め用）
