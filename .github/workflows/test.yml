@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+# トークンは読み取りだけでよい（どのワークフローも push もコメントもしない）。
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest

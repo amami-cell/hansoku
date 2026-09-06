@@ -22,6 +22,10 @@ on:
     # 同じ内容を読み直すだけで、冪等なので行数は増えない。
     - cron: '30 1 * * *'
 
+# トークンは読み取りだけでよい（どのワークフローも push もコメントもしない）。
+permissions:
+  contents: read
+
 env:
   TZ: Asia/Tokyo
 

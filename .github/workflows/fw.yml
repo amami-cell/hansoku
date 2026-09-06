@@ -94,6 +94,10 @@ on:
         required: false
         default: '2026-07'
 
+# トークンは読み取りだけでよい（どのワークフローも push もコメントもしない）。
+permissions:
+  contents: read
+
 env:
   TZ: Asia/Tokyo
 

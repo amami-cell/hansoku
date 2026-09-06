@@ -19,6 +19,10 @@ on:
     # 毎月6日 05:20 JST (= 前日 20:20 UTC)。前月ぶんが締まった頃に前月ABCを取り込む。
     - cron: '20 20 5 * *'
 
+# トークンは読み取りだけでよい（どのワークフローも push もコメントもしない）。
+permissions:
+  contents: read
+
 env:
   TZ: Asia/Tokyo
 

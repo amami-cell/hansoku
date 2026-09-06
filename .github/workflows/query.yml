@@ -51,6 +51,10 @@ on:
         required: false
         default: ''
 
+# トークンは読み取りだけでよい（どのワークフローも push もコメントもしない）。
+permissions:
+  contents: read
+
 env:
   TZ: Asia/Tokyo
 

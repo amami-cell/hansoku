@@ -13,12 +13,27 @@ CSV を読む方が壊れにくい（既存パイプラインでも CSV 経由�
 """
 from __future__ import annotations
 
+import re as _re
 import time
 from pathlib import Path
 
 from .fw_browser import FWError, fw_session
 
 BUDGET_MENU = ("損益管理", "予算管理業務", "月別予算登録")
+
+
+def _redact_postdata(body) -> str:
+    """POST body をログに出せる形に伏せる。
+
+    店長会DLの POST body には DB接続情報が入る（docs/playbook.md）。これを
+    そのまま Actions のログと $GITHUB_STEP_SUMMARY に全文出していた。
+    調査に要るのは「どのキーが何個あるか」なので、値は伏せて形だけ出す。
+    """
+    if body is None:
+        return "(なし)"
+    text = str(body)
+    keys = sorted({m.group(1) for m in _re.finditer(r"(?:^|&)([^=&]{1,40})=", text)})
+    return f"{len(text)}文字 / キー {len(keys)}種: {', '.join(keys[:25])}"
 
 
 def _open_monthly_budget(session) -> None:
@@ -996,14 +1011,14 @@ def probe_manager_dl(artifacts: Path, *, month: str = "2026-07") -> int:
                 path.write_bytes(body)
                 print(f"[店長会DL] 出力レスポンス取得: status={resp.status} ct={ct[:50]} cd={cd[:80]} {len(body)}bytes -> {path.name}")
                 print(f"[店長会DL] POST url: {captured['url']}")
-                print(f"[店長会DL] POST body(全文):\n{str(captured['postdata'])[:4000]}")
+                print(f"[店長会DL] POST body: {_redact_postdata(captured['postdata'])}")
             except Exception as exc:  # noqa: BLE001
                 print(f"[店長会DL] レスポンス本文の取得に失敗: {exc}")
         else:
             print("[店長会DL] DL/レスポンス event 無し。捕捉した POST を直接叩き直す。")
             print(f"[店長会DL] POST url: {captured.get('url')}")
             print(f"[店長会DL] POST ctype: {captured.get('ctype')}")
-            print(f"[店長会DL] POST body(全文):\n{str(captured.get('postdata'))[:4000]}")
+            print(f"[店長会DL] POST body: {_redact_postdata(captured.get('postdata'))}")
             # 捕捉した multipart 本文を page.request で再送し、レスポンス本文を同期取得する
             if captured.get("url") and captured.get("postdata") is not None:
                 try:

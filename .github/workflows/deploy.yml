@@ -9,6 +9,10 @@ on:
     # 毎日 11:00 JST (= 02:00 UTC)。実績の取り込み（10:30）の後に走らせる。
     - cron: '0 2 * * *'
 
+# トークンは読み取りだけでよい（どのワークフローも push もコメントもしない）。
+permissions:
+  contents: read
+
 env:
   TZ: Asia/Tokyo
 
