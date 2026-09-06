@@ -36,6 +36,23 @@ COLUMNS: tuple[str, ...] = (
     "ingested_at",
 )
 
+# 同じ (店, 月, 指標) を複数の取り込み口が書いたときの優先順位。小さいほど優先。
+#
+# 月次の売上は fw_sheet（店長会シート・毎日）と fw_uriage_suii（月別日別売上推移）の
+# 両方が書く。2026-01 を境に fw_sheet が入り始め、そこから両方が並んでいる。
+# 実測すると 2026年の全店・全月で fw_uriage_suii = fw_sheet × 1.10 ちょうど
+# （例 1006 2026-01: 20,785,400 / 22,863,460）。つまり fw_sheet は税抜、
+# fw_uriage_suii は税込。ABCの部門合計も税込側と 99.8% で一致する。
+#
+# 優先順位を付けずに ingested_at 任せにしていたため、2025年までは税込、
+# 2026年からは税抜が採用され、その境目をまたぐ前年比が約9%低く出ていた。
+# 税込（fw_uriage_suii）に寄せて全期間の定義を揃える。ABCとも揃う。
+SOURCE_PRIORITY: dict[str, int] = {
+    "fw_uriage_suii": 10,
+    "fw_sheet": 20,
+}
+_SOURCE_PRIORITY_DEFAULT = 50
+
 _PARAM = re.compile(r":([a-z_][a-z0-9_]*)", re.IGNORECASE)
 
 # 方言ごとの差分: (パラメータの書き方, 配列IN述語のひな型)
@@ -137,6 +154,14 @@ def build_aggregate_sql(
             where.append(array_in.format(column=column, param=name))
             params[name] = list(values)
 
+    source_rank = (
+        "CASE "
+        + " ".join(
+            f"WHEN source = '{src}' THEN {rank}"
+            for src, rank in sorted(SOURCE_PRIORITY.items(), key=lambda kv: kv[1])
+        )
+        + f" ELSE {_SOURCE_PRIORITY_DEFAULT} END"
+    )
     group_sql = ", ".join(query.group_by)
     additive = ", ".join(f"'{m}'" for m in sorted(ADDITIVE_METRICS))
     sql = f"""
@@ -147,8 +172,13 @@ WITH ranked AS (
             PARTITION BY store_code, date, grain, hour, metric,
                          product_name, product_category
             -- 同じ実績が「中間」と「確定」の両方で入っていれば確定を採る。
-            -- 同じ確定区分なら後から取り込んだ行を採る。
-            ORDER BY CASE WHEN kind = '確定' THEN 0 ELSE 1 END, ingested_at DESC
+            -- 同じ確定区分なら取り込み口の優先順位（SOURCE_PRIORITY）で決める。
+            -- ここを ingested_at 任せにすると、定義の違う二つの口が同じ指標を
+            -- 書いているとき、流した順で画面の数字が黙って変わる。
+            -- 最後の同着だけ後から取り込んだ行を採る。
+            ORDER BY CASE WHEN kind = '確定' THEN 0 ELSE 1 END,
+                     {source_rank},
+                     ingested_at DESC
         ) AS row_rank
     FROM {table}
     WHERE {' AND '.join(where)}

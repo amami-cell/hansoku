@@ -234,3 +234,47 @@ class TestCLIの束ね方:
         )
         assert {r["store_code"] for r in rows} == {"1006", "1015"}
         assert len(rows) == 6  # 2店 × 3ヶ月
+
+
+class Test取り込み口の優先順位:
+    """同じ (店, 月, 指標) を複数の取り込み口が書いたとき、どちらを採るかを固定する。
+
+    月次の売上は fw_sheet（店長会シート・毎日）と fw_uriage_suii（月別日別売上推移）の
+    両方が書く。実測では 2026年の全店・全月で fw_uriage_suii = fw_sheet × 1.10
+    ちょうど（税込と税抜）。以前は ingested_at 任せだったため、流した順で画面の
+    数字が変わり、2025年は税込・2026年は税抜という混在が起きていた。
+    """
+
+    def _rows(self, sheet_at, suii_at):
+        from datetime import datetime
+
+        common = dict(
+            store_code="1006",
+            date=date(2026, 8, 1),
+            grain=GRAIN_MONTH,
+            metric="sales",
+            kind="確定",
+        )
+        return [
+            ActualRow(
+                **common, value=20_922_282.0, source="fw_sheet",
+                ingested_at=datetime(2026, 9, 1, sheet_at),
+            ),
+            ActualRow(
+                **common, value=23_014_088.0, source="fw_uriage_suii",
+                ingested_at=datetime(2026, 9, 1, suii_at),
+            ),
+        ]
+
+    @pytest.mark.parametrize("sheet_at,suii_at", [(1, 2), (2, 1)])
+    def test_税込側_fw_uriage_suii_を採る(self, warehouse, sheet_at, suii_at):
+        """取り込んだ順に関係なく、常に同じ側が採られる。"""
+        warehouse.ensure_schema()
+        warehouse.replace_actuals(self._rows(sheet_at, suii_at))
+        rows = warehouse.aggregate(
+            AggregateQuery(
+                date(2026, 8, 1), date(2026, 8, 31), GRAIN_MONTH,
+                metrics=["sales"], store_codes=["1006"], group_by=("store_code",),
+            )
+        )
+        assert [r["value"] for r in rows] == [23_014_088.0]
