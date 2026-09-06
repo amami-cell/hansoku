@@ -1,0 +1,143 @@
+// Worker の入口（合言葉ログイン）を、実際に fetch を呼んで確かめる。
+//
+// 売上の実データが載る画面の入口なので、「開けっ放しになっていないこと」を
+// 推測ではなくテストで押さえる。@neondatabase/serverless は入れずに動かしたいので、
+// import を差し替えて読み込む。
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(HERE, "../..");
+
+// neon() を使わない偽物に差し替えた index.js を一時ファイルとして読み込む
+const src = fs.readFileSync(path.join(ROOT, "worker/index.js"), "utf8")
+  .replace(
+    'import { neon } from "@neondatabase/serverless";',
+    "const neon = () => { throw new Error('DBは使わない'); };",
+  );
+// 相対importが解決できるよう、一時ファイルは worker/ の中に置く
+const tmp = path.join(ROOT, "worker", ".under_test.mjs");
+fs.writeFileSync(tmp, src);
+const worker = (await import(tmp)).default;
+fs.unlinkSync(tmp);
+
+const ENV = {
+  APP_PASSWORD: "ただしい合言葉",
+  COOKIE_SECRET: "s".repeat(48),
+  ASSETS: { fetch: () => new Response("<html>本編</html>", { headers: { "content-type": "text/html" } }) },
+};
+
+const req = (url, opts = {}) => new Request("https://x.example" + url, opts);
+const call = (url, opts, env = ENV) => worker.fetch(req(url, opts), env);
+const form = (o) => {
+  const f = new FormData();
+  for (const [k, v] of Object.entries(o)) f.append(k, v);
+  return f;
+};
+const cookieOf = (res) => {
+  const raw = res.headers.get("set-cookie") || "";
+  return raw.split(";")[0];
+};
+
+let failed = 0;
+const test = async (name, fn) => {
+  try { await fn(); console.log("  ok   " + name); }
+  catch (e) { failed += 1; console.log("  FAIL " + name + "\n       " + e.message); }
+};
+
+console.log("入口（合言葉が設定されているとき）");
+
+await test("合言葉なしで本編を開くとログインへ送られる", async () => {
+  const res = await call("/");
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.get("location"), "/login");
+});
+
+await test("合言葉なしでAPIを叩くと401（HTMLを返さない）", async () => {
+  const res = await call("/api/targets");
+  assert.equal(res.status, 401);
+  assert.equal((await res.json()).error, "unauthenticated");
+});
+
+await test("制作物PDFも入口の内側", async () => {
+  assert.equal((await call("/creatives/a.pdf")).status, 303);
+});
+
+await test("ログイン画面は誰でも見られる", async () => {
+  const res = await call("/login");
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /合言葉/);
+});
+
+await test("合言葉が違えば401で、入れない", async () => {
+  const res = await call("/login", { method: "POST", body: form({ name: "天", password: "ちがう" }) });
+  assert.equal(res.status, 401);
+  assert.equal(res.headers.get("set-cookie"), null);
+});
+
+await test("名前が空なら通さない（誰が入れたか残らなくなるため）", async () => {
+  const res = await call("/login", { method: "POST", body: form({ name: "  ", password: ENV.APP_PASSWORD }) });
+  assert.equal(res.status, 400);
+  assert.equal(res.headers.get("set-cookie"), null);
+});
+
+await test("正しい合言葉ならクッキーが出て本編へ", async () => {
+  const res = await call("/login", { method: "POST", body: form({ name: "天", password: ENV.APP_PASSWORD }) });
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.get("location"), "/");
+  const sc = res.headers.get("set-cookie");
+  assert.match(sc, /HttpOnly/);
+  assert.match(sc, /Secure/);
+  assert.match(sc, /SameSite=Lax/);
+});
+
+await test("そのクッキーで本編が開ける", async () => {
+  const login = await call("/login", { method: "POST", body: form({ name: "天", password: ENV.APP_PASSWORD }) });
+  const res = await call("/", { headers: { cookie: cookieOf(login) } });
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /本編/);
+});
+
+await test("クッキーを1文字でも書き換えると通らない（署名）", async () => {
+  const login = await call("/login", { method: "POST", body: form({ name: "天", password: ENV.APP_PASSWORD }) });
+  const bad = cookieOf(login).slice(0, -1) + (cookieOf(login).endsWith("a") ? "b" : "a");
+  assert.equal((await call("/", { headers: { cookie: bad } })).status, 303);
+});
+
+await test("別の合言葉サイトのクッキーは通らない（署名鍵が違う）", async () => {
+  const login = await call("/login", { method: "POST", body: form({ name: "天", password: ENV.APP_PASSWORD }) },
+    { ...ENV, COOKIE_SECRET: "t".repeat(48) });
+  assert.equal((await call("/", { headers: { cookie: cookieOf(login) } })).status, 303);
+});
+
+await test("ログアウトでクッキーが消える", async () => {
+  const res = await call("/logout");
+  assert.equal(res.status, 303);
+  assert.match(res.headers.get("set-cookie"), /Max-Age=0/);
+});
+
+console.log("入口（合言葉が未設定のとき）");
+
+const NOENV = { ASSETS: ENV.ASSETS };
+
+await test("合言葉が無ければ開けっ放しにせず、全部止める", async () => {
+  const res = await call("/", {}, NOENV);
+  assert.equal(res.status, 503);
+  assert.match(await res.text(), /設定されていません/);
+});
+
+await test("合言葉が無ければAPIも止める", async () => {
+  assert.equal((await call("/api/targets", {}, NOENV)).status, 401);
+});
+
+console.log("Cloudflare Access が前段に残っている場合");
+
+await test("Access のメールがあれば合言葉なしでも通る", async () => {
+  const res = await call("/", { headers: { "Cf-Access-Authenticated-User-Email": "amami@8sin.co.jp" } }, NOENV);
+  assert.equal(res.status, 200);
+});
+
+console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
+process.exit(failed ? 1 : 0);

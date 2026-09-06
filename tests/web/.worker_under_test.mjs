@@ -6,7 +6,7 @@
 // 入口は Worker 自身が守る（合言葉＋お名前 → 署名クッキー30日）。
 // Cloudflare Access が前段に残っていればそちらを優先する（本人のメールが取れる）。
 // 合言葉もAccessも無ければ、開けっ放しにせず全部拒否する。
-import { neon } from "@neondatabase/serverless";
+const neon = () => { throw new Error('DBは使わない'); };
 
 import {
   clearCookie, identify, makeToken, sessionCookie, SESSION_DAYS, timingSafeEqual,

@@ -30,3 +30,7 @@ python3 -m hansoku.cli schedule-lint
 # 画面側の計算（前年比・効果判定・目標達成率）。ブラウザ無しで動かす。
 node --check web/app.js
 node tests/web/app_test.mjs
+
+# 入口（合言葉ログイン）。売上の実データが載る画面なので、開けっ放しに
+# なっていないことを推測ではなくテストで押さえる。
+node tests/web/worker_test.mjs

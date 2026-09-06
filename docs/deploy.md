@@ -1,11 +1,12 @@
-# 画面の公開（Cloudflare Workers + Access）
+# 画面の公開（Cloudflare Workers）
 
 画面は静的サイト。表示のたびにデータベースを叩かないので速く、アクセスが増えても
-Neon の無料枠を消費しない。売上データが載るので Access で認証をかける。すべて無料枠内。
+Neon の無料枠を消費しない。売上データが載るので、合言葉で入口を守る。すべて無料枠内。
 
 Cloudflare の新しい画面は Workers に寄っていて Pages の入口が分かりにくいので、
 **Cloudflare 側で git 連携はしない**。GitHub Actions から直接公開する。
-天がやるのは「APIトークンを1つ登録」と「Accessで認証をかける」の2つだけ。
+天がやるのは「APIトークンを1つ登録」と「合言葉を決める」の2つだけ。
+どちらも GitHub の Secrets に貼るだけで、Cloudflare の画面はさわらない。
 
 ---
 
@@ -30,46 +31,54 @@ https://github.com/amami-cell/hansoku/settings/secrets/actions
 （URLは実行ログと、Cloudflare の Workers & Pages 一覧に出る）。
 以後は毎晩 11:00 JST に最新データで自動更新される。
 
-## 3. Access で認証をかける（重要）
+## 3. 入口をつくる（合言葉ログイン）
 
-このままだと URL を知っていれば誰でも見られる。天と店長だけに絞る。
+このままだと URL を知っていれば誰でも見られる。全員共通の合言葉で入口を作る。
+Cloudflare の画面をさわる必要はない。**GitHub の Secrets に2つ足すだけ。**
 
-1. Cloudflare dash → **Zero Trust**（無料。初回はチーム名を決めるだけ）
+GitHub → リポジトリ → Settings → Secrets and variables → Actions → New secret
 
-2. **先にログイン方法を有効にする**（ここを飛ばすと自分も入れない）
+| 名前 | 中身 |
+|---|---|
+| `HANSOKU_APP_PASSWORD` | 店長に配る合言葉。覚えやすく、推測しにくいものを（例: 3語つなげる） |
+| `HANSOKU_COOKIE_SECRET` | ログイン状態の署名鍵。人が覚える必要はない。長いランダム文字列 |
 
-   **Settings** → **Authentication** → **Login methods** → **Add new** →
-   **One-time PIN** を追加する。
+署名鍵はこれで作れる（結果をそのまま貼る）:
 
-   これが無いと、選べるのが既定の **Cloudflare** だけになる。Cloudflare は
-   「その Cloudflare アカウントのメンバー」しか通さないので、
-   *Cloudflare sign-in is restricted to members of the account.* と出て、
-   店長はもちろん、アカウント所有者でも別のメールでは入れない。
+    openssl rand -base64 48
 
-   One-time PIN なら、下の Policy に並べたメールアドレス宛に6桁のコードが
-   届くだけで入れる。店長にCloudflareアカウントを作らせる必要はない。
+登録したら Actions →「画面をデプロイ」を実行。以後の使い方:
 
-3. **Access** → **Applications** → **Add an application** → **Self-hosted**
-4. 設定:
-   - Application name: `販促`
-   - Application domain: 手順1で発行された Workers のURL（`hansoku.<サブドメイン>.workers.dev`）
-5. **Policy** を1つ作る:
-   - Policy name: `許可メンバー`
-   - Action: **Allow**
-   - Include → **Emails** → 天と店長のメールアドレスを並べる
-     （まず自分のアドレスだけで作って、入れることを確かめてから増やすとよい）
-6. 保存
+1. 公開URLを開く → 合言葉とお名前を入れる
+2. その端末では **30日間** そのまま使える（毎回入力しなくてよい）
+3. 右上の「ログアウト」で切れる
 
-以後、公開URLを開くとメールアドレスの入力を求められ、
-登録済みのアドレスに届くコードを入れた人だけが入れる。パスワード管理は不要。
+お名前は「誰が目標・メモを入れたか」の記録に使う。店名でもよい。
 
-無料枠は50人まで。天のグループ（天＋店長 約27人）は収まる。
+### 気をつけること
 
----
+合言葉は**全員で1つ**なので、次の性質がある。手順ではなく、性質として理解しておく。
+
+- 1人から漏れれば全員ぶん漏れる。SNSやグループ外に貼らない
+- 辞めた人を締め出すには、`HANSOKU_APP_PASSWORD` を変えて再デプロイし、
+  全員に新しい合言葉を配り直す（個別には切れない）
+- 「誰が入れたか」はお名前の自己申告。なりすましは技術的には防げない
+- 全員を一斉にログアウトさせたいときは `HANSOKU_COOKIE_SECRET` を変えて再デプロイ
+  （合言葉はそのままでよい）
+
+もっと厳密にしたくなったら、Cloudflare Access（メール認証）へ戻せる。Worker は
+Access が前段にあればそちらを優先するので、**コードは変えずに切り替えられる**。
+
+### いま Cloudflare Access が掛かっている場合
+
+Access が前段で止めるので、合言葉の画面まで届かない。Zero Trust →
+Access → Applications → `販促` を削除してから使う。
+（消さずに残す場合は、Access のログイン方法に **One-time PIN** を追加すれば
+そのまま使える。Settings → Authentication → Login methods → Add new）
 
 ## 4. 動作確認
 
 1. Actions →「画面をデプロイ」を手動実行 → 成功を確認
-2. 公開URLを開く → Access のメール認証 → 画面が出る
+2. 公開URLを開く → 合言葉とお名前を入れる → 画面が出る
 
 店舗・指標を切り替えて、実績が表示されれば完了。

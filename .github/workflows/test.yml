@@ -49,6 +49,7 @@ jobs:
         run: |
           node --check web/app.js
           node tests/web/app_test.mjs
+          node tests/web/worker_test.mjs
 
       - name: テスト
         env:

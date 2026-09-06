@@ -78,6 +78,8 @@ jobs:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          APP_PASSWORD: ${{ secrets.HANSOKU_APP_PASSWORD }}
+          COOKIE_SECRET: ${{ secrets.HANSOKU_COOKIE_SECRET }}
         run: |
           set -o pipefail   # パイプの途中が失敗したら step も失敗させる
           # トークンに紛れ込みやすい前後の空白・改行・引用符を落とす。
@@ -111,6 +113,25 @@ jobs:
               echo "::warning::DATABASE_URL の設定に失敗。目標の保存(API)が使えない可能性があります。"
           else
             echo "::warning::NEON_DATABASE_URL 未設定。目標の保存(API)は無効です。"
+          fi
+
+          # 入口の合言葉。未設定なら Worker は「誰も入れない」に倒れる（開けっ放しにしない）。
+          if [ -n "$APP_PASSWORD" ]; then
+            echo "── APP_PASSWORD を設定 ──"
+            printf '%s' "$APP_PASSWORD" | npx wrangler secret put APP_PASSWORD 2>&1 | tail -2 || \
+              echo "::error::APP_PASSWORD の設定に失敗しました。"
+          else
+            echo "::warning::HANSOKU_APP_PASSWORD 未設定。Cloudflare Access が無いと誰も入れません。"
+          fi
+
+          # クッキーの署名鍵。合言葉とは別に持つ（合言葉を変えてもログアウトさせない／
+          # 鍵を変えれば全員を一斉にログアウトさせられる）。
+          if [ -n "$COOKIE_SECRET" ]; then
+            echo "── COOKIE_SECRET を設定 ──"
+            printf '%s' "$COOKIE_SECRET" | npx wrangler secret put COOKIE_SECRET 2>&1 | tail -2 || \
+              echo "::error::COOKIE_SECRET の設定に失敗しました。"
+          else
+            echo "::warning::HANSOKU_COOKIE_SECRET 未設定。合言葉ログインは無効です。"
           fi
           url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/wr.log | head -1 || true)
           if [ -n "$url" ]; then
