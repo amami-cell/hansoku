@@ -35,17 +35,32 @@ https://github.com/amami-cell/hansoku/settings/secrets/actions
 このままだと URL を知っていれば誰でも見られる。天と店長だけに絞る。
 
 1. Cloudflare dash → **Zero Trust**（無料。初回はチーム名を決めるだけ）
-2. **Access** → **Applications** → **Add an application** → **Self-hosted**
-3. 設定:
+
+2. **先にログイン方法を有効にする**（ここを飛ばすと自分も入れない）
+
+   **Settings** → **Authentication** → **Login methods** → **Add new** →
+   **One-time PIN** を追加する。
+
+   これが無いと、選べるのが既定の **Cloudflare** だけになる。Cloudflare は
+   「その Cloudflare アカウントのメンバー」しか通さないので、
+   *Cloudflare sign-in is restricted to members of the account.* と出て、
+   店長はもちろん、アカウント所有者でも別のメールでは入れない。
+
+   One-time PIN なら、下の Policy に並べたメールアドレス宛に6桁のコードが
+   届くだけで入れる。店長にCloudflareアカウントを作らせる必要はない。
+
+3. **Access** → **Applications** → **Add an application** → **Self-hosted**
+4. 設定:
    - Application name: `販促`
    - Application domain: 手順1で発行された Workers のURL（`hansoku.<サブドメイン>.workers.dev`）
-4. **Policy** を1つ作る:
+5. **Policy** を1つ作る:
    - Policy name: `許可メンバー`
    - Action: **Allow**
    - Include → **Emails** → 天と店長のメールアドレスを並べる
-5. 保存
+     （まず自分のアドレスだけで作って、入れることを確かめてから増やすとよい）
+6. 保存
 
-以後、`hansoku.pages.dev` を開くとメールアドレスの入力を求められ、
+以後、公開URLを開くとメールアドレスの入力を求められ、
 登録済みのアドレスに届くコードを入れた人だけが入れる。パスワード管理は不要。
 
 無料枠は50人まで。天のグループ（天＋店長 約27人）は収まる。
