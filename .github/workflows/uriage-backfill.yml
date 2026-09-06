@@ -1,6 +1,16 @@
-name: 月次売上をさかのぼって取り込む
+name: 月次の売上・客数・予算を取り込む
 
-# 月別日別売上推移から、過去の月次「売上・客数」を1店ずつ埋める。
+# 月別日別売上推移から、月次の「売上・客数」を1店ずつ取り込む。
+# 毎月自動で回り、手動でさかのぼりもできる（対象月を渡す）。
+#
+# ここが売上の正となる取り込み口。店長会シート（ingest.yml）は税抜、こちらは
+# 税込で、db/warehouse.py の SOURCE_PRIORITY はこちらを優先する。毎月ここが
+# 回っていないと、税抜のシート側が採用されて前年比が約9%低く出る。
+#
+# 客数（covers）と売上予算（sales_budget）は、これまでどのスケジュールにも
+# 載っておらず手動起動でしか入らなかった。集客の前年比と予算達成率という
+# 販促評価の2軸が「誰かが思い出したときだけ」更新される状態だったので、
+# 売上と同じ月次の便に乗せる。
 #
 # 画面は1店につき『対象月』を末尾とする12ヶ月を出し、前年実績の列も持つので、
 # 1回の照会で約24ヶ月ぶんが書ける。対象月を 2025-08 にすると
@@ -21,6 +31,15 @@ on:
         description: '1店だけ試すとき: 店コード or 店名の一部（空欄なら全店）'
         required: false
         default: ''
+      budget:
+        description: '売上予算も取り込む（自動実行では常に取り込む）'
+        type: boolean
+        default: false
+  schedule:
+    # 毎月6日 04:00 JST (= 前日 19:00 UTC)。前月が締まった頃に前月ぶんを取り込む。
+    # 同じ日 05:20 の月次ABC（abc-monthly.yml）より前に回して、
+    # 「部門合計 ÷ 月次売上」の検算が新しい売上に対してできるようにする。
+    - cron: '0 19 5 * *'
 
 # トークンは読み取りだけでよい（どのワークフローも push もコメントもしない）。
 permissions:
@@ -50,7 +69,12 @@ jobs:
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os, yaml
           data = yaml.safe_load(open("config/stores.yaml")) or {}
-          stores = [s for s in data.get("stores", []) if s.get("active")]
+          # FW未連動の店（pos が fw 以外）はFWに元データが無い。回しても0件で
+          # 終わるだけで、取りこぼしと区別が付かなくなるので外す。
+          stores = [
+              s for s in data.get("stores", [])
+              if s.get("active") and (s.get("pos") or "fw") == "fw"
+          ]
           only = (os.environ.get("ONLY") or "").strip()
           if only:
               stores = [
@@ -107,6 +131,7 @@ jobs:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          # 自動実行では入力が無いので直近12ヶ月（＝前月を含む）を取り直す。
           MONTHS: ${{ inputs.months }}
         run: |
           # tee で受けるので、パイプ途中の失敗を step の失敗として扱う。
@@ -130,7 +155,56 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: uriage-backfill-${{ matrix.store }}
+          name: uriage-${{ matrix.store }}
+          path: fw-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # 売上予算（sales_budget）。予算達成率の分母で、これまで手動でしか入らなかった。
+  # 店をまたいで1回のログインで回るので matrix にはしない。
+  budget:
+    if: ${{ github.event_name == 'schedule' || inputs.budget }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: 売上予算を取り込む
+        env:
+          FOODIST_JOURNAL_USER_ID: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FOODIST_JOURNAL_PASSWORD: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          # tee で受けるので、パイプ途中の失敗を step の失敗として扱う。
+          set -o pipefail
+          {
+            echo "## 売上予算の取り込み"
+            echo ''
+            echo '```'
+            xvfb-run -a python -m hansoku.cli fw-budget --mode ingest \
+              --months 3 --artifacts fw-artifacts
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: 記録をアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: budget
           path: fw-artifacts/
           retention-days: 7
           if-no-files-found: ignore
