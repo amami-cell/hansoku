@@ -424,8 +424,16 @@ def ingest_monthly(
         return 0
     warehouse.ensure_schema()
     # 店を絞って流すことがあるので、消す範囲にも店を含める（他店を巻き添えにしない）。
-    loaded = warehouse.replace_actuals(collected, scope_stores=True)
+    # 指標も範囲に含める。含めないと、売上が取れて客数が取れなかった月に、
+    # 売上行が (店, 月) を削除範囲へ引き込んで既存の客数を消してしまう。
+    loaded = warehouse.replace_actuals(collected, scope_stores=True, scope_metrics=True)
     print(f"[売上推移] warehouse へ {loaded} 件 書き込みました")
+    if not collected:
+        print("::error::[売上推移] 1件も取り込めませんでした")
+        return 1
+    if failures:
+        print(f"::error::[売上推移] 取れなかった 店/対象月 {len(failures)}件")
+        return 1
     return 0
 
 
@@ -731,6 +739,7 @@ def ingest_hourly(
     ingested_at = datetime.now(timezone.utc)
     active_by_code = {s.store_code: s for s in master.active}
     collected: list[ActualRow] = []
+    skipped: list[str] = []
 
     with fw_session(artifacts) as session:
         _open_hourly(session)
@@ -750,9 +759,13 @@ def ingest_hourly(
             name = store.store_name
             if not _select_combo(session, value):
                 print(f"[時間帯別] 店舗選択に失敗: {name} ({value})")
+                skipped.append(f"{store.store_code}:店舗選択")
                 continue
             if not _set_date_range(session, d_from, d_to):
+                # 日付が効いていなければ別の期間のグリッドを読むことになる。続行しない。
                 print(f"[時間帯別] 日付レンジ設定に失敗: {name}")
+                skipped.append(f"{store.store_code}:日付レンジ")
+                continue
             _click_search(session)
             time.sleep(1.2)
             grid = _extract_hour_grid(session)
@@ -764,6 +777,7 @@ def ingest_hourly(
             if not grid:
                 session.snapshot(f"nohour_{store.store_code}")
                 print(f"  {store.store_code} {name[:14]} 時間帯グリッドが読めませんでした")
+                skipped.append(f"{store.store_code}:グリッド無し")
                 continue
             n_before = len(collected)
             for band in grid:
@@ -794,12 +808,22 @@ def ingest_hourly(
             )
 
     print(f"[時間帯別] 収集 {len(collected)} 行")
+    if skipped:
+        print(f"[時間帯別] ⚠ 取れなかった店 {len(skipped)}件: {', '.join(skipped)}")
     if dry_run:
         print("[時間帯別] dry-run のため書き込みはしません")
-        return 0
+        return 1 if skipped else 0
     warehouse.ensure_schema()
-    loaded = warehouse.replace_actuals(collected)
+    # 取れた店ぶんだけを入れ替える。店を含めないと、取りこぼした店の既存データまで
+    # 同じ (source, grain, date) に巻き込まれて消える。
+    loaded = warehouse.replace_actuals(collected, scope_stores=True)
     print(f"[時間帯別] warehouse へ {loaded} 件 書き込みました")
+    if not collected:
+        print("::error::[時間帯別] 1件も取り込めませんでした")
+        return 1
+    if skipped:
+        print(f"::error::[時間帯別] {len(skipped)}店ぶん取りこぼしました")
+        return 1
     return 0
 
 
@@ -1303,8 +1327,9 @@ def ingest_abc(
         page_ret, picked_codes = _abc_open_store_modal_and_select_all(session, master)
         print(f"[ABC] 店舗選択おわり (+{time.time() - t0:.0f}s)")
         if page_ret is None:
-            print("[ABC] 店舗選択に失敗。0件で無害終了。")
-            picked_codes = []
+            # 「無害」ではない。ここで抜けると全店ぶん0件のまま緑で終わる。
+            print("::error::[ABC] 店舗選択に失敗しました")
+            return 1
         # 多数店の集計はFW側がぶれる（同条件でも出る時と『データなし』の時がある）。
         # 検索→最大40秒ポーリングを最大3回まで繰り返し、出るまで粘る。
         products: list[dict] = []
@@ -1665,6 +1690,10 @@ def report_data_audit(
     findings += len(thin)
 
     print(f"\n=== 要確認 合計 {findings}件（{date_from}〜{date_to}） ===")
+    # 検算で1件でも引っかかったらジョブを赤くする。緑のまま放置させない。
+    if findings:
+        print(f"::error::[検算] 要確認 {findings}件")
+        return 1
     return 0
 
 
@@ -2218,6 +2247,14 @@ def ingest_abc_store(
     if skipped:
         # 取れた月は既に入っている。残りだけ流し直せばよいので、そのまま貼れる形で出す。
         print(f"[ABC店] 取り残し: --abc-store {code} --month {','.join(skipped)}")
+        return 1
+    if suspect:
+        # 月が違うのに合計が一致するのは、日付が効かず前月のグリッドを読んだ可能性。
+        # 静かに緑で終わらせない。
+        print(f"::error::[ABC店] {code} 同額の月あり（日付未反映の疑い）: {','.join(suspect)}")
+        return 1
+    if no_dept:
+        print(f"::error::[ABC店] {code} 部門が取れなかった月: {','.join(no_dept)}")
         return 1
     return 0
 

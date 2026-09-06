@@ -595,8 +595,13 @@ def ingest(
         for (code, m, value) in collected
     ]
     warehouse.ensure_schema()
-    loaded = warehouse.replace_actuals(rows)
+    # 取れた店ぶんだけを入れ替える。店を含めないと、読み取りに失敗した店の
+    # 既存予算まで同じ (source, grain, date) に巻き込まれて消える。
+    loaded = warehouse.replace_actuals(rows, scope_stores=True)
     print(f"[budget] warehouse へ {loaded} 件 書き込みました")
+    if not rows:
+        print("::error::[budget] 1件も取り込めませんでした")
+        return 1
     return 0
 
 

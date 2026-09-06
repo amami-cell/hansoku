@@ -81,6 +81,9 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
+          # tee で受けるので、パイプ途中の失敗を step の失敗として扱う。
+          # これが無いと python がこけても tee の成功で success になる。
+          set -o pipefail
           {
             echo '## 取り込み元シートのタブ一覧'
             echo ''
@@ -102,6 +105,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
+          set -o pipefail
           args="--metric ${{ inputs.metric }} \
                 --date-from ${{ inputs.date_from }} \
                 --date-to ${{ inputs.date_to }}"
