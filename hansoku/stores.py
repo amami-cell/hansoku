@@ -42,6 +42,11 @@ class Store:
     # FWのABCで部門（分類）が取れるか。FW側で商品に部門が紐付いていない店は
     # 何度取り込んでも部門0件になる。取込の不具合と区別するために持つ。
     abc_dept: bool = True
+    # 業態変更（リニューアル）した月 "YYYY-MM"。この月より前は別の店の数字なので、
+    # またぐ前年比は「同じ店の比較」ではない。数字は消さずに注意書きを出すために持つ。
+    renewal_month: str = ""
+    # リニューアル前の店名。推移を見るときに、どこまでが旧店かを示す。
+    former_name: str = ""
 
 
 class UnknownStoreError(LookupError):
@@ -98,6 +103,8 @@ class StoreMaster:
                 active=bool(row.get("active", True)),
                 pos=str(row.get("pos", "") or "fw"),
                 abc_dept=bool(row.get("abc_dept", True)),
+                renewal_month=str(row.get("renewal_month", "") or ""),
+                former_name=str(row.get("former_name", "") or ""),
             )
             for row in data.get("stores", [])
         ]

@@ -6,25 +6,91 @@
       "store_name": "NagaGutsu",
       "menu_title": "禁断の沼パスタ",
       "start_date": "2026-08-24",
-      "period": { "from": "2026-08-24", "to": "2026-08-30", "days": 7 },
-      "lunch": { "sales": 51348, "cost_rate": 0.3082 },
+      "period": {
+        "from": "2026-08-24",
+        "to": "2026-08-30",
+        "days": 7
+      },
+      "lunch": {
+        "sales": 51348,
+        "cost_rate": 0.3082
+      },
       "daily_meals": [
-        { "name": "こくうま濃厚クリームスープパスタ", "qty": 16, "sales": 19360, "cost_rate": 0.2984, "rank": "A", "new": true },
-        { "name": "完熟トマトスープパスタ", "qty": 18, "sales": 17820, "cost_rate": 0.3155, "rank": "A", "new": true },
-        { "name": "シンプルなペペロンチーノスープパスタ", "qty": 14, "sales": 14168, "cost_rate": 0.3129, "rank": "A", "new": true }
+        {
+          "name": "こくうま濃厚クリームスープパスタ",
+          "qty": 16,
+          "sales": 19360,
+          "cost_rate": 0.2984,
+          "rank": "A",
+          "new": true
+        },
+        {
+          "name": "完熟トマトスープパスタ",
+          "qty": 18,
+          "sales": 17820,
+          "cost_rate": 0.3155,
+          "rank": "A",
+          "new": true
+        },
+        {
+          "name": "シンプルなペペロンチーノスープパスタ",
+          "qty": 14,
+          "sales": 14168,
+          "cost_rate": 0.3129,
+          "rank": "A",
+          "new": true
+        }
       ],
       "toppings": [
-        { "name": "替え玉パスタ（追い）", "qty": 2, "sales": 500, "cost_rate": 0.3320, "new": true }
+        {
+          "name": "替え玉パスタ（追い）",
+          "qty": 2,
+          "sales": 500,
+          "cost_rate": 0.332,
+          "new": true
+        }
       ],
       "menu": [
-        { "name": "こくうま濃厚クリームスープパスタ", "qty": 16, "sales": 19360, "cost_rate": 0.2984, "rank": "A", "type": "meal", "new": true },
-        { "name": "完熟トマトスープパスタ", "qty": 18, "sales": 17820, "cost_rate": 0.3155, "rank": "A", "type": "meal", "new": true },
-        { "name": "シンプルなペペロンチーノスープパスタ", "qty": 14, "sales": 14168, "cost_rate": 0.3129, "rank": "A", "type": "meal", "new": true },
-        { "name": "替え玉パスタ（追い）", "qty": 2, "sales": 500, "cost_rate": 0.3320, "rank": "C", "type": "topping", "new": true }
+        {
+          "name": "こくうま濃厚クリームスープパスタ",
+          "qty": 16,
+          "sales": 19360,
+          "cost_rate": 0.2984,
+          "rank": "A",
+          "type": "meal",
+          "new": true
+        },
+        {
+          "name": "完熟トマトスープパスタ",
+          "qty": 18,
+          "sales": 17820,
+          "cost_rate": 0.3155,
+          "rank": "A",
+          "type": "meal",
+          "new": true
+        },
+        {
+          "name": "シンプルなペペロンチーノスープパスタ",
+          "qty": 14,
+          "sales": 14168,
+          "cost_rate": 0.3129,
+          "rank": "A",
+          "type": "meal",
+          "new": true
+        },
+        {
+          "name": "替え玉パスタ（追い）",
+          "qty": 2,
+          "sales": 500,
+          "cost_rate": 0.332,
+          "rank": "C",
+          "type": "topping",
+          "new": true
+        }
       ],
       "compare": {
         "unavailable": true,
-        "reason": "開始7日目（8/24〜8/30）の速報。POS未登録で当初取れなかった本体3種がFW ABCに計上されたため取得できた。前年・新旧比較はFW ABCの過去月制約により不可。今後の蓄積で食数/日・原価率を継続更新する。"
+        "reason": "開始7日目（8/24〜8/30）の速報。POS未登録で当初取れなかった本体3種がFW ABCに計上されたため取得できた。この店は2026-05にケジョンからリニューアルしており、前年同月は別業態の数字になるため前年比は出さない。"
       }
     },
     {
@@ -32,47 +98,241 @@
       "store_name": "ぎふや 天満橋店",
       "menu_title": "新・日替わりランチ",
       "start_date": "2026-08-01",
-      "period": { "from": "2026-08-01", "to": "2026-08-25", "days": 25 },
+      "period": {
+        "from": "2026-08-01",
+        "to": "2026-08-25",
+        "days": 25
+      },
       "store_sales": 6137765,
-      "lunch": { "sales": 1041540, "cost_rate": 0.2929 },
+      "lunch": {
+        "sales": 1041540,
+        "cost_rate": 0.2929
+      },
       "daily_meals": [
-        { "name": "ミックスフライ定食", "qty": 92, "sales": 117760, "cost_rate": 0.3078, "rank": "A", "new": true },
-        { "name": "冷やし鶏蕎麦とミニ海鮮丼", "qty": 11, "sales": 15180, "cost_rate": 0.3623, "rank": "C", "new": true }
+        {
+          "name": "ミックスフライ定食",
+          "qty": 92,
+          "sales": 117760,
+          "cost_rate": 0.3078,
+          "rank": "A",
+          "new": true
+        },
+        {
+          "name": "冷やし鶏蕎麦とミニ海鮮丼",
+          "qty": 11,
+          "sales": 15180,
+          "cost_rate": 0.3623,
+          "rank": "C",
+          "new": true
+        }
       ],
       "toppings": [
-        { "name": "カニクリームコロッケ", "qty": 12, "sales": 2040, "cost_rate": 0.3823, "new": true },
-        { "name": "もつ煮込み変更", "qty": 7, "sales": 1260, "cost_rate": 0.1722, "new": true },
-        { "name": "ニンニク", "qty": 4, "sales": 400, "cost_rate": 0.2000, "new": true }
+        {
+          "name": "カニクリームコロッケ",
+          "qty": 12,
+          "sales": 2040,
+          "cost_rate": 0.3823,
+          "new": true
+        },
+        {
+          "name": "もつ煮込み変更",
+          "qty": 7,
+          "sales": 1260,
+          "cost_rate": 0.1722,
+          "new": true
+        },
+        {
+          "name": "ニンニク",
+          "qty": 4,
+          "sales": 400,
+          "cost_rate": 0.2,
+          "new": true
+        }
       ],
       "menu": [
-        { "name": "チキンカツ定食", "qty": 287, "sales": 281260, "cost_rate": 0.2734, "rank": "A", "type": "meal" },
-        { "name": "トンタマ定食", "qty": 235, "sales": 235000, "cost_rate": 0.2750, "rank": "A", "type": "meal" },
-        { "name": "ミックスフライ定食", "qty": 92, "sales": 117760, "cost_rate": 0.3078, "rank": "A", "type": "meal", "new": true },
-        { "name": "トンテキ定食100g", "qty": 55, "sales": 53900, "cost_rate": 0.3336, "rank": "A", "type": "meal" },
-        { "name": "トンタマ1.5定食", "qty": 41, "sales": 53300, "cost_rate": 0.2707, "rank": "A", "type": "meal" },
-        { "name": "唐カツ定食", "qty": 41, "sales": 53300, "cost_rate": 0.2823, "rank": "A", "type": "meal" },
-        { "name": "唐トン定食", "qty": 38, "sales": 49400, "cost_rate": 0.2653, "rank": "B", "type": "meal" },
-        { "name": "ライスカレー", "qty": 48, "sales": 47040, "cost_rate": 0.2530, "rank": "B", "type": "meal" },
-        { "name": "トンテキ定食150g", "qty": 32, "sales": 38400, "cost_rate": 0.3191, "rank": "B", "type": "meal" },
-        { "name": "唐揚げ定食", "qty": 32, "sales": 35200, "cost_rate": 0.2881, "rank": "B", "type": "meal" },
-        { "name": "チキンカツカレー", "qty": 24, "sales": 28800, "cost_rate": 0.2824, "rank": "B", "type": "meal" },
-        { "name": "トンタマダブル定食", "qty": 13, "sales": 19500, "cost_rate": 0.2839, "rank": "C", "type": "meal" },
-        { "name": "冷やし鶏蕎麦とミニ海鮮丼", "qty": 11, "sales": 15180, "cost_rate": 0.3623, "rank": "C", "type": "meal", "new": true },
-        { "name": "トンテキ定食300g", "qty": 4, "sales": 7200, "cost_rate": 0.3227, "rank": "C", "type": "meal" },
-        { "name": "豚串カツカレー", "qty": 2, "sales": 2600, "cost_rate": 0.3138, "rank": "C", "type": "meal" },
-        { "name": "カニクリームコロッケ", "qty": 12, "sales": 2040, "cost_rate": 0.3823, "rank": "C", "type": "topping", "new": true },
-        { "name": "もつ煮込み変更", "qty": 7, "sales": 1260, "cost_rate": 0.1722, "rank": "C", "type": "topping", "new": true },
-        { "name": "ニンニク", "qty": 4, "sales": 400, "cost_rate": 0.2000, "rank": "C", "type": "topping", "new": true },
-        { "name": "ご飯大盛り", "qty": 35, "sales": 0, "cost_rate": 0, "rank": "C", "type": "rice" },
-        { "name": "ご飯おかわり(無料)", "qty": 98, "sales": 0, "cost_rate": 0, "rank": "C", "type": "rice" }
+        {
+          "name": "チキンカツ定食",
+          "qty": 287,
+          "sales": 281260,
+          "cost_rate": 0.2734,
+          "rank": "A",
+          "type": "meal"
+        },
+        {
+          "name": "トンタマ定食",
+          "qty": 235,
+          "sales": 235000,
+          "cost_rate": 0.275,
+          "rank": "A",
+          "type": "meal"
+        },
+        {
+          "name": "ミックスフライ定食",
+          "qty": 92,
+          "sales": 117760,
+          "cost_rate": 0.3078,
+          "rank": "A",
+          "type": "meal",
+          "new": true
+        },
+        {
+          "name": "トンテキ定食100g",
+          "qty": 55,
+          "sales": 53900,
+          "cost_rate": 0.3336,
+          "rank": "A",
+          "type": "meal"
+        },
+        {
+          "name": "トンタマ1.5定食",
+          "qty": 41,
+          "sales": 53300,
+          "cost_rate": 0.2707,
+          "rank": "A",
+          "type": "meal"
+        },
+        {
+          "name": "唐カツ定食",
+          "qty": 41,
+          "sales": 53300,
+          "cost_rate": 0.2823,
+          "rank": "A",
+          "type": "meal"
+        },
+        {
+          "name": "唐トン定食",
+          "qty": 38,
+          "sales": 49400,
+          "cost_rate": 0.2653,
+          "rank": "B",
+          "type": "meal"
+        },
+        {
+          "name": "ライスカレー",
+          "qty": 48,
+          "sales": 47040,
+          "cost_rate": 0.253,
+          "rank": "B",
+          "type": "meal"
+        },
+        {
+          "name": "トンテキ定食150g",
+          "qty": 32,
+          "sales": 38400,
+          "cost_rate": 0.3191,
+          "rank": "B",
+          "type": "meal"
+        },
+        {
+          "name": "唐揚げ定食",
+          "qty": 32,
+          "sales": 35200,
+          "cost_rate": 0.2881,
+          "rank": "B",
+          "type": "meal"
+        },
+        {
+          "name": "チキンカツカレー",
+          "qty": 24,
+          "sales": 28800,
+          "cost_rate": 0.2824,
+          "rank": "B",
+          "type": "meal"
+        },
+        {
+          "name": "トンタマダブル定食",
+          "qty": 13,
+          "sales": 19500,
+          "cost_rate": 0.2839,
+          "rank": "C",
+          "type": "meal"
+        },
+        {
+          "name": "冷やし鶏蕎麦とミニ海鮮丼",
+          "qty": 11,
+          "sales": 15180,
+          "cost_rate": 0.3623,
+          "rank": "C",
+          "type": "meal",
+          "new": true
+        },
+        {
+          "name": "トンテキ定食300g",
+          "qty": 4,
+          "sales": 7200,
+          "cost_rate": 0.3227,
+          "rank": "C",
+          "type": "meal"
+        },
+        {
+          "name": "豚串カツカレー",
+          "qty": 2,
+          "sales": 2600,
+          "cost_rate": 0.3138,
+          "rank": "C",
+          "type": "meal"
+        },
+        {
+          "name": "カニクリームコロッケ",
+          "qty": 12,
+          "sales": 2040,
+          "cost_rate": 0.3823,
+          "rank": "C",
+          "type": "topping",
+          "new": true
+        },
+        {
+          "name": "もつ煮込み変更",
+          "qty": 7,
+          "sales": 1260,
+          "cost_rate": 0.1722,
+          "rank": "C",
+          "type": "topping",
+          "new": true
+        },
+        {
+          "name": "ニンニク",
+          "qty": 4,
+          "sales": 400,
+          "cost_rate": 0.2,
+          "rank": "C",
+          "type": "topping",
+          "new": true
+        },
+        {
+          "name": "ご飯大盛り",
+          "qty": 35,
+          "sales": 0,
+          "cost_rate": 0,
+          "rank": "C",
+          "type": "rice"
+        },
+        {
+          "name": "ご飯おかわり(無料)",
+          "qty": 98,
+          "sales": 0,
+          "cost_rate": 0,
+          "rank": "C",
+          "type": "rice"
+        }
       ],
       "compare": {
         "unavailable": true,
-        "reason": "FWのABC分析は過去月の商品明細を返さない（前年2025/08・直前2026/07とも、4回再試行・日付確認済みでデータなし）。ランチ単位の前年比／新旧比はABCからは取得できません。",
+        "reason": "開始からの日数が短く、前年・新旧の比較はまだ出していない。（以前ここに『FWのABC分析は過去月の商品明細を返さない』と書いていたのは誤り。原因は操作順で、日付範囲→店舗選択の順にすれば過去月も取れる。月次ABCは2024-09以降を取り込み済みなので、比較は今後この蓄積から出す。）",
         "store_monthly": [
-          { "ym": "2025-08", "sales": 4059832 },
-          { "ym": "2026-07", "sales": 9044786 },
-          { "ym": "2026-08", "sales": 6116074, "partial": true }
+          {
+            "ym": "2025-08",
+            "sales": 4059832
+          },
+          {
+            "ym": "2026-07",
+            "sales": 9044786
+          },
+          {
+            "ym": "2026-08",
+            "sales": 6116074,
+            "partial": true
+          }
         ]
       }
     }

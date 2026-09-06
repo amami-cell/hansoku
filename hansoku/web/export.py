@@ -607,6 +607,10 @@ def build(
                     if n.store_code != s.store_code and n.store_code in monthly
                 ],
                 "shared_facility": s.is_shared_facility,
+                # 業態変更（リニューアル）。この月より前は別の店の数字なので、
+                # またぐ前年比には注意書きを出す（数字自体は消さない）。
+                "renewal_month": s.renewal_month or None,
+                "former_name": s.former_name or None,
             }
             for s in master.active
             if s.store_code in monthly

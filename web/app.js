@@ -329,6 +329,19 @@ function latestConfirmed(code) {
   return null;
 }
 // 前年同月比。直近の確定月と、その1年前を比べる
+// 比較の2ヶ月がリニューアルをまたぐか。またぐ＝別業態どうしの比較なので、
+// 数字は出すが「同じ店の前年比」として読ませない。
+function crossesRenewal(code, from, to) {
+  const r = store(code).renewal_month;
+  return !!r && from < r && to >= r;
+}
+const renewalNote = code => {
+  const st = store(code);
+  return st.renewal_month
+    ? `${st.renewal_month} リニューアル${st.former_name ? `（前: ${st.former_name}）` : ""}`
+    : "";
+};
+
 function yoy(code) {
   const last = latestConfirmed(code);
   if (!last) return null;
@@ -336,7 +349,10 @@ function yoy(code) {
   const prev = `${+y - 1}-${mo}`;
   const b = valueAt(code, prev);
   if (typeof b !== "number" || !b) return null;
-  return { month: last.m, cur: last.v, prev: b, pct: (last.v / b - 1) * 100 };
+  return {
+    month: last.m, cur: last.v, prev: b, pct: (last.v / b - 1) * 100,
+    renewal: crossesRenewal(code, prev, last.m) ? renewalNote(code) : null,
+  };
 }
 
 // ── 集客（客数）。売上と別枠の DATA.covers を読む。人数なので円と混ぜない ──
@@ -767,7 +783,9 @@ function renderList() {
       const y = yoy(code);
       const spark = sparkline(series(code, months), color);
       const yline = y
-        ? `<span class="yoy ${y.pct >= 0 ? "up" : "down"}">前年比 ${signed(y.pct)}%</span>`
+        ? (y.renewal
+            ? `<span class="yoy flat" title="${esc(y.renewal)}｜別業態どうしの比較になります">前年比 ${signed(y.pct)}% ⚠</span>`
+            : `<span class="yoy ${y.pct >= 0 ? "up" : "down"}">前年比 ${signed(y.pct)}%</span>`)
         : `<span class="yoy flat">前年比 ―</span>`;
       const promo = storePromoSummary(code);
       const promoLine = promo
@@ -2006,8 +2024,8 @@ function renderStore(code) {
       <div class="kpi"><div class="lbl">直近確定月${latest ? "（" + latest.m + "）" : ""}</div>
         <div class="big">${latest && latest.v != null ? (isRatio ? pct(latest.v) : yen(latest.v)) : "―"}</div></div>
       <div class="kpi"><div class="lbl">前年同月比</div>
-        <div class="big ${y ? (y.pct >= 0 ? "up" : "down") : ""}">${y ? signed(y.pct) + "%" : "―"}</div>
-        <div class="delta">${y ? `${man(y.prev)} → ${man(y.cur)}` : "前年データなし"}</div></div>
+        <div class="big ${y && !y.renewal ? (y.pct >= 0 ? "up" : "down") : ""}">${y ? signed(y.pct) + "%" : "―"}</div>
+        <div class="delta">${y ? `${man(y.prev)} → ${man(y.cur)}` : "前年データなし"}${y && y.renewal ? `<br><span class="warn">⚠ ${esc(y.renewal)}｜前年は別業態の数字です</span>` : ""}</div></div>
       <div class="kpi"><div class="lbl">前月比</div>
         <div class="big ${mom ? (mom.pct >= 0 ? "up" : "down") : ""}">${mom ? signed(mom.pct) + "%" : "―"}</div>
         <div class="delta">${mom ? `${man(mom.prev)} → ${man(latest.v)}` : "前月データなし"}</div></div>
