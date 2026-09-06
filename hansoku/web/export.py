@@ -282,11 +282,16 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
     raw_list = []
     for name, d in depts.items():
         bucket = dept_bucket(name)
-        cost = d["sales"] * (d["rate"] / 100.0) if d["rate"] is not None else 0.0
-        b = buckets.setdefault(bucket, {"sales": 0.0, "qty": 0.0, "cost": 0.0})
+        b = buckets.setdefault(
+            bucket, {"sales": 0.0, "qty": 0.0, "cost": 0.0, "rated_sales": 0.0}
+        )
         b["sales"] += d["sales"]
         b["qty"] += d["qty"]
-        b["cost"] += cost
+        # 原価率が取れていない部門は、分子にも分母にも入れない。0として足すと
+        # その売上ぶんだけ原価率が低く（＝粗利が高く）出て、改善が要る店を見逃す。
+        if d["rate"] is not None:
+            b["cost"] += d["sales"] * (d["rate"] / 100.0)
+            b["rated_sales"] += d["sales"]
         if bucket == "アラカルト":
             key = "ドリンク" if is_drink_dept(name) else "フード"
             alacarte_split[key] += d["sales"]
@@ -310,7 +315,13 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
                 "sales": round(b["sales"]),
                 "qty": round(b["qty"]),
                 "share": round(b["sales"] / total, 4),
-                "cost_rate": round(b["cost"] / b["sales"] * 100, 1) if b["sales"] else None,
+                "cost_rate": (
+                    round(b["cost"] / b["rated_sales"] * 100, 1) if b["rated_sales"] else None
+                ),
+                # 原価率が取れている売上の割合。低いほど cost_rate は当てにならない。
+                "cost_coverage": (
+                    round(b["rated_sales"] / b["sales"], 3) if b["sales"] else None
+                ),
             }
         )
     raw_list.sort(key=lambda r: r["sales"], reverse=True)
@@ -495,35 +506,11 @@ def build(
     ):
         hourly_month = row["date"].strftime("%Y-%m")
 
-    # 売れ筋商品（FW ABC分析）。商品別売上の上位を店ごとに持つ。product_category は
-    # FWのABCランク（A/B/C）。おすすめ料理・売れ筋の把握に使う。取り込み前は空。
-    prod_by_store: dict[str, list[dict]] = {}
-    prod_month: str | None = None
-    for row in warehouse.aggregate(
-        AggregateQuery(
-            date_from=date_from,
-            date_to=date_to,
-            grain=GRAIN_MONTH,
-            metrics=[METRIC_PRODUCT_SALES],
-            store_codes=master.active_codes,
-            group_by=("store_code", "product_name", "product_category"),
-        )
-    ):
-        prod_by_store.setdefault(row["store_code"], []).append(
-            {
-                "name": row["product_name"],
-                "sales": round(row["value"]),
-                "rank": row["product_category"],
-            }
-        )
-    products: dict[str, list[dict]] = {}
-    for code, items in prod_by_store.items():
-        items.sort(key=lambda p: p["sales"], reverse=True)
-        products[code] = items[:PRODUCTS_TOP_N]
-
     # 全店（グループ全体）の売れ筋。ABC分析は既定で「全店」集計なので、擬似店舗
     # コード "_group" に入れてある。おすすめ料理候補としてTOPページに出す。
-    products_group: list[dict] = []
+    # ここも「直近1ヶ月」の表なので、月ごとに拾って最新月だけを出す
+    # （全期間を合算して単月のラベルを付けない）。
+    group_by_month: dict[str, list[dict]] = {}
     for row in warehouse.aggregate(
         AggregateQuery(
             date_from=date_from,
@@ -531,72 +518,22 @@ def build(
             grain=GRAIN_MONTH,
             metrics=[METRIC_PRODUCT_SALES],
             store_codes=["_group"],
-            group_by=("product_name", "product_category"),
+            group_by=("date", "product_name", "product_category"),
         )
     ):
-        products_group.append(
+        group_by_month.setdefault(row["date"].strftime("%Y-%m"), []).append(
             {
                 "name": row["product_name"],
                 "sales": round(row["value"]),
                 "rank": row["product_category"],
             }
         )
-    products_group.sort(key=lambda p: p["sales"], reverse=True)
-    products_group = products_group[:PRODUCTS_TOP_N]
-
-    # 部門内訳（FW ABC 分類=部門）。店ごとにバラバラな部門名を標準バケット
-    # （コース/ランチ/アラカルト/飲み放題/食べ放題）へ寄せて、店舗詳細で構成比を出す。
-    # 生の部門も raw に残す。売上=dept_sales・数量=dept_qty・原価率=product_category(%)。
-    dept_raw: dict[str, dict[str, dict]] = {}
-    for row in warehouse.aggregate(
-        AggregateQuery(
-            date_from=date_from,
-            date_to=date_to,
-            grain=GRAIN_MONTH,
-            metrics=[METRIC_DEPT_SALES],
-            store_codes=master.active_codes,
-            group_by=("store_code", "product_name", "product_category"),
-        )
-    ):
-        try:
-            rate = float(row["product_category"]) if row["product_category"] else None
-        except (TypeError, ValueError):
-            rate = None
-        d = dept_raw.setdefault(row["store_code"], {}).setdefault(
-            row["product_name"], {"sales": 0.0, "qty": 0.0, "rate": rate}
-        )
-        d["sales"] += row["value"]
-        if rate is not None:
-            d["rate"] = rate
-    for row in warehouse.aggregate(
-        AggregateQuery(
-            date_from=date_from,
-            date_to=date_to,
-            grain=GRAIN_MONTH,
-            metrics=[METRIC_DEPT_QTY],
-            store_codes=master.active_codes,
-            group_by=("store_code", "product_name"),
-        )
-    ):
-        store = dept_raw.get(row["store_code"])
-        if store and row["product_name"] in store:
-            store[row["product_name"]]["qty"] += row["value"]
-
-    departments: dict[str, dict] = {
-        code: _assemble_departments(depts) for code, depts in dept_raw.items()
-    }
-
-    for row in warehouse.aggregate(
-        AggregateQuery(
-            date_from=date_from,
-            date_to=date_to,
-            grain=GRAIN_MONTH,
-            metrics=[METRIC_PRODUCT_SALES],
-            store_codes=[*master.active_codes, "_group"],
-            group_by=("date",),
-        )
-    ):
-        prod_month = row["date"].strftime("%Y-%m")
+    products_group: list[dict] = []
+    products_group_month: str | None = max(group_by_month) if group_by_month else None
+    if products_group_month:
+        products_group = sorted(
+            group_by_month[products_group_month], key=lambda p: p["sales"], reverse=True
+        )[:PRODUCTS_TOP_N]
 
     # 原価率は行ごとに平均できないため、分子・分母を合計してから割る
     cost_rates: dict[str, dict[str, float]] = {}
@@ -621,6 +558,29 @@ def build(
     departments_monthly, products_monthly = _build_abc_by_month(
         warehouse, master, date_from, date_to
     )
+
+    # 店舗詳細の「部門構成」「売れ筋商品」は “直近1ヶ月” を名乗る表なので、月次
+    # シリーズの最新月をそのまま使う。以前は date_from〜date_to を丸ごと SUM した
+    # うえで単月のラベルを付けていたため、ABCを2ヶ月以上ためた時点で
+    # 「(2026-08) 売れ筋商品」の中身が全期間合計になっていた。
+    # 最新月は店ごとに違う（取込月が揃っていない）ので、店ごとに持つ。
+    departments: dict[str, dict] = {}
+    products: dict[str, list[dict]] = {}
+    abc_month: dict[str, str] = {}
+    for code, months in departments_monthly.items():
+        if not months:
+            continue
+        m = max(months)
+        departments[code] = months[m]
+        abc_month[code] = m
+    for code, months in products_monthly.items():
+        if not months:
+            continue
+        m = max(months)
+        products[code] = months[m]
+        # 部門と商品で最新月がずれることは無いはずだが、ずれたら新しい方を採る。
+        abc_month[code] = max(abc_month.get(code, m), m)
+    prod_month = max(abc_month.values()) if abc_month else None
 
     # エリア（大阪/東京/…）と、それぞれに属する稼働店コード
     regions = [
@@ -664,7 +624,10 @@ def build(
         "products": products,
         # 全店（グループ全体）の売れ筋商品 上位。おすすめ料理候補としてTOPに出す。
         "products_group": products_group,
+        "products_group_month": products_group_month,
         "products_month": prod_month,
+        # 店ごとのABC対象月。部門構成・売れ筋の見出しはこれを使う（店で月が違う）。
+        "abc_month": abc_month,
         # 部門内訳（FW ABC 分類=部門・店舗別）。コース/ランチ/アラカルト/飲み放題/食べ放題の
         # 構成比＋生の部門。abc-store-ingest で店を1つずつ焼くと入る。空でも画面は成立する。
         "departments": departments,

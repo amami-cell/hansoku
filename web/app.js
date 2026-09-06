@@ -657,7 +657,7 @@ function renderGroupProducts() {
       <span class="pbar"><span class="pfill" style="width:${pct}%"></span></span>
       <span class="psales">${yen(p.sales)}</span></li>`;
   }).join("");
-  const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
+  const monthLbl = DATA.products_group_month ? `（${DATA.products_group_month}）` : "";
   return `
     <section class="block">
       <div class="bhead"><h2>売れ筋商品（グループ全店・ABC）</h2>
@@ -781,13 +781,13 @@ function renderList() {
       const profLine = (pf.kt != null || pf.gp != null)
         ? `<div class="sprof">
             ${pf.kt != null ? `<span class="pf pf-kt" title="直近確定月の 売上÷客数">客単 ${yen(pf.kt)}</span>` : ""}
-            ${pf.gp != null ? `<span class="pf pf-gp ${pf.gp >= 0.65 ? "up" : pf.gp < 0.60 ? "warn" : ""}" title="100−ABC部門原価率">粗利 ${pct(pf.gp)}</span>` : ""}
+            ${pf.gp != null ? `<span class="pf pf-gp ${pf.gp >= 0.65 ? "up" : pf.gp < 0.60 ? "warn" : ""}" title="100−FW理論原価率（ロス・棚卸差異は含まない）">理論粗利 ${pct(pf.gp)}</span>` : ""}
           </div>`
         : "";
       return `
         <button class="scard" data-store="${code}" style="--rc:${color}">
           <div class="stop"><span class="rtag">${r.name}</span>${storeName(code)}</div>
-          <div class="sbig">${man(total)}<span class="unit">円</span></div>
+          <div class="sbig">${METRIC === "cost_rate" ? "―" : man(total) + '<span class="unit">円</span>'}</div>
           ${spark}
           ${profLine}
           ${promoLine}
@@ -799,7 +799,7 @@ function renderList() {
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
     <section class="block">
       <div class="bhead"><h2>店舗</h2>
-        <span class="bnote">${METRIC_LABELS[METRIC]}・期間合計／前年同月比（当月の暫定は除く）</span></div>
+        <span class="bnote">${METRIC === "cost_rate" ? "理論原価率は期間合計にできないため ― と出ます" : METRIC_LABELS[METRIC] + "・期間合計"}／前年同月比（当月の暫定は除く）</span></div>
       <div class="sgrid">${cards}</div>
     </section>
     <div class="ovrlink"><button class="linkbtn" data-view="overview">エリア・全店の一覧を見る →</button></div>
@@ -976,6 +976,10 @@ function resolveDept(d, name) {
 }
 const bucketOf = (code, name) => resolveDept(deptFor(code), name);
 
+// 部門構成・売れ筋は「その店の直近1ヶ月」。取込月は店ごとに違うので店の月を出す。
+const abcMonthOf = code => (DATA.abc_month || {})[code] || null;
+const abcMonthLbl = code => { const m = abcMonthOf(code); return m ? `（${m}）` : ""; };
+
 // ── FW ABC 月次シリーズ（departments_monthly / products_monthly）アクセサ ───────
 // 毎月ABCを取り込むと積み上がる。無ければ空＝旧・最新1ヶ月版にフォールバック。
 function abcMonths(code) {
@@ -1074,7 +1078,7 @@ function campDeptCardMonthly(c) {
 
 // 最新1ヶ月版（月次ABCが無い時のフォールバック）。
 function campDeptCardSnapshot(c) {
-  const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
+  const monthLbl = abcMonthLbl((c.stores || [])[0]);
   const bname = c.bucket || campKindBucket(c.kind);
   const items = c.items || [];
   const sections = [];
@@ -1430,7 +1434,7 @@ function lunchHeadline(c) {
   return `<div class="ccmp"><span class="ccmp-h">${esc(e.menu_title || "新ランチ")}</span>` +
     `<span class="ccmp-i">${per1(m.dailyPerDay)}食/日</span>` +
     `<span class="ccmp-i">原価 ${pct(m.dailyCost)}</span>` +
-    `<span class="ccmp-i">ランチ構成比 ${pct(m.lunchShare)}</span></div>`;
+    `<span class="ccmp-i">ランチ構成比 ${m.lunchShare == null ? "―" : pct(m.lunchShare)}</span></div>`;
 }
 // 施策1件の比較ワンライン（環境系→前後、ランチ→ランチ要点）。無ければ空。
 const campHeadline = c => envHeadline(c.id) || (c.kind === "lunch" ? lunchHeadline(c) : "");
@@ -1458,9 +1462,11 @@ function campVerdict(c) {
     const le = code && lunchFor(code);
     if (le) {
       const m = lunchMetrics(le);
-      const sig = [`${per1(m.dailyPerDay)}食/日`, `原価 ${pct(m.dailyCost)}`, `構成比 ${pct(m.lunchShare)}`];
+      const sig = [`${per1(m.dailyPerDay)}食/日`, `原価 ${pct(m.dailyCost)}`];
+      if (m.lunchShare != null) sig.push(`構成比 ${pct(m.lunchShare)}`);
       if (m.dailyCost > 0.32) return { tone: "warn", label: "原価高め", signals: sig };
-      if (m.lunchShare >= 0.12) return { tone: "good", label: "定着", signals: sig };
+      // 構成比が取れていない店は、このしきい値で判定しない。
+      if (m.lunchShare != null && m.lunchShare >= 0.12) return { tone: "good", label: "定着", signals: sig };
       return { tone: "flat", label: "様子見", signals: sig };
     }
   }
@@ -1735,7 +1741,8 @@ function renderCross() {
       <section class="block"><div class="bhead"><h2>販促ターゲット（横断）</h2></div>
       <div class="panel"><p class="muted">部門データがまだありません。abc-store-ingest で店舗別ABCを取り込むと表示されます。</p></div></section>`;
   }
-  const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
+  // 店ごとに取込月が違うので、単月を名乗らない（各行に対象月を出す）。
+  const monthLbl = "";
 
   // 部門構成マトリクス（ブランド別・積み上げバー）
   const bar = r => DEPT_ORDER.filter(n => (r.share[n] || 0) > 0.004).map(n => {
@@ -1829,7 +1836,7 @@ function renderCross() {
       <div class="bhead"><h2>収益性ランキング（横断）</h2>
         <span class="bnote">直近確定月の 客単価 × 粗利率　${prof.length}店</span></div>
       <div class="panel"><ul class="xplist">${rows}</ul>
-        <div class="bnote" style="margin-top:8px">客単価＝売上÷客数、粗利率＝100−原価率（ABC部門）。行タップで店舗詳細へ。</div>
+        <div class="bnote" style="margin-top:8px">客単価＝売上÷客数、理論粗利率＝100−FW理論原価率（ロス・棚卸差異は含まない）。行タップで店舗詳細へ。</div>
         ${worstNote}
       </div>
     </section>`;
@@ -2185,7 +2192,7 @@ function renderDepartments(code) {
     return `<li><span class="rbk" style="--dc:${DEPT_COLORS[r.bucket] || "var(--ink-3)"}">${esc(r.bucket)}</span>
       ${esc(r.name)}<span class="rval">${yen(r.sales)}・${(r.qty || 0).toLocaleString("ja-JP")}点${cr}</span></li>`;
   }).join("");
-  const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
+  const monthLbl = abcMonthLbl(code);
   const rawBlock = raw
     ? `<details class="draw"><summary>FWの生の部門 ${d.raw.length}件を見る</summary>
          <ul class="drawlist">${raw}</ul></details>`
@@ -2333,7 +2340,7 @@ function renderProducts(code) {
       <span class="pbar"><span class="pfill" style="width:${pct}%"></span></span>
       <span class="psales">${yen(p.sales)}</span></li>`;
   }).join("");
-  const monthLbl = DATA.products_month ? `（${DATA.products_month}）` : "";
+  const monthLbl = abcMonthLbl(code);
   return `
     <section class="block">
       <div class="bhead"><h2>売れ筋商品（ABC）</h2>
@@ -2365,7 +2372,9 @@ function lunchMetrics(e) {
     topAttach: dailyQty ? topQty / dailyQty : 0,
     topPerMeal: dailyQty ? topSales / dailyQty : 0,
     lunchSales, lunchCost: (e.lunch && e.lunch.cost_rate) || 0,
-    lunchShare: e.store_sales ? lunchSales / e.store_sales : 0,
+    // store_sales が無い店は 0 ではなく null。0 にすると「店売上の0%」と読めてしまい、
+    // 判定の構成比しきい値も永久に成立しない。
+    lunchShare: e.store_sales ? lunchSales / e.store_sales : null,
   };
 }
 const per1 = n => (Math.round(n * 10) / 10).toLocaleString("ja-JP");
@@ -2399,8 +2408,8 @@ function renderLunch(code) {
   if (!e) return `<div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
     <div class="empty">ランチ分析データがありません。</div>`;
   const m = lunchMetrics(e);
-  const store = (DATA.stores || []).find(s => s.store_code === code);
-  const nm = (store && store.store_name) || e.store_name || code;
+  const store = (DATA.stores || []).find(s => s.code === code);
+  const nm = (store && store.name) || e.store_name || code;
   const pr = e.period || {};
 
   // 日替わり本体2品（強調）
@@ -2504,7 +2513,7 @@ function renderLunch(code) {
 
     <section class="block">
       <div class="bhead"><h2>ランチ全品 一覧（人気順）</h2>
-        <span class="bnote">ランチ部門 ${man(m.lunchSales)}・原価${pct(m.lunchCost)}・店内構成比 ${pct(m.lunchShare)}</span></div>
+        <span class="bnote">ランチ部門 ${man(m.lunchSales)}・原価${pct(m.lunchCost)}・店内構成比 ${m.lunchShare == null ? "―（店売上 未取得）" : pct(m.lunchShare)}</span></div>
       <div class="panel"><ul class="llist">${mealRows}</ul>${riceNote}</div>
     </section>
     ${cmpNote}`;
