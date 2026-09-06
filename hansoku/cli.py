@@ -508,18 +508,12 @@ def cmd_export_web(args: argparse.Namespace) -> int:
     master = StoreMaster.load(args.stores)
     campaigns = load_schedule(master)
     creatives = load_creatives(master, campaigns)
-    # アプリ内で入力された目標・要因メモ（Neon）を焼き込む。届かなければ既定のまま。
-    try:
-        with get_appdb(settings) as db:
-            server_targets = db.list_promo_targets()
-            server_notes = db.list_promo_notes()
-        for camp in campaigns:
-            if camp["id"] in server_targets:
-                camp["target"] = server_targets[camp["id"]]
-            if camp["id"] in server_notes:
-                camp["memo"] = server_notes[camp["id"]]
-    except Exception as exc:  # noqa: BLE001 — 目標/メモが無くても画面は成立させる
-        print(f"[warn] 目標/メモ(promo_*)の読み込みをスキップ: {exc}")
+    # 目標と要因メモは dashboard.json に焼き込まない。
+    #
+    # 画面は /api/targets・/api/notes から直に読む（Cloudflare Access の内側）。
+    # 焼き込むと、この JSON をそのまま公開するデザイン確認用プレビュー
+    # （deploy-preview.yml・認証なし）に、本部の要因メモまで載ってしまう。
+    # 目標・メモの置き場所をアプリに一本化したので、焼き込む必要も無くなった。
     with get_warehouse(settings) as warehouse:
         payload = build(
             warehouse,

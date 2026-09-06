@@ -141,3 +141,23 @@ def test_目標とメモの鍵は開始年つき(master, tmp_path):
             end: "2027-11-30"
     """)
     assert load_schedule(master, path2)[0]["key"] == "r-osusume@2027"
+
+
+def test_目標とメモは書き出しに含めない(master, tmp_path):
+    """dashboard.json はデザイン確認用プレビュー（認証なし）でもそのまま公開される。
+
+    目標と要因メモは本部の内部情報なので焼き込まない。画面は
+    /api/targets・/api/notes から Cloudflare Access の内側で直に読む。
+    """
+    code = master.active_codes[0]
+    path = _write(tmp_path, f"""
+        campaigns:
+          - id: 2026-a
+            stores: ["{code}"]
+            title: t
+            kind: gm
+            start: "2026-01-01"
+    """)
+    camp = load_schedule(master, path)[0]
+    assert "target" not in camp
+    assert "memo" not in camp
