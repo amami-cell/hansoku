@@ -1628,9 +1628,13 @@ def report_abc_detail(
     except Exception:  # noqa: BLE001
         pass
 
-    y, m = int(month[:4]), int(month[5:7])
+    # 月に範囲（"2025-09..2026-08"）を渡せる。業態変更やメニュー刷新の前後で
+    # 売れ筋がどう入れ替わったかを1回で並べるため。
+    span = _expand_months(month) if (".." in month or "," in month) else [month]
+    y, m = int(span[0][:4]), int(span[0][5:7])
     d_from = _date(y, m, 1)
-    d_to = _date(y + (m == 12), 1 if m == 12 else m + 1, 1)
+    ly, lm = int(span[-1][:4]), int(span[-1][5:7])
+    d_to = _date(ly + (lm == 12), 1 if lm == 12 else lm + 1, 1)
 
     codes = list(master.active_codes)
     # ワークフローの入力は空欄だと既定値（1店）に化けるので、「全店」で明示的に外せるようにする。
@@ -1644,6 +1648,33 @@ def report_abc_detail(
             print(f"[ABC明細] 店舗『{store_filter}』をマスタで解決できません。終了。")
             return 1
         codes = sorted(want)
+
+    if len(span) > 1:
+        # 月ごとの売れ筋を並べる（推移を見る形）。店は1つに絞って使うのが前提。
+        by_month: dict[str, list[tuple[str, float]]] = {}
+        for row in warehouse.aggregate(
+            AggregateQuery(
+                date_from=d_from, date_to=d_to, grain=GRAIN_MONTH,
+                metrics=[METRIC_PRODUCT_SALES], store_codes=codes,
+                group_by=("store_code", "date", "product_name"),
+            )
+        ):
+            key = f"{row['store_code']}|{row['date'].strftime('%Y-%m')}"
+            by_month.setdefault(key, []).append((row["product_name"], row["value"]))
+        print(f"=== ABC明細 {span[0]}〜{span[-1]} 月ごとの売れ筋 上位{top_n}品 ===")
+        for st in master.active:
+            if st.store_code not in codes:
+                continue
+            months_here = [m for m in span if f"{st.store_code}|{m}" in by_month]
+            if not months_here:
+                continue
+            print(f"\n── {st.store_code} {st.store_name} ──")
+            for mm in months_here:
+                items_m = sorted(by_month[f"{st.store_code}|{mm}"], key=lambda x: x[1], reverse=True)
+                total_m = sum(v for _, v in items_m)
+                head = " / ".join(f"{n}({int(v):,})" for n, v in items_m[:top_n])
+                print(f"  {mm}  上位計{int(total_m):,}  {head}")
+        return 0
 
     depts: dict[str, list[tuple[str, float]]] = {}
     for row in warehouse.aggregate(
