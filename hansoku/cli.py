@@ -475,6 +475,14 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
     raise SystemExit(f"未知のモード: {args.mode}")
 
 
+def cmd_schedule_lint(args: argparse.Namespace) -> int:
+    """台帳（config/schedule.yaml）の書き方を検査する。DBもFWも要らない。"""
+    from .schedule_lint import report_schedule_lint
+
+    master = StoreMaster.load(args.stores)
+    return report_schedule_lint(master, args.path)
+
+
 def cmd_export_web(args: argparse.Namespace) -> int:
     from .web.export import build, load_creatives, load_schedule, write
 
@@ -754,6 +762,13 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--date-to", required=True, type=_date, dest="date_to")
     export.add_argument("--out", default="web/data", help="書き出し先ディレクトリ")
     export.set_defaults(func=cmd_export_web)
+
+    slint = sub.add_parser(
+        "schedule-lint",
+        help="台帳 config/schedule.yaml を検査する（黙って消える書き方を見つける）",
+    )
+    slint.add_argument("--path", default=None, help="schedule.yaml のパス")
+    slint.set_defaults(func=cmd_schedule_lint)
 
     grant = sub.add_parser("grant-admin", help="admin 権限を付与する")
     grant.add_argument("email")

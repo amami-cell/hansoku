@@ -40,6 +40,11 @@ jobs:
       - name: 依存パッケージをインストール
         run: pip install -r requirements.txt
 
+      - name: 台帳の検査
+        # 唯一の人力入力なので、間違えた書き方が黙って消える前にここで止める。
+        # DBもFWも要らない。
+        run: python -m hansoku.cli schedule-lint
+
       - name: テスト
         env:
           HANSOKU_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/hansoku_test
