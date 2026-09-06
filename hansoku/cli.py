@@ -477,7 +477,6 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
 
 def cmd_promo_migrate_keys(args: argparse.Namespace) -> int:
     """目標・メモの鍵を 素の施策id → id@開始年 に移す（一度きり）。"""
-    from .db.appdb import get_appdb
     from .web.export import load_schedule
 
     master = StoreMaster.load(args.stores)

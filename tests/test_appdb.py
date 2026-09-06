@@ -319,3 +319,27 @@ class Test鍵の移行:
         appdb.migrate_promo_keys(keys)
         assert appdb.migrate_promo_keys(keys) == []
         assert appdb.list_promo_targets() == {"r1006-osusume@2026": 16_000_000}
+
+
+class TestCLIの配線:
+    """遅延importの取り違えは --help では出ず、本番で初めて落ちる。
+
+    実際 promo-migrate-keys を get_appdb の在り処を間違えて書き、Actions で
+    ImportError にした。サブコマンドを実際に呼んで、配線ごと確かめる。
+    """
+
+    def test_promo_migrate_keys_が実行できる(self, appdb, monkeypatch):
+        import os
+
+        from hansoku.cli import main
+
+        monkeypatch.setenv("HANSOKU_ENV", "local")
+        monkeypatch.setenv(
+            "LOCAL_DATABASE_URL", os.environ["HANSOKU_TEST_DATABASE_URL"]
+        )
+        appdb.set_promo_target("r1006-osusume", 16_000_000)
+        assert main(["promo-migrate-keys", "--dry-run"]) == 0
+        # 試算なので動いていない
+        assert appdb.list_promo_targets() == {"r1006-osusume": 16_000_000}
+        assert main(["promo-migrate-keys"]) == 0
+        assert appdb.list_promo_targets() == {"r1006-osusume@2026": 16_000_000}
