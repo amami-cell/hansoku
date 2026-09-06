@@ -1718,6 +1718,8 @@ def report_source_audit(
     """
     import sys as _sys
 
+    from ..model import GRAIN_MONTH
+
     try:
         _sys.stdout.reconfigure(line_buffering=True)
     except Exception:  # noqa: BLE001
@@ -1737,7 +1739,7 @@ def report_source_audit(
         GROUP BY store_code, date, source, kind
         ORDER BY date, store_code, source
         """,
-        {"metric": metric, "grain": "月", "d_from": d_from, "d_to": d_to},
+        {"metric": metric, "grain": GRAIN_MONTH, "d_from": d_from, "d_to": d_to},
     )
     if not rows:
         print(f"[出どころ] {metric} の月次データがありません（{date_from}〜{date_to}）")
