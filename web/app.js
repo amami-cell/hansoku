@@ -532,7 +532,8 @@ function reviewProgressStrip() {
   return `
     <section class="rpstrip">
       ${tile("campaigns", `${live.length}<small>件</small>`, "実施中の施策", soon.length ? `予定 ${soon.length}・終了 ${done.length}` : `終了 ${done.length}`, "", "", "live")}
-      ${tile("campaigns", `<span class="up">${good}</span> / <span class="down">${warn}</span>`, "判定 効果あり/要改善", `計測できた施策の結果`)}
+      ${tile("campaigns", `<span class="up">${good}</span> / <span class="down">${warn}</span>`, "判定 効果あり/要改善",
+        `測れているのは ${good + warn} / ${live.length + done.length}件`)}
       ${tile("campaigns",
         goals.length ? `${achieved}<small>/${goals.length}</small>` : "―",
         "目標達成（実施中）",
@@ -950,7 +951,7 @@ function renderCampaigns() {
           }<span class="sub">（確定${t.months}ヶ月・${t.stores}店）</span>`
         : campBasis(c)
           ? `<span class="muted">対象部門・商品がまだABCに出ていません</span>`
-          : `<span class="muted">効果の測り方が未設定（bucket / items）</span>`;
+          : `<span class="muted">この販促を何で測るか未設定 — 対象の部門（例: コース）か商品名を決めると数字が出ます</span>`;
       effHtml = `${head}<div class="ceff sub2" title="${esc(overlapNote(c))}">店全体 ${man(sum.cur)}円　${yoy}${mom}<span class="sub">（確定${sum.months}ヶ月・${sum.stores}店／${esc(overlapNote(c))}）</span></div>`;
       // 集客（客数）。売上表示のときだけ、同期間の客数を前年比つきで添える
       if (METRIC === "sales" && sum.covers != null) {
@@ -1392,7 +1393,7 @@ function renderCampaign(id) {
           <div class="delta">${
             campBasis(c)
               ? "対象の部門・商品がまだABCに出ていません"
-              : "測り方が未設定。台帳に bucket（部門）か items（商品名）を入れてください"
+              : "何で測るかが未設定です。対象の部門（例: コース）か商品名を決めてください"
           }</div></div>`;
     overall = `<div class="kpis">
       ${tgtKpi}
@@ -1678,7 +1679,7 @@ function campVerdict(c) {
     if (!campBasis(c)) {
       return {
         tone: "flat", label: "測り方 未設定",
-        signals: ["台帳に bucket（部門）か items（商品名）を入れると効果を出せます"],
+        signals: ["対象の部門か商品名を決めると、この販促だけの数字が出ます"],
       };
     }
     if (t && t.pct != null) {
@@ -1768,7 +1769,7 @@ function campReviewLine(c) {
       `<span class="ccmp-i sub">確定${t.months}ヶ月・${t.stores}店</span></div>`;
   }
   if (!campBasis(c)) {
-    return `<div class="ccmp"><span class="ccmp-i sub">効果の測り方が未設定（台帳の bucket / items）</span></div>`;
+    return `<div class="ccmp"><span class="ccmp-i sub">この販促を何で測るか未設定 — 対象の部門（例: コース）か商品名を決めると数字が出ます</span></div>`;
   }
   const sum = campaignSummary(c);
   if (sum.stores) {
@@ -2321,7 +2322,7 @@ function renderStore(code) {
             : "前年データなし";
           effHtml = `<div class="ceff">${esc(tgt1.label)}（確定${tgt1.months}ヶ月）<b>${man(tgt1.cur)}円</b>・${cmp}</div>`;
         } else if (!campBasis(c)) {
-          effHtml = `<div class="ceff muted">効果の測り方が未設定（台帳の bucket / items）</div>`;
+          effHtml = `<div class="ceff muted">この販促を何で測るか未設定 — 対象の部門（例: コース）か商品名を決めると数字が出ます</div>`;
         }
         if (eff && METRIC !== "sales") {
           effHtml += `<div class="ceff sub2">店全体の${METRIC_LABELS[METRIC]} ${man(eff.cur)}円<span class="sub">（${esc(overlapNote(c))}）</span></div>`;
