@@ -5,30 +5,45 @@
    ============================================================ */
 :root {
   --bg:#F6F7F9; --surface:#FFFFFF; --surface-2:#FAFBFD;
-  --ink:#14171E; --ink-2:#4B5262; --ink-3:#838B9C;
+  --ink:#14171E; --ink-2:#4B5262; --ink-3:#6B7382;
   --line:#E4E7ED; --line-strong:#CDD3DD;
   --accent:#2E4A7D; --accent-soft:#EBF0F8; --accent-line:#C6D3E8;
   --good:#0CA30C; --warning:#FAB219; --critical:#D03B3B;
   --good-ink:#0A6E12; --warning-ink:#8A5D00; --critical-ink:#A62A2A;
   --radius:10px;
   --shadow:0 1px 2px rgba(20,23,30,.05), 0 4px 14px rgba(20,23,30,.045);
+  /* 使われているのに定義が無かったトークン。ブラウザで実測したところ、TOPの
+     主役タイル（実施中/判定/目標達成/振り返り率/原価アラート）の背景が
+     rgba(0,0,0,0)＝透明になっていた。バーのトラックや行ホバーも同様。 */
+  --surface-1:var(--surface); --ink-1:var(--ink);
+  --good-soft:#E4F3E4; --warn-soft:#FBF0DA;
+  /* チップ等の「塗りの上に載る文字色」。7箇所で同じ上書きを繰り返していた。 */
+  --on-accent:#FFFFFF;
   --display:"Zen Old Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
   --body:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#0E1116; --surface:#161A21; --surface-2:#1B2029;
-  --ink:#E9ECF2; --ink-2:#A7AFBF; --ink-3:#737B8C;
+  --ink:#E9ECF2; --ink-2:#A7AFBF; --ink-3:#8B93A4;
   --line:#262C37; --line-strong:#39414F;
   --accent:#8AABE2; --accent-soft:#1A2231; --accent-line:#2E3B52;
   --good-ink:#4FC24F; --warning-ink:#F0BE55; --critical-ink:#E4756F;
+  --surface-1:var(--surface); --ink-1:var(--ink);
+  --good-soft:color-mix(in srgb,var(--good-ink) 20%,var(--surface));
+  --warn-soft:color-mix(in srgb,var(--warning-ink) 20%,var(--surface));
+  --on-accent:#0E1116;
   --shadow:0 1px 2px rgba(0,0,0,.35), 0 4px 14px rgba(0,0,0,.28);
 }}
 :root[data-theme="dark"]{
   --bg:#0E1116; --surface:#161A21; --surface-2:#1B2029;
-  --ink:#E9ECF2; --ink-2:#A7AFBF; --ink-3:#737B8C;
+  --ink:#E9ECF2; --ink-2:#A7AFBF; --ink-3:#8B93A4;
   --line:#262C37; --line-strong:#39414F;
   --accent:#8AABE2; --accent-soft:#1A2231; --accent-line:#2E3B52;
   --good-ink:#4FC24F; --warning-ink:#F0BE55; --critical-ink:#E4756F;
+  --surface-1:var(--surface); --ink-1:var(--ink);
+  --good-soft:color-mix(in srgb,var(--good-ink) 20%,var(--surface));
+  --warn-soft:color-mix(in srgb,var(--warning-ink) 20%,var(--surface));
+  --on-accent:#0E1116;
   --shadow:0 1px 2px rgba(0,0,0,.35), 0 4px 14px rgba(0,0,0,.28);
 }
 *{box-sizing:border-box;}
@@ -82,7 +97,8 @@ figcaption{font-size:12.5px;color:var(--ink-3);margin-top:12px;padding-top:11px;
 
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;}
 th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);font-size:13.5px;}
-th{font-size:11px;letter-spacing:.08em;color:var(--ink-3);font-weight:500;text-transform:uppercase;cursor:pointer;user-select:none;}
+/* 並べ替えは未実装。cursor:pointer だと押せると誤解させるので外した。 */
+th{font-size:11px;letter-spacing:.08em;color:var(--ink-3);font-weight:500;text-transform:uppercase;}
 th.num,td.num{text-align:right;}
 th:hover{color:var(--accent);}
 tbody tr:last-child td{border-bottom:0;}
@@ -277,7 +293,12 @@ tbody tr:last-child td{border-bottom:0;}
 .srow[data-store]{cursor:pointer;}
 .srow[data-store]:hover{background:var(--surface-2);}
 .snm{display:flex;align-items:center;gap:7px;padding:8px 10px 8px 12px;font-size:13px;
-  font-weight:500;overflow:hidden;border-right:1px solid var(--line);}
+  font-weight:500;overflow:hidden;border-right:1px solid var(--line);
+  /* 横スクロールしても店名は残す。760px 必要な表を 364px の端末で見るので、
+     これが無いとどの店の帯を見ているのか分からなくなる。 */
+  position:sticky;left:0;z-index:2;background:var(--surface);}
+.srow[data-store]:hover .snm{background:var(--surface-2);}
+.sgrp{position:sticky;left:0;z-index:2;}
 .snm .rtag{font-size:10px;padding:2px 6px;}
 .snm-t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .strack{position:relative;min-height:calc(var(--lanes,1) * 24px + 8px);}
@@ -856,3 +877,16 @@ b.warn{color:var(--warning-ink);}
   font-size:10.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
 .cscur{font-weight:700;color:var(--ink-2);}
 .cscur.up{color:var(--good-ink);}.cscur.down{color:var(--warning-ink);}
+
+/* ── 指で操作する端末（スマホ・タブレット）────────────────────────
+   目標と要因メモの入力はこのアプリの目的そのものなのに、ボタンが約22px しか
+   なく、太い指では狙えなかった。入力にかかわるものを 44px 以上にする。
+   select は 16px 未満だと iOS Safari がページごと自動ズームし、
+   指標を切り替えるたびにレイアウトが飛ぶ。 */
+@media (pointer:coarse){
+  select{font-size:16px;}
+  .goalbtn{min-height:44px;padding:10px 14px;font-size:13px;}
+  .linkbtn{min-height:44px;display:inline-flex;align-items:center;}
+  .fchip,.vtab{min-height:42px;}
+  .tbtn{min-height:40px;}
+}

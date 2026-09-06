@@ -463,6 +463,8 @@ function render() {
     el.addEventListener("click", () => go({ kind: "store", code: el.dataset.store })));
   app.querySelectorAll("[data-lunch]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "lunch", code: el.dataset.lunch }); }));
+  app.querySelectorAll("[data-tilefilter]").forEach(el =>
+    el.addEventListener("click", () => { CAMP_FILTER = { ...CAMP_FILTER, status: el.dataset.tilefilter }; }, true));
   app.querySelectorAll("[data-view]").forEach(el =>
     el.addEventListener("click", () => go({ kind: el.dataset.view }, el.dataset.scroll)));
   app.querySelectorAll("[data-cal]").forEach(el =>
@@ -523,13 +525,13 @@ function reviewProgressStrip() {
   // 原価アラート（前月比で原価率が悪化した店）
   const alerts = costAlerts();
 
-  const tile = (view, big, lbl, sub, tone, scroll) => `
-    <button class="rptile${tone ? " " + tone : ""}" data-view="${view}"${scroll ? ` data-scroll="${scroll}"` : ""}>
+  const tile = (view, big, lbl, sub, tone, scroll, filter) => `
+    <button class="rptile${tone ? " " + tone : ""}" data-view="${view}"${scroll ? ` data-scroll="${scroll}"` : ""}${filter ? ` data-tilefilter="${filter}"` : ""}>
       <div class="rpv">${big}</div><div class="rpl">${lbl}</div>
       ${sub ? `<div class="rps">${sub}</div>` : ""}</button>`;
   return `
     <section class="rpstrip">
-      ${tile("campaigns", `${live.length}<small>件</small>`, "実施中の施策", soon.length ? `予定 ${soon.length}・終了 ${done.length}` : `終了 ${done.length}`)}
+      ${tile("campaigns", `${live.length}<small>件</small>`, "実施中の施策", soon.length ? `予定 ${soon.length}・終了 ${done.length}` : `終了 ${done.length}`, "", "", "live")}
       ${tile("campaigns", `<span class="up">${good}</span> / <span class="down">${warn}</span>`, "判定 効果あり/要改善", `計測できた施策の結果`)}
       ${tile("campaigns",
         goals.length ? `${achieved}<small>/${goals.length}</small>` : "―",
@@ -538,7 +540,7 @@ function reviewProgressStrip() {
       ${tile("campaigns",
         done.length ? `${rvPct}<small>%</small>` : "―",
         "振り返り記入率", needs ? `未記入 ${needs}件が残っています` : (done.length ? "やりっぱなし ゼロ" : "終了施策なし"),
-        needs ? "warn" : "")}
+        needs ? "warn" : "", "", "review")}
       ${tile("cross",
         `${alerts.length}<small>店</small>`,
         "原価アラート",
@@ -3135,7 +3137,7 @@ function fillNotice() {
   const gen = DATA.generated_at ? DATA.generated_at.replace("T", " ").replace("+00:00", " UTC") : "";
   document.getElementById("notice").innerHTML =
     `<p><b>データ</b>　FW実績・全${DATA.stores.length}店。当月は締め前の暫定値のため点線・淡色で示します。</p>
-     <p><b>これから</b>　施策の登録・目標対比・ランチ／ディナー比（時間帯別）を追加します。施策を登録すると、店舗の売上グラフに施策期間の帯が重なり、結果が並びます。</p>
+     <p><b>数字の読み方</b>　当月は締め前なので点線・淡色です。施策の効果は、その施策が効く部門・商品を前年の同じ月と比べています（GM改定は店全体）。理論原価率はレシピ上の値で、ロスや棚卸差異は含みません。</p>
      <p class="fine">最終更新 ${gen}</p>`;
 }
 
