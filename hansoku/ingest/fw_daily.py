@@ -1178,6 +1178,31 @@ def _abc_open_store_modal_and_select_all(session, master=None):
     return page, added_codes
 
 
+# 商品行から「商品名」にあたるセルを選ぶ。ランク(A/B/C)・商品CD・値は名前ではない。
+_ABC_RANK_RE = re.compile(r"^[ABC]$")
+# 合計行はラベルのセルが空のことがあり、その場合は次の原価率セル（例 "25.57%"）を
+# 商品名として拾ってしまう。実際 1151 の 2025-02 に「25.57%」という商品が
+# ¥2,378,250 で入っていた。数値・パーセントだけの文字列は商品名ではない。
+_ABC_NUMLIKE_RE = re.compile(r"^[\d,]+(\.\d+)?%?$")
+
+
+def _abc_product_name_index(cells: list[str]) -> int | None:
+    """商品名にあたるセルの位置。見つからなければ None。"""
+    for i, c in enumerate(cells):
+        t = (c or "").strip()
+        if not t:
+            continue
+        if _INT_RE.match(t):  # 数字（商品CD・値）はスキップ
+            continue
+        if _ABC_RANK_RE.match(t):  # 単独の A/B/C はランク
+            continue
+        if _ABC_NUMLIKE_RE.match(t):  # "25.57%" や "1,234" は値であって商品名ではない
+            continue
+        if len(t) >= 2:  # 商品名らしい文字列
+            return i
+    return None
+
+
 def _extract_product_grid(session) -> list[dict]:
     """ABC分析のグリッドを視覚行に復元し、商品行だけ返す。
 
@@ -1185,22 +1210,10 @@ def _extract_product_grid(session) -> list[dict]:
     商品名（先頭の非数字・非ランクの文字セル）を起点にし、続く整数が4つ以上ある行を採る。
     見出し・合計・データなしは自然に除外される。
     """
-    rank_re = re.compile(r"^[ABC]$")
     result: list[dict] = []
     seen: set[str] = set()
     for cells in _visual_rows(session):
-        name_idx = None
-        for i, c in enumerate(cells):
-            s = c.strip()
-            if not s:
-                continue
-            if _INT_RE.match(s):  # 数字（商品CD・値）はスキップ
-                continue
-            if rank_re.match(s):  # 単独の A/B/C はランク
-                continue
-            if len(s) >= 2:  # 商品名らしい文字列
-                name_idx = i
-                break
+        name_idx = _abc_product_name_index(cells)
         if name_idx is None:
             continue
         name = cells[name_idx].strip()
@@ -1211,7 +1224,7 @@ def _extract_product_grid(session) -> list[dict]:
             continue
         rank = None
         for c in reversed(cells):
-            if rank_re.match(c.strip()):
+            if _ABC_RANK_RE.match(c.strip()):
                 rank = c.strip()
                 break
         seen.add(name)
@@ -1863,7 +1876,7 @@ def ingest_abc_store(
     # 前月と部門合計が完全一致したら、日付が反映されず同じグリッドを読んだ疑いが濃い。
     # （〜2千万円の合計が偶然そろうことは無い）。売上推移で同種の取りこぼしをやったので、
     # 「取れたつもり」を検知できるようにしておく。
-    seen_totals: dict[int, str] = {}
+    seen_totals: dict[tuple[str, int], str] = {}
     suspect: list[str] = []
     empty: list[str] = []
     # 新しい月から古い月へ降順で回す。データのある月に先に当たるので、
@@ -2022,12 +2035,22 @@ def ingest_abc_store(
                 if n_dept == 0 and getattr(st, "abc_dept", True):
                     no_dept.append(month)
             # 同じ合計の月が二度出たら、日付が効かず同じグリッドを読んでいる疑い。
-            dup = seen_totals.get(dept_total) if dept_total else None
-            if dup:
-                suspect.append(f"{month}={dup}")
-            elif dept_total:
-                seen_totals[dept_total] = month
-            mark = " ⚠同額" if dup else ""
+            # 部門合計と商品合計の両方で「他の月と完全一致」を見る。日付が効かず
+            # 同じグリッドを読むと、月をまたいで数字がそっくり同じになる。
+            # 部門だけ見ていたら、1151 の 2025-02 と 2025-03 が商品まで丸ごと
+            # 同一だったのを取りこぼした。
+            prod_total = sum(
+                p["ints"][_ABC_SALES] for p in products[:top_n] if len(p["ints"]) > _ABC_SALES
+            )
+            dup = seen_totals.get(("dept", dept_total)) if dept_total else None
+            dup_p = seen_totals.get(("prod", prod_total)) if prod_total else None
+            if dup or dup_p:
+                suspect.append(f"{month}={dup or dup_p}")
+            if dept_total and not dup:
+                seen_totals[("dept", dept_total)] = month
+            if prod_total and not dup_p:
+                seen_totals[("prod", prod_total)] = month
+            mark = " ⚠同額" if (dup or dup_p) else ""
             _flush(month)
             print(
                 f"[ABC店] {code} {month} [{used_level}] 商品{len(products)}品→{n_prod}行"
@@ -2052,7 +2075,7 @@ def ingest_abc_store(
         print(f"[ABC店] 入れ直し: --abc-store {code} --month {','.join(no_dept)}")
     if suspect:
         # 取り込みは止めない（同額でも本当に同額な可能性は残る）が、必ず目に付くよう出す。
-        print(f"[ABC店] ⚠ {code} 部門合計が他の月と一致: {suspect}")
+        print(f"[ABC店] ⚠ {code} 合計が他の月と一致（部門または商品）: {suspect}")
         print("[ABC店] ⚠ 日付が反映されていない疑い。query.yml の dept_sales で月別に検算すること。")
     if dry_run:
         print("[ABC店] dry-run のため書き込みはしません")

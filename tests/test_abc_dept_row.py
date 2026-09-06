@@ -39,3 +39,29 @@ def test_全商品グリッドの行は部門ではない():
 def test_行が短くても落ちない():
     assert not _abc_countable_dept([])
     assert not _abc_countable_dept(["部門名"])
+
+
+def _name(cells):
+    from hansoku.ingest.fw_daily import _abc_product_name_index
+
+    i = _abc_product_name_index(cells)
+    return None if i is None else cells[i].strip()
+
+
+def test_ラベルが空の合計行から商品名を拾わない():
+    """合計行はラベルのセルが空のことがあり、次の原価率セルを商品名にしてしまう。
+
+    実際 1151 の 2025-02 に「25.57%」という商品が ¥2,378,250 で入っていた。
+    """
+    assert _name(["", "25.57%", "24,834", "2,378,250"]) is None
+
+
+def test_普通の商品名は拾う():
+    assert _name(["009010088900011321", "韓国冷麺", "935", "226.00"]) == "韓国冷麺"
+    assert _name(["012530125200080871", "2人前)グリルケバブ", "1,408"]) == "2人前)グリルケバブ"
+
+
+def test_ランクや数値は商品名にしない():
+    assert _name(["A"]) is None
+    assert _name(["1,234"]) is None
+    assert _name([]) is None
