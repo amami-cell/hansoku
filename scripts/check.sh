@@ -23,3 +23,10 @@ if [ -n "${HANSOKU_TEST_DATABASE_URL:-}" ] && command -v pg_isready >/dev/null 2
 fi
 
 python3 -m pytest tests/ -q
+
+# 台帳（唯一の人力入力）の書き方。間違えると黙って消えるので、ここで止める。
+python3 -m hansoku.cli schedule-lint
+
+# 画面側の計算（前年比・効果判定・目標達成率）。ブラウザ無しで動かす。
+node --check web/app.js
+node tests/web/app_test.mjs

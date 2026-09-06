@@ -45,6 +45,11 @@ jobs:
         # DBもFWも要らない。
         run: python -m hansoku.cli schedule-lint
 
+      - name: 画面側の計算テスト（ブラウザ不要）
+        run: |
+          node --check web/app.js
+          node tests/web/app_test.mjs
+
       - name: テスト
         env:
           HANSOKU_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/hansoku_test

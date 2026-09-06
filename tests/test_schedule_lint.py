@@ -82,3 +82,29 @@ class Test正しい台帳は素通しする:
 
     def test_本番の台帳にエラーが無い(self, master):
         assert _msgs(master, None) == []
+
+
+class Test効果の測り方:
+    def test_bucketもitemsも無ければ警告(self, master, tmp_path):
+        path = _write(tmp_path, """
+            campaigns:
+              - { id: 2026-a, stores: "all", title: 秋おすすめ, kind: osusume, start: "2026-09-15" }
+        """)
+        assert any("効果を出せません" in m for m in _msgs(master, path, "warn"))
+
+    def test_itemsがあれば警告しない(self, master, tmp_path):
+        path = _write(tmp_path, """
+            campaigns:
+              - { id: 2026-a, stores: "all", title: 秋おすすめ, kind: osusume,
+                  start: "2026-09-15", items: ["秋の味覚"] }
+        """)
+        assert not any("効果を出せません" in m for m in _msgs(master, path, "warn"))
+
+    def test_GM改定と忘年会は対象外(self, master, tmp_path):
+        """GM改定は店全体が範囲、忘年会は kind から部門を推定できる。"""
+        path = _write(tmp_path, """
+            campaigns:
+              - { id: 2026-a, stores: "all", title: GM改定, kind: gm, start: "2026-10-01" }
+              - { id: 2026-b, stores: "all", title: 忘年会, kind: bounenkai, start: "2026-10-01" }
+        """)
+        assert not any("効果を出せません" in m for m in _msgs(master, path, "warn"))

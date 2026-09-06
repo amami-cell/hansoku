@@ -46,6 +46,7 @@ def lint_schedule(master: StoreMaster, path: Path | str | None = None) -> list[F
     findings: list[Finding] = []
     seen_ids: dict[str, int] = {}
     no_year: list[str] = []
+    no_basis: list[str] = []
 
     for index, camp in enumerate(data.get("campaigns") or []):
         cid = str(camp.get("id") or "")
@@ -117,6 +118,16 @@ def lint_schedule(master: StoreMaster, path: Path | str | None = None) -> list[F
         if _DATE_RE.match(start) and _DATE_RE.match(end) and end < start:
             findings.append(Finding("error", where, f"end {end} が start {start} より前です"))
 
+        # 効果の測り方。bucket（部門）か items（商品名）が無いと、その施策の
+        # 効果は出せない（店全体の売上を出すと、同月に重なる他の施策と同じ数字に
+        # なるだけなので、あえて出さない）。GM改定は店全体が範囲なので対象外。
+        # 忘年会・ランチは kind から部門を推定できる。
+        if (
+            not (camp.get("items") or camp.get("bucket"))
+            and kind not in ("gm", "bounenkai", "lunch", "closure")
+        ):
+            no_basis.append(f"{cid or index} {camp.get('title', '')}")
+
         if camp.get("items") is not None and not isinstance(camp["items"], (list, tuple)):
             findings.append(Finding("error", where, "items は配列です"))
         if camp.get("target") is not None:
@@ -124,6 +135,17 @@ def lint_schedule(master: StoreMaster, path: Path | str | None = None) -> list[F
                 float(camp["target"])
             except (TypeError, ValueError):
                 findings.append(Finding("error", where, f"target が数値ではありません: {camp['target']!r}"))
+
+    if no_basis:
+        findings.append(
+            Finding(
+                "warn",
+                f"効果 {len(no_basis)}件",
+                "bucket（部門）も items（商品名）も無いので効果を出せません。"
+                "例: " + " / ".join(no_basis[:4]) + "。"
+                "fw.yml の abc-detail でその店・その月の部門と売れ筋を出せます",
+            )
+        )
 
     # 年の欠落は1件ずつ出すと埋もれるので、まとめて1行にする。
     if no_year:

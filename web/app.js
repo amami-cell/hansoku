@@ -891,7 +891,18 @@ function renderCampaigns() {
         : `<span class="muted">前年比 ―</span>`;
       const mom = sum.momPct != null
         ? `　<span class="${sum.momPct >= 0 ? "up" : "down"}">前月比 ${signed(sum.momPct)}%</span>` : "";
-      effHtml = `<b>${man(sum.cur)}円</b>　${yoy}${mom}<span class="sub">（確定${sum.months}ヶ月・${sum.stores}店）</span>`;
+      // 主指標＝この施策が効くはずの部門・商品。店全体はその下に参考として置く。
+      const t = campTargeted(c);
+      const head = t
+        ? `<b>${esc(t.label)} ${man(t.cur)}円</b>　${
+            t.pct != null
+              ? `<span class="${t.pct >= 0 ? "up" : "down"}">前年比 ${signed(t.pct)}%</span>`
+              : `<span class="muted">前年比 ―</span>`
+          }<span class="sub">（確定${t.months}ヶ月・${t.stores}店）</span>`
+        : campBasis(c)
+          ? `<span class="muted">対象部門・商品がまだABCに出ていません</span>`
+          : `<span class="muted">効果の測り方が未設定（bucket / items）</span>`;
+      effHtml = `${head}<div class="ceff sub2" title="${esc(overlapNote(c))}">店全体 ${man(sum.cur)}円　${yoy}${mom}<span class="sub">（確定${sum.months}ヶ月・${sum.stores}店／${esc(overlapNote(c))}）</span></div>`;
       // 集客（客数）。売上表示のときだけ、同期間の客数を前年比つきで添える
       if (METRIC === "sales" && sum.covers != null) {
         const cy = sum.coversPct != null
@@ -1012,6 +1023,94 @@ const prevYearM = m => { const [y, mo] = m.split("-"); return `${+y - 1}-${mo}`;
 const deptBucketAtM = (code, m, name) =>
   resolveDept(((DATA.departments_monthly || {})[code] || {})[m], name);
 const prodsAtM = (code, m) => ((DATA.products_monthly || {})[code] || {})[m] || [];
+
+// ── 施策の主指標（その施策が効くはずの範囲だけを見る）────────────────────
+// 「効果」を対象店の総売上で見ると、同じ月に重なる施策が全部同じ数字を出す。
+// 実際 1店あたり2〜3件が重なるので、秋おすすめも忘年会もGM改定も同じ前年比になる。
+// 台帳の items（商品名）→ bucket（部門）→ 種類から推定した部門 の順に、
+// 効くはずの範囲だけを前年同月と比べる。どれも無ければ数字を出さない
+// （出せてしまうと「測り方が未設定」のまま放置されるので、あえて出さない）。
+function campBasis(c) {
+  const items = (c.items || []).filter(Boolean);
+  const bucket = c.bucket || campKindBucket(c.kind);
+  if (items.length) return { kind: "items", items, bucket };
+  if (bucket) return { kind: "bucket", bucket };
+  // GM改定はグランドメニューを丸ごと入れ替えるので、店全体の売上がそのまま
+  // その施策の範囲。部門や商品に絞るほうがかえって狭い。
+  if (c.kind === "gm") return { kind: "store" };
+  return null;
+}
+
+function campTargeted(c) {
+  const basis = campBasis(c);
+  if (!basis) return null;
+  if (basis.kind === "store") {
+    // 店全体が範囲。ただし重なっている施策の数は必ず添えて読ませる。
+    const sum = campaignSummary(c, salesAt);
+    if (!sum.stores) return null;
+    return {
+      basis, label: "店全体の売上", storeWide: true,
+      cur: sum.cur, prev: sum.prev, pct: sum.pct,
+      months: sum.months, stores: sum.stores,
+    };
+  }
+  const sM = c.start.slice(0, 7), eM = (c.end || c.start).slice(0, 7);
+  let cur = 0, prev = 0, prevOk = true;
+  const months = new Set(), stores = new Set();
+  for (const code of c.stores) {
+    for (const m of abcMonths(code)) {
+      // 当月（暫定）と未来月は入れない。店全体の効果と同じ扱い。
+      if (m >= CURRENT_MONTH || m < sM || m > eM) continue;
+      let v = null, pv = null;
+      if (basis.kind === "items") {
+        const hit = prodsAtM(code, m).filter(p => basis.items.some(kw => (p.name || "").includes(kw)));
+        if (!hit.length) continue;
+        v = hit.reduce((a, p) => a + (p.sales || 0), 0);
+        const ph = prodsAtM(code, prevYearM(m))
+          .filter(p => basis.items.some(kw => (p.name || "").includes(kw)));
+        pv = ph.length ? ph.reduce((a, p) => a + (p.sales || 0), 0) : null;
+      } else {
+        const b = deptBucketAtM(code, m, basis.bucket);
+        if (!b) continue;
+        v = b.sales;
+        const pb = deptBucketAtM(code, prevYearM(m), basis.bucket);
+        pv = pb ? pb.sales : null;
+      }
+      cur += v; months.add(m); stores.add(code);
+      if (pv != null) prev += pv; else prevOk = false;
+    }
+  }
+  if (!stores.size) return null;
+  return {
+    basis,
+    label: basis.kind === "items" ? basis.items.join("・") : basis.bucket,
+    cur,
+    prev: prevOk ? prev : null,
+    pct: (prevOk && prev) ? (cur / prev - 1) * 100 : null,
+    months: months.size,
+    stores: stores.size,
+  };
+}
+
+// 同じ店・同じ期間に重なっている他の施策の数。店全体の売上を効果として見せるときは
+// 必ずこれを添える（その数字は重なっている施策すべてに共通のものなので）。
+function campOverlap(c) {
+  const sM = c.start.slice(0, 7), eM = (c.end || c.start).slice(0, 7);
+  const mine = new Set(c.stores);
+  let n = 0;
+  for (const o of DATA.campaigns || []) {
+    if (o.id === c.id) continue;
+    if (o.start.slice(0, 7) > eM || (o.end || o.start).slice(0, 7) < sM) continue;
+    if ((o.stores || []).some(x => mine.has(x))) n += 1;
+  }
+  return n;
+}
+
+// 店全体の数字に必ず付ける但し書き。
+function overlapNote(c) {
+  const n = campOverlap(c);
+  return n ? `同月に重なる施策 ${n}件ぶんを含みます` : "この施策以外は重なっていません";
+}
 
 // 施策×データ紐づけ（ディスパッチャ）: 月次ABCがあれば「1ヵ月毎＋前年比」で、
 // 無ければ最新1ヶ月版（campDeptCardSnapshot）で出す。
@@ -1216,10 +1315,26 @@ function renderCampaign(id) {
     const covKpi = (METRIC === "sales" && sum.covers != null)
       ? `<div class="kpi"><div class="lbl">集客（確定分）</div><div class="big">${nin(sum.covers)}</div>
           <div class="delta">${sum.coversPct != null ? `<span class="${sum.coversPct >= 0 ? "up" : "down"}">前年比 ${signed(sum.coversPct)}%</span>` : "前年比 ―"}</div></div>` : "";
+    // 主指標＝この施策が効くはずの部門・商品。先頭に置く。
+    const t = campTargeted(c);
+    const tgtKpi = t
+      ? `<div class="kpi"><div class="lbl">${esc(t.label)}（確定${t.months}ヶ月・${t.stores}店）</div>
+          <div class="big ${t.pct != null ? (t.pct >= 0 ? "up" : "down") : ""}">${
+            t.pct != null ? signed(t.pct) + "%" : "―"
+          }</div>
+          <div class="delta">${man(t.cur)}${t.prev != null ? `（前年 ${man(t.prev)}）` : "・前年のABCなし"}</div></div>`
+      : `<div class="kpi"><div class="lbl">この施策の効果</div>
+          <div class="big">―</div>
+          <div class="delta">${
+            campBasis(c)
+              ? "対象の部門・商品がまだABCに出ていません"
+              : "測り方が未設定。台帳に bucket（部門）か items（商品名）を入れてください"
+          }</div></div>`;
     overall = `<div class="kpis">
-      <div class="kpi"><div class="lbl">${METRIC_LABELS[METRIC]}（確定${sum.months}ヶ月・${sum.stores}/${sum.total}店）</div>
+      ${tgtKpi}
+      <div class="kpi"><div class="lbl">店全体の${METRIC_LABELS[METRIC]}（参考・確定${sum.months}ヶ月・${sum.stores}/${sum.total}店）</div>
         <div class="big">${man(sum.cur)}<span class="unit">円</span></div>
-        <div class="delta">${yoy}　${mom}</div></div>
+        <div class="delta">${yoy}　${mom}<br><span class="sub">${esc(overlapNote(c))}</span></div></div>
       ${goalKpi}${covKpi}
     </div>`;
   } else {
@@ -1493,13 +1608,27 @@ function campVerdict(c) {
     }
   }
   {
-    const sum = campaignSummary(c, salesAt);
-    if (sum.stores && sum.pct != null) {
-      const sig = [`売上 前年比 ${signed(sum.pct)}%`];
-      if (sum.momPct != null) sig.push(`前月比 ${signed(sum.momPct)}%`);
-      return sum.pct >= 0
+    // その施策が効くはずの範囲（部門・商品）で判定する。店全体の売上で判定すると、
+    // 同月に重なっている施策が全部そろって「効果あり」か「要改善」になる。
+    const t = campTargeted(c);
+    if (!campBasis(c)) {
+      return {
+        tone: "flat", label: "測り方 未設定",
+        signals: ["台帳に bucket（部門）か items（商品名）を入れると効果を出せます"],
+      };
+    }
+    if (t && t.pct != null) {
+      const sig = [`${t.label} 前年比 ${signed(t.pct)}%`, `確定${t.months}ヶ月・${t.stores}店`];
+      if (t.storeWide) sig.push(overlapNote(c));
+      return t.pct >= 0
         ? { tone: "good", label: "効果あり", signals: sig }
         : { tone: "warn", label: "要改善", signals: sig };
+    }
+    if (t) {
+      return {
+        tone: "flat", label: "前年比なし",
+        signals: [`${t.label} ${man(t.cur)}円`, "前年同月のABCが無いため前年比は出せません"],
+      };
     }
   }
   return { tone: "wait", label: campStatus(c).k === "soon" ? "開始前" : "計測中", signals: [] };
@@ -1564,13 +1693,26 @@ function campReviewLine(c) {
   const hl = campHeadline(c);
   if (hl) return hl;
   if (METRIC === "cost_rate") return "";
+  // その施策が効くはずの範囲があればそれを出す。無ければ店全体だが、必ず
+  // 「重なっている施策の数」を添えて、施策の成績と読ませない。
+  const t = campTargeted(c);
+  if (t) {
+    const yoy = t.pct != null
+      ? `<span class="${t.pct >= 0 ? "up" : "down"}">前年比 ${signed(t.pct)}%</span>` : "";
+    return `<div class="ccmp"><span class="ccmp-i">${esc(t.label)} <b>${man(t.cur)}円</b></span>` +
+      (yoy ? `<span class="ccmp-i">${yoy}</span>` : "") +
+      `<span class="ccmp-i sub">確定${t.months}ヶ月・${t.stores}店</span></div>`;
+  }
+  if (!campBasis(c)) {
+    return `<div class="ccmp"><span class="ccmp-i sub">効果の測り方が未設定（台帳の bucket / items）</span></div>`;
+  }
   const sum = campaignSummary(c);
   if (sum.stores) {
     const yoy = sum.pct != null ? `<span class="${sum.pct >= 0 ? "up" : "down"}">前年比 ${signed(sum.pct)}%</span>` : "";
     const mom = sum.momPct != null ? `・<span class="${sum.momPct >= 0 ? "up" : "down"}">前月比 ${signed(sum.momPct)}%</span>` : "";
-    return `<div class="ccmp"><span class="ccmp-i">実績 <b>${man(sum.cur)}円</b></span>` +
+    return `<div class="ccmp"><span class="ccmp-i">店全体 <b>${man(sum.cur)}円</b></span>` +
       (yoy ? `<span class="ccmp-i">${yoy}${mom}</span>` : "") +
-      `<span class="ccmp-i sub">確定${sum.months}ヶ月・${sum.stores}店</span></div>`;
+      `<span class="ccmp-i sub">確定${sum.months}ヶ月・${sum.stores}店／${esc(overlapNote(c))}</span></div>`;
   }
   return "";
 }
