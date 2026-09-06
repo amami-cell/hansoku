@@ -197,13 +197,72 @@ test("重なりが無ければその旨を出す", () => {
 console.log("目標達成率（campGoalRate）");
 
 test("画面の指標を切り替えても、達成率は売上のまま", () => {
-  const c = camp({ id: "c1", bucket: "コース", target: 10000000 });
+  const c = camp({ id: "c1", bucket: "コース" });
+  c.key = "c1@2026";
   const ctx = loadApp({ ...base, campaigns: [c] });
+  // 目標はアプリ（Neon）に入る。台帳には書かない。
+  call(ctx, `API_OK = true; SERVER_TARGETS = { "c1@2026": { value: 10000000 } };`);
   const before = call(ctx, `campGoalRate(${JSON.stringify(c)}).cur`);
   call(ctx, `METRIC = "drink_sales";`);
   const after = call(ctx, `campGoalRate(${JSON.stringify(c)}).cur`);
   assert.equal(before, after);
   assert.equal(before, 8000000);
+});
+
+console.log("目標・メモの鍵（回ごとに分ける）");
+
+const withKey = (over) => {
+  const c = camp(over);
+  c.key = `${c.id}@${c.start.slice(0, 4)}`;
+  return c;
+};
+
+test("鍵は id@開始年", () => {
+  const c = withKey({ id: "r1006-osusume", start: "2026-09-15", end: "2026-11-30" });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  assert.equal(call(ctx, `campKey(${JSON.stringify(c)})`), "r1006-osusume@2026");
+});
+
+test("来年の同じ施策は今年の目標を引き継がない", () => {
+  const y26 = withKey({ id: "r1006-osusume", start: "2026-09-15", end: "2026-11-30" });
+  const y27 = withKey({ id: "r1006-osusume", start: "2027-09-15", end: "2027-11-30" });
+  const ctx = loadApp({ ...base, campaigns: [y26, y27] });
+  call(ctx, `API_OK = true; SERVER_TARGETS = { "r1006-osusume@2026": { value: 16000000 } };`);
+  assert.equal(call(ctx, `targetOf(${JSON.stringify(y26)})`), 16000000);
+  assert.equal(call(ctx, `targetOf(${JSON.stringify(y27)})`), null);
+});
+
+test("鍵が付く前に素のidで入った目標も読める（移行の橋渡し）", () => {
+  const c = withKey({ id: "r1006-osusume", start: "2026-09-15", end: "2026-11-30" });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  call(ctx, `API_OK = true; SERVER_TARGETS = { "r1006-osusume": { value: 16000000 } };`);
+  assert.equal(call(ctx, `targetOf(${JSON.stringify(c)})`), 16000000);
+});
+
+test("鍵つきの値があれば、素のidの古い値より優先する", () => {
+  const c = withKey({ id: "r1006-osusume", start: "2026-09-15", end: "2026-11-30" });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  call(ctx, `API_OK = true; SERVER_TARGETS = {
+    "r1006-osusume": { value: 16000000 },
+    "r1006-osusume@2026": { value: 20000000 },
+  };`);
+  assert.equal(call(ctx, `targetOf(${JSON.stringify(c)})`), 20000000);
+});
+
+test("メモも同じ鍵で分かれる", () => {
+  const y26 = withKey({ id: "r-o", start: "2026-09-15", end: "2026-11-30" });
+  const y27 = withKey({ id: "r-o", start: "2027-09-15", end: "2027-11-30" });
+  const ctx = loadApp({ ...base, campaigns: [y26, y27] });
+  call(ctx, `API_OK = true; SERVER_NOTES = { "r-o@2026": { note: "客足が伸びた" } };`);
+  assert.equal(call(ctx, `memoOf(${JSON.stringify(y26)})`), "客足が伸びた");
+  assert.equal(call(ctx, `memoOf(${JSON.stringify(y27)})`), "");
+});
+
+test("台帳の target はもう読まない（目標はアプリに一本化）", () => {
+  const c = withKey({ id: "x", target: 9999999 });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  call(ctx, `API_OK = true; SERVER_TARGETS = {};`);
+  assert.equal(call(ctx, `targetOf(${JSON.stringify(c)})`), null);
 });
 
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");

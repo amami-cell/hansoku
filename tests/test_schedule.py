@@ -1,16 +1,7 @@
 """施策スケジュール（config/schedule.yaml）の読み込みと正規化。"""
 import textwrap
 
-from hansoku.web.export import _parse_target, load_schedule
-
-
-def test_目標値の正規化():
-    assert _parse_target("5,000,000") == 5_000_000
-    assert _parse_target("1600000円") == 1_600_000
-    assert _parse_target(3000000) == 3_000_000
-    assert _parse_target(None) is None
-    assert _parse_target("") is None
-    assert _parse_target("未定") is None
+from hansoku.web.export import load_schedule
 
 
 def _write(tmp_path, body: str):
@@ -103,9 +94,10 @@ def test_目標はyamlからも渡せる(master, tmp_path):
             start: "2026-09-01"
             end: "2026-09-30"
     """)
+    # 目標はアプリ（Neon）に一本化したので、台帳から読み込まない。
     camps = {c["id"]: c for c in load_schedule(master, path)}
-    assert camps["withgoal"]["target"] == 5_000_000
-    assert camps["nogoal"]["target"] is None
+    assert "target" not in camps["withgoal"]
+    assert "target" not in camps["nogoal"]
 
 
 def test_終了日省略は単日になる(master, tmp_path):
@@ -120,3 +112,32 @@ def test_終了日省略は単日になる(master, tmp_path):
     """)
     camps = load_schedule(master, path)
     assert camps[0]["start"] == camps[0]["end"] == "2026-09-01"
+
+
+def test_目標とメモの鍵は開始年つき(master, tmp_path):
+    """id は年をまたいで使い回されるので（秋おすすめは毎年ある）、
+    目標とメモは id ではなく id@開始年 にぶら下げる。これが無いと
+    来年の同じ施策が今年ぶんを上書きする。"""
+    code = master.active_codes[0]
+    path = _write(tmp_path, f"""
+        campaigns:
+          - id: r-osusume
+            stores: ["{code}"]
+            title: 秋おすすめ
+            kind: osusume
+            start: "2026-09-15"
+            end: "2026-11-30"
+    """)
+    camps = load_schedule(master, path)
+    assert camps[0]["key"] == "r-osusume@2026"
+
+    path2 = _write(tmp_path, f"""
+        campaigns:
+          - id: r-osusume
+            stores: ["{code}"]
+            title: 秋おすすめ
+            kind: osusume
+            start: "2027-09-15"
+            end: "2027-11-30"
+    """)
+    assert load_schedule(master, path2)[0]["key"] == "r-osusume@2027"

@@ -277,3 +277,45 @@ class Testスキーマの移行:
         appdb.execute("ALTER TABLE m_stores DROP COLUMN IF EXISTS infomart_code")
         appdb.ensure_schema()
         assert appdb.query("SELECT count(*) c FROM m_stores")[0]["c"] == 24
+
+
+class Test鍵の移行:
+    """目標・メモは施策の「回」にぶら下がる（id@開始年）。
+
+    素の id のままだと、来年の秋おすすめが今年の目標・メモを上書きする。
+    すでに画面から入れ直したぶんを、古い値で潰さないことが肝心。
+    """
+
+    def test_素のidを鍵つきへ移す(self, appdb):
+        appdb.set_promo_target("r1006-osusume", 16_000_000)
+        appdb.set_promo_note("r1006-osusume", "客足が伸びた")
+        moved = appdb.migrate_promo_keys({"r1006-osusume": "r1006-osusume@2026"})
+        assert len(moved) == 2
+        assert appdb.list_promo_targets() == {"r1006-osusume@2026": 16_000_000}
+        assert appdb.list_promo_notes() == {"r1006-osusume@2026": "客足が伸びた"}
+
+    def test_試算では書き換えない(self, appdb):
+        appdb.set_promo_target("r1006-osusume", 16_000_000)
+        moved = appdb.migrate_promo_keys(
+            {"r1006-osusume": "r1006-osusume@2026"}, dry_run=True
+        )
+        assert moved
+        assert appdb.list_promo_targets() == {"r1006-osusume": 16_000_000}
+
+    def test_新しい鍵が既にあれば古い方で潰さない(self, appdb):
+        appdb.set_promo_target("r1006-osusume", 16_000_000)          # 古い
+        appdb.set_promo_target("r1006-osusume@2026", 20_000_000)     # 画面から入れ直した
+        appdb.migrate_promo_keys({"r1006-osusume": "r1006-osusume@2026"})
+        assert appdb.list_promo_targets()["r1006-osusume@2026"] == 20_000_000
+
+    def test_台帳に無いidは触らない(self, appdb):
+        appdb.set_promo_target("消えた施策", 1_000_000)
+        appdb.migrate_promo_keys({"r1006-osusume": "r1006-osusume@2026"})
+        assert appdb.list_promo_targets() == {"消えた施策": 1_000_000}
+
+    def test_何度流しても同じ(self, appdb):
+        appdb.set_promo_target("r1006-osusume", 16_000_000)
+        keys = {"r1006-osusume": "r1006-osusume@2026"}
+        appdb.migrate_promo_keys(keys)
+        assert appdb.migrate_promo_keys(keys) == []
+        assert appdb.list_promo_targets() == {"r1006-osusume@2026": 16_000_000}

@@ -1,0 +1,62 @@
+name: 手入れ（DBの整え）
+
+# たまにしか使わないDB側の手入れ。FWログインは要らない。
+# いまは目標・メモの鍵の移行だけ。増えたらここに足す。
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'やること'
+        type: choice
+        options:
+          - promo-migrate-keys
+        default: promo-migrate-keys
+      dry_run:
+        description: '書き換えず、対象だけ出す'
+        type: boolean
+        default: true
+
+# トークンは読み取りだけでよい（push もコメントもしない）。
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: 実行
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          # tee で受けるので、パイプ途中の失敗を step の失敗として扱う。
+          set -o pipefail
+          {
+            echo "## ${{ inputs.task }}${{ inputs.dry_run && '（試算）' || '' }}"
+            echo ''
+            echo '```'
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              python -m hansoku.cli "${{ inputs.task }}" --dry-run
+            else
+              python -m hansoku.cli "${{ inputs.task }}"
+            fi
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

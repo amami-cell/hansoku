@@ -80,19 +80,31 @@ async function fetchServerTargets() {
   } catch (e) { /* API 無し → 端末内保存で動く */ }
 }
 
-// 有効な目標＝サーバ値（本番）→ 端末内 → schedule.yaml の順
+// 目標とメモは施策の「回」にぶら下がる。鍵は id@開始年（例 r1006-osusume@2026）。
+// id だけだと、来年の秋おすすめが今年の目標・メモを上書きしてしまう。
+// 鍵が入る前に書かれた行は素の id で入っているので、そちらも読む（移行の橋渡し）。
+const campKey = c => c.key || `${c.id}@${(c.start || "").slice(0, 4)}`;
+const pickByKey = (store, c) => {
+  const k = campKey(c);
+  return (k in store) ? store[k] : store[c.id];
+};
+
+// 有効な目標＝サーバ値（本番）→ 端末内
 function targetOf(c) {
   if (API_OK) {
-    const s = SERVER_TARGETS[c.id];
-    if (s && typeof s.value === "number") return s.value;
-    return c.target != null ? c.target : null;
+    const s = pickByKey(SERVER_TARGETS, c);
+    return (s && typeof s.value === "number") ? s.value : null;
   }
-  if (c.id in GOALS) return GOALS[c.id];
-  return c.target != null ? c.target : null;
+  const g = pickByKey(GOALS, c);
+  return typeof g === "number" ? g : null;
 }
 
+// 編集ボタンから来る id は鍵（id@開始年）。鍵がまだ無い（素のidで保存された）
+// 施策では、いまの値を素のidから拾って初期値に出す。保存は必ず鍵で行う。
+const bareId = key => String(key).split("@")[0];
 async function editGoal(id) {
-  const cur = API_OK ? (SERVER_TARGETS[id] && SERVER_TARGETS[id].value) : GOALS[id];
+  const t = API_OK ? (SERVER_TARGETS[id] || SERVER_TARGETS[bareId(id)]) : null;
+  const cur = API_OK ? (t && t.value) : (id in GOALS ? GOALS[id] : GOALS[bareId(id)]);
   const v = window.prompt("この販促の目標売上（円）を入力してください（空欄で削除）", cur == null ? "" : String(cur));
   if (v === null) return;
   const cleaned = String(v).replace(/[,，円\s]/g, "");
@@ -138,16 +150,18 @@ async function fetchServerNotes() {
 // 有効な要因メモ＝サーバ値（本番）→ 端末内 → 書き出し時に焼いた memo の順
 function memoOf(c) {
   if (API_OK) {
-    const s = SERVER_NOTES[c.id];
+    const s = pickByKey(SERVER_NOTES, c);
     if (s && s.note) return s.note;
     return c.memo || "";
   }
-  if (NOTES[c.id]) return NOTES[c.id];
+  const n = pickByKey(NOTES, c);
+  if (n) return n;
   return c.memo || "";
 }
 
 async function editMemo(id) {
-  const cur = API_OK ? (SERVER_NOTES[id] && SERVER_NOTES[id].note) : NOTES[id];
+  const n = API_OK ? (SERVER_NOTES[id] || SERVER_NOTES[bareId(id)]) : null;
+  const cur = API_OK ? (n && n.note) : (NOTES[id] || NOTES[bareId(id)]);
   const v = window.prompt("この販促の要因メモ（なぜ動いた/動かなかったか）。空欄で削除", cur || "");
   if (v === null) return;
   const note = String(v).trim();
@@ -528,7 +542,7 @@ function actionPanel() {
   const goalHtml = noGoal.map(c =>
     `<li><span class="kdot" style="background:${kindOf(c.kind).color}"></span>
       <span class="amain">${c.title}</span><span class="atag">${scopeOf(c)}</span>
-      <button class="goalbtn add" data-goal="${c.id}">＋ 目標を入力</button></li>`).join("");
+      <button class="goalbtn add" data-goal="${campKey(c)}">＋ 目標を入力</button></li>`).join("");
 
   const reviewHtml = review.map(c =>
     `<li><span class="kdot" style="background:${kindOf(c.kind).color}"></span>
@@ -925,8 +939,8 @@ function renderCampaigns() {
     const reviewTag = needsReview(c) ? `<span class="rvneed">⚠ 要振り返り</span>` : "";
     const memo = memoOf(c);
     const memoHtml = memo
-      ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${c.id}" title="メモを編集">✎</button></div>`
-      : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${c.id}">＋ 要因メモ</button></div>`;
+      ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${campKey(c)}" title="メモを編集">✎</button></div>`
+      : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`;
     return `<li data-camp="${c.id}">
       <span class="kchip" style="--kc:${k.color}">${k.label}</span>
       <div class="cbody">
@@ -1293,8 +1307,8 @@ function renderCampaign(id) {
 
   // 目標（進捗欄で編集）
   const goalBtn = tgt != null
-    ? `<button class="goalbtn" data-goal="${c.id}" title="目標を編集">目標 ${man(tgt)}円 ✎</button>`
-    : `<button class="goalbtn add" data-goal="${c.id}">＋ 目標を入力</button>`;
+    ? `<button class="goalbtn" data-goal="${campKey(c)}" title="目標を編集">目標 ${man(tgt)}円 ✎</button>`
+    : `<button class="goalbtn add" data-goal="${campKey(c)}">＋ 目標を入力</button>`;
 
   // 全体結果（確定月・全店合算）
   let overall;
@@ -1370,8 +1384,8 @@ function renderCampaign(id) {
   // 要因メモ
   const memo = memoOf(c);
   const memoHtml = memo
-    ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${c.id}" title="メモを編集">✎</button></div>`
-    : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${c.id}">＋ 要因メモ</button></div>`;
+    ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${campKey(c)}" title="メモを編集">✎</button></div>`
+    : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`;
 
   // POP・制作物（この施策に紐づくもの）
   const crs = creativesForCampaign(id);
@@ -1670,8 +1684,8 @@ function renderReview(c) {
         `${esc(x.store)}「${esc(x.title)}」<span class="${x.pct >= 0 ? "up" : "down"}">${signed(x.pct)}%</span>`).join("　")}</div>`
     : `<div class="rvnb muted">近隣（同エリア）に同種類の実績はまだありません。</div>`;
   const memoHtml = memo
-    ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${c.id}" title="メモを編集">✎</button></div>`
-    : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${c.id}">＋ 要因メモ</button></div>`;
+    ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${campKey(c)}" title="メモを編集">✎</button></div>`
+    : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`;
   const nextHtml = prop && prop.next
     ? `<div class="rvnext">${escBr(prop.next)}<div class="rvby">— ${esc(prop.by || "AI")}${prop.at ? "・" + esc(prop.at) : ""}</div></div>`
     : `<div class="rvnext muted">次回提案は未記入です。config/proposals.json に追記（AIに依頼も可）。</div>`;
@@ -2264,15 +2278,15 @@ function renderStore(code) {
           const prog = rate != null
             ? ` ・ 実績(確定) ${man(actual)}円 ・ <span class="${rate >= 100 ? "up" : "down"}">達成 ${rate.toFixed(0)}%</span>`
             : ` ・ <span class="sub">実績は確定月が出てから</span>`;
-          goalHtml = `<div class="cgoal">目標 <b>${man(tgt)}円</b>${prog} <button class="goalbtn" data-goal="${c.id}" title="目標を編集">✎</button></div>`;
+          goalHtml = `<div class="cgoal">目標 <b>${man(tgt)}円</b>${prog} <button class="goalbtn" data-goal="${campKey(c)}" title="目標を編集">✎</button></div>`;
         } else {
-          goalHtml = `<div class="cgoal muted"><button class="goalbtn add" data-goal="${c.id}">＋ 目標を入力</button></div>`;
+          goalHtml = `<div class="cgoal muted"><button class="goalbtn add" data-goal="${campKey(c)}">＋ 目標を入力</button></div>`;
         }
         // 要因メモ（アプリ内で入力・共有）
         const memo = memoOf(c);
         const memoHtml = memo
-          ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${c.id}" title="メモを編集">✎</button></div>`
-          : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${c.id}">＋ 要因メモ</button></div>`;
+          ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${campKey(c)}" title="メモを編集">✎</button></div>`
+          : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`;
         return `<li data-camp="${c.id}">
           <span class="kchip" style="--kc:${k.color}">${k.label}</span>
           <div class="cbody">

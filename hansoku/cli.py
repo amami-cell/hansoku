@@ -475,6 +475,25 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
     raise SystemExit(f"未知のモード: {args.mode}")
 
 
+def cmd_promo_migrate_keys(args: argparse.Namespace) -> int:
+    """目標・メモの鍵を 素の施策id → id@開始年 に移す（一度きり）。"""
+    from .db.appdb import get_appdb
+    from .web.export import load_schedule
+
+    master = StoreMaster.load(args.stores)
+    keys = {c["id"]: c["key"] for c in load_schedule(master)}
+    settings = load_settings()
+    with get_appdb(settings) as db:
+        moved = db.migrate_promo_keys(keys, dry_run=args.dry_run)
+    if not moved:
+        print("移すものはありません（すべて鍵つきです）。")
+        return 0
+    print(("[試算] " if args.dry_run else "") + f"{len(moved)}件:")
+    for line in moved:
+        print(f"  {line}")
+    return 0
+
+
 def cmd_schedule_lint(args: argparse.Namespace) -> int:
     """台帳（config/schedule.yaml）の書き方を検査する。DBもFWも要らない。"""
     from .schedule_lint import report_schedule_lint
@@ -762,6 +781,13 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--date-to", required=True, type=_date, dest="date_to")
     export.add_argument("--out", default="web/data", help="書き出し先ディレクトリ")
     export.set_defaults(func=cmd_export_web)
+
+    pmk = sub.add_parser(
+        "promo-migrate-keys",
+        help="目標・メモの鍵を 素の施策id → id@開始年 へ移す（一度きり）",
+    )
+    pmk.add_argument("--dry-run", action="store_true", help="書き換えず、移す対象だけ出す")
+    pmk.set_defaults(func=cmd_promo_migrate_keys)
 
     slint = sub.add_parser(
         "schedule-lint",

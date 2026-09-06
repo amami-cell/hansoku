@@ -157,6 +157,10 @@ def load_schedule(
         out.append(
             {
                 "id": str(camp.get("id", f"c{index}")),
+                # 目標とメモをぶら下げる鍵。id は年をまたいで使い回されるので
+                # （秋おすすめは毎年ある）、開始年を付けて回ごとに分ける。
+                # これが無いと、来年の同じ施策が今年の目標・メモを上書きする。
+                "key": f"{camp.get('id', f'c{index}')}@{start[:4]}",
                 "stores": codes,
                 "scope_all": scope_all,
                 "title": str(camp.get("title", "")),
@@ -170,8 +174,10 @@ def load_schedule(
                 # 商品内訳のキーワード（部分一致）。書くと該当商品の実績＋部門内構成比を
                 # 施策詳細に「表示」で出す。文字列でも配列でも可。未設定は空配列。
                 "items": _parse_items(camp.get("items")),
-                # 販促の目標数値（売上・円）。アプリ内で入力していく。未設定は None。
-                "target": _parse_target(camp.get("target")),
+                # 目標はここでは持たない。アプリ（/api/targets → Neon）に一本化した。
+                # 台帳とアプリの2箇所にあると書き手が迷い、どちらが効いているのか
+                # 分からなくなる。台帳＝施策の定義、アプリ＝目標と振り返り。
+                # 台帳に target を書いた場合は schedule-lint がエラーにする。
                 # 要因メモ（アプリ内で入力・Neon共有）。書き出し時に焼き込む。未設定は空。
                 "memo": "",
             }
@@ -191,16 +197,6 @@ def _parse_items(value) -> list[str]:
         if s:
             out.append(s)
     return out
-
-
-def _parse_target(value) -> int | None:
-    """目標値を円の整数に正規化する。空・数字でないものは None。"""
-    if value is None or value == "":
-        return None
-    try:
-        return int(round(float(str(value).replace(",", "").replace("円", "").strip())))
-    except (ValueError, TypeError):
-        return None
 
 
 def load_creatives(

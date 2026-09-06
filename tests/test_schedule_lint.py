@@ -61,14 +61,23 @@ class Test黙って消える書き方を見つける:
         """)
         assert any("YYYY-MM-DD" in m for m in _msgs(master, path))
 
-    def test_年の無いidは警告どまり(self, master, tmp_path):
-        """来年の同じ施策が今年の目標・メモを上書きするが、いま壊れてはいない。"""
+    def test_台帳に目標を書いたらエラー(self, master, tmp_path):
+        """目標はアプリ（Neon）に一本化した。2箇所あると書き手が迷う。"""
+        path = _write(tmp_path, """
+            campaigns:
+              - { id: 2026-a, stores: "all", title: t, kind: gm, start: "2026-01-01",
+                  target: 5000000 }
+        """)
+        assert any("target は台帳に書きません" in m for m in _msgs(master, path))
+
+    def test_年の無いidはもう警告しない(self, master, tmp_path):
+        """鍵が id@開始年 になったので、id を年込みに改名する必要は無い。"""
         path = _write(tmp_path, """
             campaigns:
               - { id: r1006-osusume, stores: "all", title: t, kind: gm, start: "2026-01-01" }
         """)
         assert _msgs(master, path, "error") == []
-        assert any("年が入っていません" in m for m in _msgs(master, path, "warn"))
+        assert not any("年が入っていません" in m for m in _msgs(master, path, "warn"))
 
 
 class Test正しい台帳は素通しする:

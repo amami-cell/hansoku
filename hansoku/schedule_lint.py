@@ -19,9 +19,6 @@ from .stores import StoreMaster
 from .web.export import DEFAULT_SCHEDULE_PATH, VALID_KINDS
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-# id に年が入っていれば、来年の同じ施策を別idにできる。目標・メモは campaign_id に
-# ぶら下がるので、年が無いと 2027年の秋おすすめが 2026年の目標を上書きする。
-_YEAR_IN_ID_RE = re.compile(r"(^|[^0-9])20\d{2}([^0-9]|$)")
 
 
 @dataclass(frozen=True)
@@ -45,7 +42,6 @@ def lint_schedule(master: StoreMaster, path: Path | str | None = None) -> list[F
     active = set(master.active_codes)
     findings: list[Finding] = []
     seen_ids: dict[str, int] = {}
-    no_year: list[str] = []
     no_basis: list[str] = []
 
     for index, camp in enumerate(data.get("campaigns") or []):
@@ -59,13 +55,12 @@ def lint_schedule(master: StoreMaster, path: Path | str | None = None) -> list[F
                 Finding(
                     "error", where,
                     f"id が {seen_ids[cid]} 番目と重複しています。"
-                    "目標とメモは id にぶら下がるので、2件が同じ目標・同じメモを共有します",
+                    "目標とメモの鍵は id@開始年 なので、開始年まで同じだと"
+                    "2件が同じ目標・同じメモを共有します",
                 )
             )
         else:
             seen_ids[cid] = index
-            if not _YEAR_IN_ID_RE.search(cid):
-                no_year.append(cid)
 
         # 対象店。書いたのに解決できなかったトークンは、いま黙って捨てられている。
         stores_field = camp.get("stores", "all")
@@ -131,10 +126,17 @@ def lint_schedule(master: StoreMaster, path: Path | str | None = None) -> list[F
         if camp.get("items") is not None and not isinstance(camp["items"], (list, tuple)):
             findings.append(Finding("error", where, "items は配列です"))
         if camp.get("target") is not None:
-            try:
-                float(camp["target"])
-            except (TypeError, ValueError):
-                findings.append(Finding("error", where, f"target が数値ではありません: {camp['target']!r}"))
+            # 目標はアプリ（/api/targets → Neon）に一本化した。台帳にも書けると
+            # 書き手がどちらに入れるか迷い、どちらが効いているのか分からなくなる。
+            # 台帳＝施策の定義（いつ・どこで・何を・どう測るか）、
+            # アプリ＝目標と振り返り（期中に何度も直すもの）。
+            findings.append(
+                Finding(
+                    "error", where,
+                    "target は台帳に書きません（画面から入力してください）。"
+                    "台帳には残っても読まれないので、消してください",
+                )
+            )
 
     if no_basis:
         findings.append(
@@ -147,17 +149,6 @@ def lint_schedule(master: StoreMaster, path: Path | str | None = None) -> list[F
             )
         )
 
-    # 年の欠落は1件ずつ出すと埋もれるので、まとめて1行にする。
-    if no_year:
-        findings.append(
-            Finding(
-                "warn",
-                f"id {len(no_year)}件",
-                "id に年が入っていません（例 r1006-osusume → 2026-1006-osusume）。"
-                "目標とメモは id にぶら下がるので、来年の同じ施策を同じ id で書くと"
-                "今年ぶんを上書きします。別 id にすれば今度は今年のメモが迷子になります",
-            )
-        )
     return findings
 
 

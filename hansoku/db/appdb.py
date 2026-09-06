@@ -210,3 +210,35 @@ class AppDb:
         self.execute(
             "DELETE FROM promo_notes WHERE campaign_id = %s", (campaign_id,)
         )
+
+    # ── 鍵の移行（素の施策id → id@開始年）──────────────────────────────
+    def migrate_promo_keys(self, keys: dict[str, str], *, dry_run: bool = False) -> list[str]:
+        """素の施策idで入っている目標・メモを、回ごとの鍵へ移す。
+
+        目標とメモは施策の「回」にぶら下がるべきもの。id だけで持っていると、
+        来年の秋おすすめが今年ぶんを上書きしてしまう。keys は {素のid: 新しい鍵}。
+
+        すでに新しい鍵で入っている行は触らない（画面から入れ直したぶんを
+        古い値で上書きしないため）。台帳に無い id の行も触らない。
+        """
+        moved: list[str] = []
+        for table, value_col in (("promo_targets", "target_value"), ("promo_notes", "note")):
+            rows = self.query(f"SELECT campaign_id, {value_col} FROM {table}")
+            have = {r["campaign_id"] for r in rows}
+            for r in rows:
+                old_id = r["campaign_id"]
+                new_key = keys.get(old_id)
+                if not new_key or new_key == old_id:
+                    continue
+                if new_key in have:
+                    moved.append(f"{table}: {old_id} は {new_key} が既にあるので触らない")
+                    continue
+                moved.append(f"{table}: {old_id} → {new_key}")
+                if dry_run:
+                    continue
+                self.execute(
+                    f"UPDATE {table} SET campaign_id = %s WHERE campaign_id = %s",
+                    (new_key, old_id),
+                )
+                have.add(new_key)
+        return moved
