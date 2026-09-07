@@ -51,6 +51,15 @@ jobs:
           node tests/web/app_test.mjs
           node tests/web/worker_test.mjs
 
+      - name: URLと画面の対応（実ブラウザ）
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+          HANSOKU_CHROME="$(python -c "
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p: print(p.chromium.executable_path)
+          ")" python tests/web/route_check.py
+
       - name: テスト
         env:
           HANSOKU_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/hansoku_test

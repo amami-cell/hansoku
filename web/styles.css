@@ -890,3 +890,8 @@ b.warn{color:var(--warning-ink);}
   .fchip,.vtab{min-height:42px;}
   .tbtn{min-height:40px;}
 }
+
+/* 「うちの店」。店長はここを押すと、次からこの店が最初に開く。 */
+.homebtn{margin-left:auto;white-space:nowrap;}
+.homebtn.on{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft);}
+@media (max-width:560px){ .homebtn{margin-left:0;flex:1 1 100%;} }

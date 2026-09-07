@@ -34,3 +34,7 @@ node tests/web/app_test.mjs
 # 入口（合言葉ログイン）。売上の実データが載る画面なので、開けっ放しに
 # なっていないことを推測ではなくテストで押さえる。
 node tests/web/worker_test.mjs
+
+# URL と画面の対応（実ブラウザ）。戻るボタン・リンク共有・「うちの店」。
+# chromium が無い環境では中で自動的に飛ばす。
+python3 tests/web/route_check.py

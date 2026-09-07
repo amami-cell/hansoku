@@ -288,6 +288,83 @@ function campCovers(code, c) {
   return effectOver(code, c, coversAt);
 }
 
+// ── URL（#）と画面の対応 ───────────────────────────────────────────────
+// 状態を URL に出さないと、戻るボタンでアプリごと抜け、リンクも送れず、
+// 店長は自分の店をホーム画面に置けない。VIEW は URL の写しとして扱う。
+//
+// #/                        全店スケジュール（本部の入口）
+// #/store/1006              店舗詳細（店長の入口）
+// #/campaign/<id>           施策詳細
+// #/campaigns?status=review 施策の効果（絞り込みつき）
+// #/year/2026 など
+const VIEW_PATHS = {
+  schedule: "", calendar: "calendar", list: "stores", overview: "overview",
+  campaigns: "campaigns", manage: "manage", cross: "cross", gallery: "gallery",
+};
+const PATH_VIEWS = Object.fromEntries(Object.entries(VIEW_PATHS).map(([k, v]) => [v, k]));
+
+function viewToHash(v = VIEW) {
+  let path = "";
+  if (v.kind === "store") path = `store/${encodeURIComponent(v.code)}`;
+  else if (v.kind === "lunch") path = `lunch/${encodeURIComponent(v.code)}`;
+  else if (v.kind === "campaign") path = `campaign/${encodeURIComponent(v.id)}`;
+  else if (v.kind === "year") path = `year/${YEAR}`;
+  else path = VIEW_PATHS[v.kind] ?? "";
+  const q = new URLSearchParams();
+  if (METRIC !== "sales") q.set("metric", METRIC);
+  if (v.kind === "campaigns") {
+    if (CAMP_FILTER.status !== "all") q.set("status", CAMP_FILTER.status);
+    if (CAMP_FILTER.kind !== "all") q.set("kind", CAMP_FILTER.kind);
+  }
+  const qs = q.toString();
+  return `#/${path}${qs ? "?" + qs : ""}`;
+}
+
+// URL → 画面。読めない URL は既定（全店スケジュール）に落とす。
+function hashToView(hash) {
+  const raw = String(hash || "").replace(/^#\/?/, "");
+  const [path, query] = raw.split("?");
+  const q = new URLSearchParams(query || "");
+  const metric = q.get("metric");
+  if (metric && METRIC_LABELS[metric]) METRIC = metric;
+  const [head, arg] = path.split("/").map(x => (x ? decodeURIComponent(x) : x));
+  if (head === "store" && arg) return { kind: "store", code: arg };
+  if (head === "lunch" && arg) return { kind: "lunch", code: arg };
+  if (head === "campaign" && arg) return { kind: "campaign", id: arg };
+  if (head === "year") { if (arg && /^\d{4}$/.test(arg)) YEAR = +arg; return { kind: "year" }; }
+  if (head === "campaigns") {
+    CAMP_FILTER = { status: q.get("status") || "all", kind: q.get("kind") || "all" };
+    return { kind: "campaigns" };
+  }
+  const kind = PATH_VIEWS[head];
+  return kind ? { kind } : { kind: "schedule" };
+}
+
+// いま見えているものを URL に反映する。履歴を汚さないよう、同じなら何もしない。
+let SUPPRESS_HASH = false;
+function syncHash(replace) {
+  const next = viewToHash();
+  if (location.hash === next) return;
+  SUPPRESS_HASH = true;
+  if (replace) history.replaceState(null, "", next);
+  else history.pushState(null, "", next);
+  SUPPRESS_HASH = false;
+}
+
+// ── うちの店（店長は毎回ここから始まる）──────────────────────────────
+const HOME_KEY = "hansoku_home_store";
+function homeStore() {
+  try {
+    const c = localStorage.getItem(HOME_KEY);
+    return c && store(c).code ? c : null;
+  } catch (e) { return null; }
+}
+function setHomeStore(code) {
+  try {
+    if (code) localStorage.setItem(HOME_KEY, code); else localStorage.removeItem(HOME_KEY);
+  } catch (e) { /* 保存できなくても表示は続く */ }
+}
+
 // ── 起動 ─────────────────────────────────────────────────────────────────
 async function boot() {
   document.getElementById("today").textContent = formatToday();
@@ -307,10 +384,31 @@ async function boot() {
   NOTES = loadNotes();
   await fetchServerTargets();   // 本番は Neon の共有目標を読む。無ければ端末内保存で動く
   await fetchServerNotes();     // 要因メモも同様（本番=共有、無ければ端末内）
+  // URL が指定されていればそれに従う。無ければ「うちの店」。それも無ければ全店。
+  if (location.hash && location.hash !== "#") {
+    VIEW = hashToView(location.hash);
+  } else {
+    const home = homeStore();
+    if (home) VIEW = { kind: "store", code: home };
+  }
   buildMetricSelect();
   buildStoreJump();
   render();
+  syncHash(true);
   fillNotice();
+  // 戻る/進むで画面が動くようにする。
+  window.addEventListener("popstate", () => {
+    if (SUPPRESS_HASH) return;
+    VIEW = hashToView(location.hash);
+    buildMetricSelect();
+    render();
+  });
+  window.addEventListener("hashchange", () => {
+    if (SUPPRESS_HASH) return;
+    const v = hashToView(location.hash);
+    if (JSON.stringify(v) === JSON.stringify(VIEW)) return;
+    VIEW = v; buildMetricSelect(); render();
+  });
 }
 
 function formatToday() {
@@ -428,7 +526,7 @@ function buildMetricSelect() {
   sel.innerHTML = DATA.metrics.concat(["cost_rate"])
     .map(m => `<option value="${m}">${METRIC_LABELS[m] || m}</option>`).join("");
   sel.value = METRIC;
-  sel.addEventListener("change", () => { METRIC = sel.value; render(); });
+  sel.addEventListener("change", () => { METRIC = sel.value; render(); syncHash(); });
 }
 function buildStoreJump() {
   const sel = document.getElementById("storesel");
@@ -437,7 +535,7 @@ function buildStoreJump() {
       .map(s => `<option value="${s.code}">${s.name}（${s.region}）</option>`));
   sel.innerHTML = opts.join("");
   sel.addEventListener("change", () => {
-    if (sel.value) { VIEW = { kind: "store", code: sel.value }; render(); sel.value = ""; }
+    if (sel.value) { VIEW = { kind: "store", code: sel.value }; render(); syncHash(); sel.value = ""; }
   });
 }
 
@@ -463,6 +561,13 @@ function render() {
     el.addEventListener("click", () => go({ kind: "store", code: el.dataset.store })));
   app.querySelectorAll("[data-lunch]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "lunch", code: el.dataset.lunch }); }));
+  app.querySelectorAll("[data-home]").forEach(el =>
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const code = el.dataset.home;
+      setHomeStore(homeStore() === code ? null : code);
+      render();
+    }));
   app.querySelectorAll("[data-tilefilter]").forEach(el =>
     el.addEventListener("click", () => { CAMP_FILTER = { ...CAMP_FILTER, status: el.dataset.tilefilter }; }, true));
   app.querySelectorAll("[data-view]").forEach(el =>
@@ -470,7 +575,7 @@ function render() {
   app.querySelectorAll("[data-cal]").forEach(el =>
     el.addEventListener("click", () => { CAL_MONTH = addMonth(CAL_MONTH, el.dataset.cal === "next" ? 1 : -1); render(); }));
   app.querySelectorAll("[data-year]").forEach(el =>
-    el.addEventListener("click", () => { YEAR = +el.dataset.year; render(); }));
+    el.addEventListener("click", () => { YEAR = +el.dataset.year; render(); syncHash(); }));
   app.querySelectorAll("[data-goal]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); editGoal(el.dataset.goal); }));
   app.querySelectorAll("[data-memo]").forEach(el =>
@@ -479,12 +584,12 @@ function render() {
     el.addEventListener("click", () => {
       const [dim, val] = el.dataset.cfilter.split(":");
       CAMP_FILTER = { ...CAMP_FILTER, [dim]: val };
-      render();
+      render(); syncHash();
     }));
   wireEmphasis(app);
 }
 function go(v, scroll) {
-  VIEW = v; render();
+  VIEW = v; render(); syncHash();
   if (scroll) {
     const el = document.getElementById(scroll);
     if (el) { el.scrollIntoView({ behavior: "smooth", block: "start" }); return; }
@@ -2242,6 +2347,9 @@ function renderStore(code) {
         <div class="big">${nin(cs.total)}</div>
         <div class="delta">${yc}${cs.last ? `（直近 ${cs.last.m}）` : ""}</div></div>`;
   })();
+  const isHome = homeStore() === code;
+  const homeBtn = `<button class="tbtn homebtn${isHome ? " on" : ""}" data-home="${esc(code)}">${
+    isHome ? "★ うちの店（次から最初に開きます）" : "☆ うちの店にする"}</button>`;
   const kpis = `
     <div class="kpis">
       <div class="kpi"><div class="lbl">期間合計（${METRIC_LABELS[METRIC]}）</div>
@@ -2382,7 +2490,8 @@ function renderStore(code) {
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
     <section class="block">
       <div class="shd"><span class="rtag" style="--rc:${color}">${s.region}</span>
-        <h2 class="sname">${s.name}</h2>${s.shared_facility ? '<span class="tagx">共営施設</span>' : ""}</div>
+        <h2 class="sname">${s.name}</h2>${s.shared_facility ? '<span class="tagx">共営施設</span>' : ""}
+        ${homeBtn}</div>
       ${kpis}
       ${storeTargetChip(code)}
     </section>
