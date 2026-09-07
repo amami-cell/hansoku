@@ -1,55 +1,42 @@
-"""ルクアLargo(1160) パフェスノー一覧：商品別に月次売上・前年8月・ABCランク。"""
+"""GOLD京都ポルタ(1168) 8月半減の確認：日別売上で、月末まで入っているか見る。"""
 from __future__ import annotations
 import sys
 from datetime import date
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from hansoku.db import AggregateQuery, get_warehouse
-from hansoku.model import GRAIN_MONTH
+from hansoku.model import GRAIN_DAY, GRAIN_MONTH
 from hansoku.settings import load_settings
 
-CODE="1160"
-PERIODS={
- "2026-06":(date(2026,6,1),date(2026,7,1)),
- "2026-07":(date(2026,7,1),date(2026,8,1)),
- "2026-08":(date(2026,8,1),date(2026,9,1)),
- "2025-08":(date(2025,8,1),date(2025,9,1)),
-}
-KEYS=("パフェ","スノー")
+CODE="1168"
 
-def prods(wh, dfrom, dto):
-    rows=wh.aggregate(AggregateQuery(date_from=dfrom,date_to=dto,grain=GRAIN_MONTH,
-        metrics=["product_sales"],store_codes=[CODE],
-        group_by=("product_name",)))
-    d={}
-    for r in rows:
-        n=r.get("product_name") or ""
-        d[n]={"sales":(r["value"] or 0)+d.get(n,{}).get("sales",0)}
-    return d
+def daily(wh, dfrom, dto):
+    rows=wh.aggregate(AggregateQuery(date_from=dfrom, date_to=dto, grain=GRAIN_DAY,
+        metrics=["sales"], store_codes=[CODE], group_by=("date",)))
+    return sorted((r["date"], r["value"] or 0) for r in rows)
+
+def month_sales(wh, dfrom, dto):
+    rows=wh.aggregate(AggregateQuery(date_from=dfrom, date_to=dto, grain=GRAIN_MONTH,
+        metrics=["sales"], store_codes=[CODE], group_by=("store_code",)))
+    return sum(r["value"] or 0 for r in rows)
 
 def main():
     s=load_settings()
-    data={}
     with get_warehouse(s) as wh:
-        for label,(a,b) in PERIODS.items():
-            data[label]=prods(wh,a,b)
-    # パフェ/スノー商品を集める（全期間の和集合）
-    names=set()
-    for label in PERIODS:
-        for n in data[label]:
-            if any(k in n for k in KEYS): names.add(n)
-    print("# ルクアLargo パフェ・スノー 一覧（商品別）")
-    print("| 商品 | 6月 | 7月 | 8月 | 前年8月 | 前年比 |")
-    print("|---|--:|--:|--:|--:|--:|")
-    def g(label,n): return data[label].get(n,{}).get("sales",0)
-    rows=sorted(names,key=lambda n:-g("2026-08",n))
-    t26=t25=0
-    for n in rows:
-        a8=g("2026-08",n); p8=g("2025-08",n)
-        t26+=a8; t25+=p8
-        yoy=f"{(a8/p8-1)*100:+.0f}%" if (a8 and p8) else ("新" if a8 and not p8 else ("終売" if p8 and not a8 else "—"))
-        print(f"| {n} | {g('2026-06',n):,.0f} | {g('2026-07',n):,.0f} | {a8:,.0f} | {p8:,.0f} | {yoy} |")
-    ty=f"{(t26/t25-1)*100:+.1f}%" if t25 else "—"
-    print(f"| **合計** |  |  | **{t26:,.0f}** | **{t25:,.0f}** | **{ty}** |")
+        jul=daily(wh, date(2026,7,1), date(2026,7,31))
+        aug=daily(wh, date(2026,8,1), date(2026,8,31))
+        # 月次(月別日別売上推移=uriage_suii)側の月合計も比較
+        jul_m=month_sales(wh, date(2026,7,1), date(2026,7,31))
+        aug_m=month_sales(wh, date(2026,8,1), date(2026,8,31))
+    for label, d, m in [("2026-07",jul,jul_m),("2026-08",aug,aug_m)]:
+        days=[x for x in d if x[1]]
+        total=sum(v for _,v in d)
+        print(f"## {label}  日別の入っている日数={len(days)}  日別合計=¥{total:,.0f}  月次側合計=¥{m:,.0f}")
+        if days:
+            print(f"  最初の日: {days[0][0]}  最後の日: {days[-1][0]}")
+        # 全日を出す
+        for dt,v in d:
+            print(f"   {dt}  ¥{v:,.0f}")
+        print()
     return 0
 raise SystemExit(main())
