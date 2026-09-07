@@ -49,19 +49,18 @@ def main():
     print()
     osu=[nm for nm in names if "おすすめ" in nm or "オススメ" in nm]
     print("## 「おすすめ」部門:", osu)
-    print()
-    print("## おすすめ部門 月次推移")
-    print("| 月 | おすすめ売上 | 構成比 | 数量 | 単価 | 原価率 |")
-    print("|---|--:|--:|--:|--:|--:|")
-    for m in months:
-        rows_=[(dept[(m,nm)]['sales'], dept[(m,nm)]['rate'], qty.get((m,nm),0)) for nm in osu if (m,nm) in dept]
-        sales=sum(x[0] for x in rows_); q=sum(x[2] for x in rows_)
-        # 原価率は売上加重
-        rated=[(x[0],x[1]) for x in rows_ if x[1] is not None]
-        cr=(sum(a*b for a,b in rated)/sum(a for a,_ in rated)) if rated and sum(a for a,_ in rated) else None
-        share=f"{sales/tot[m]*100:.1f}%" if tot[m] else "—"
-        unit=f"¥{sales/q:,.0f}" if q else "—"
-        crv=f"{cr:.1f}%" if cr is not None else "—"
-        print(f"| {m} | ¥{sales:,.0f} | {share} | {q:,.0f} | {unit} | {crv} |")
+    for nm in osu:
+        print(f"\n## {nm} 月次推移（売上／店売上比＝構成比／数量／単価／原価率）")
+        print("| 月 | 売上 | 構成比 | 数量 | 単価 | 原価率 |")
+        print("|---|--:|--:|--:|--:|--:|")
+        for m in months:
+            e=dept.get((m,nm)); q=qty.get((m,nm),0)
+            if not e: 
+                print(f"| {m} | ¥0 | — | 0 | — | — |"); continue
+            sales=e['sales']; rate=e['rate']
+            share=f"{sales/tot[m]*100:.2f}%" if tot[m] else "—"
+            unit=f"¥{sales/q:,.0f}" if q else "—"
+            crv=f"{rate:.1f}%" if rate is not None else "—"
+            print(f"| {m} | ¥{sales:,.0f} | {share} | {q:,.0f} | {unit} | {crv} |")
     return 0
 raise SystemExit(main())
