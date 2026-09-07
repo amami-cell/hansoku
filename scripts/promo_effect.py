@@ -54,10 +54,10 @@ def main():
     print("| 月 | おすすめ売上 | 構成比 | 数量 | 単価 | 原価率 |")
     print("|---|--:|--:|--:|--:|--:|")
     for m in months:
-        sset_=[(dept[(m,nm)]['sales'], dept[(m,nm)]['rate'], qty.get((m,nm),0)) for nm in osu if (m,nm) in dept]
-        sales=sum(x[0] for x in set_); q=sum(x[2] for x in set_)
+        rows_=[(dept[(m,nm)]['sales'], dept[(m,nm)]['rate'], qty.get((m,nm),0)) for nm in osu if (m,nm) in dept]
+        sales=sum(x[0] for x in rows_); q=sum(x[2] for x in rows_)
         # 原価率は売上加重
-        rated=[(x[0],x[1]) for x in set_ if x[1] is not None]
+        rated=[(x[0],x[1]) for x in rows_ if x[1] is not None]
         cr=(sum(a*b for a,b in rated)/sum(a for a,_ in rated)) if rated and sum(a for a,_ in rated) else None
         share=f"{sales/tot[m]*100:.1f}%" if tot[m] else "—"
         unit=f"¥{sales/q:,.0f}" if q else "—"
