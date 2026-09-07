@@ -1,61 +1,52 @@
-"""FWの商品「部門（カテゴリ）」構成を確認する。
-
-「春に無い＝新商品」では、夏おすすめとグランド改定・通常新メニューが混ざる。
-正しく夏おすすめを切り出すには部門で見る必要がある。まず各店の8月の
-部門別売上と、部門ごとの商品例を出して、"おすすめ/季節" 区分の有無を確かめる。
-"""
+"""2店を深掘り：ルクアLargoのパフェ昨対比／泡くらいの8月構成。"""
 from __future__ import annotations
 import sys
 from datetime import date
 from pathlib import Path
-
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from hansoku.db import AggregateQuery, get_warehouse
 from hansoku.model import GRAIN_MONTH
 from hansoku.settings import load_settings
-from hansoku.stores import StoreMaster
 
-AUG = (date(2026, 8, 1), date(2026, 8, 31))
+def prods(wh, code, dfrom, dto):
+    rows = wh.aggregate(AggregateQuery(
+        date_from=dfrom, date_to=dto, grain=GRAIN_MONTH,
+        metrics=["product_sales"], store_codes=[code],
+        group_by=("product_name",)))
+    d={}
+    for r in rows:
+        n=r.get("product_name")
+        if n: d[n]=d.get(n,0)+(r["value"] or 0)
+    return d
 
-
-def main() -> int:
-    settings = load_settings()
-    m = StoreMaster.load()
-    smap = {s.store_code: s for s in m.active}
-    with get_warehouse(settings) as warehouse:
-        # 部門別売上
-        dept = warehouse.aggregate(AggregateQuery(
-            date_from=AUG[0], date_to=AUG[1], grain=GRAIN_MONTH,
-            metrics=["product_sales"], group_by=("store_code", "product_category"),
-        ))
-        # 商品×部門（部門にどんな品が入るか例示用）
-        prod = warehouse.aggregate(AggregateQuery(
-            date_from=AUG[0], date_to=AUG[1], grain=GRAIN_MONTH,
-            metrics=["product_sales"], group_by=("store_code", "product_category", "product_name"),
-        ))
-
-    bycat = {}
-    for r in dept:
-        bycat.setdefault(r["store_code"], []).append((r.get("product_category") or "(無)", r["value"] or 0))
-    examples = {}
-    for r in prod:
-        key = (r["store_code"], r.get("product_category") or "(無)")
-        examples.setdefault(key, []).append((r.get("product_name") or "", r["value"] or 0))
-
-    print("## 各店の商品部門（カテゴリ）構成・2026-08")
-    print("※ ここに『おすすめ/季節/フェア』等の区分があれば、夏おすすめを正確に切り出せる")
+def show(title, d, n=25):
+    print(f"### {title}  （品数{len(d)}／合計¥{sum(d.values()):,.0f}）")
+    for name,v in sorted(d.items(), key=lambda x:-x[1])[:n]:
+        print(f"  {v:>12,.0f}  {name}")
     print()
-    for code in sorted(bycat, key=lambda c: (smap[c].region if c in smap else "", c)):
-        name = smap[code].store_name if code in smap else code
-        cats = sorted(bycat[code], key=lambda x: -x[1])
-        print(f"### {name}（{code}）  部門数={len(cats)}")
-        for cat, val in cats:
-            ex = examples.get((code, cat), [])
-            ex_top = "、".join(p for p, _ in sorted(ex, key=lambda x: -x[1])[:3])
-            print(f"  - {cat}: ¥{val:,.0f}  例) {ex_top}")
-        print()
+
+def main():
+    s=load_settings()
+    with get_warehouse(s) as wh:
+        largo26=prods(wh,"1160",date(2026,8,1),date(2026,8,31))
+        largo25=prods(wh,"1160",date(2025,8,1),date(2025,8,31))
+        awa26=prods(wh,"1115",date(2026,8,1),date(2026,8,31))
+    print("# ルクアLargo（1160）")
+    show("2026-08 全商品", largo26)
+    show("2025-08 全商品", largo25)
+    # パフェ/スノー/かき氷/デザート系を拾う
+    def dessert(d):
+        keys=("パフェ","スノー","かき氷","ケーキ","タルト","プリン","ジェラート","クリームソーダ","チーズケーキ","シャルロット","アラスカ","ムース")
+        return {k:v for k,v in d.items() if any(x in k for x in keys)}
+    d26,d25=dessert(largo26),dessert(largo25)
+    print(f"## パフェ・デザート系 昨対比：2025 ¥{sum(d25.values()):,.0f} → 2026 ¥{sum(d26.values()):,.0f}")
+    print("### 2026 デザート系"); [print(f"  {v:>12,.0f}  {k}") for k,v in sorted(d26.items(),key=lambda x:-x[1])]
+    print("### 2025 デザート系"); [print(f"  {v:>12,.0f}  {k}") for k,v in sorted(d25.items(),key=lambda x:-x[1])]
+    print()
+    print("# 泡くらい（1115）")
+    show("2026-08 全商品（上位30）", awa26, 30)
+    tabe={k:v for k,v in awa26.items() if ("放題" in k)}
+    print(f"## 食べ/飲み放題だけの合計：¥{sum(tabe.values()):,.0f}（8月売上に占める割合の分子）")
+    for k,v in sorted(tabe.items(),key=lambda x:-x[1]): print(f"  {v:>12,.0f}  {k}")
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+raise SystemExit(main())
