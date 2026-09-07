@@ -47,6 +47,13 @@ class Store:
     renewal_month: str = ""
     # リニューアル前の店名。推移を見るときに、どこまでが旧店かを示す。
     former_name: str = ""
+    # 現場での呼び名。マスタ名と違うことが多い（1006 は「大衆寿司酒場すさび湯」
+    # だが、店長も本部も「すさび湯 梅田」と呼ぶ）。画面のさがす欄で引けるようにする。
+    aliases: tuple[str, ...] = ()
+    # 読みがな。アプリの検索でだけ使う。スマホでかな入力のまま探す人が
+    # 「うめだ」で 1006 に辿り着けるようにするためのもので、
+    # 取り込み時の店名照合には使わない（ゆるすぎて別の店に当たりうる）。
+    yomi: tuple[str, ...] = ()
 
 
 class UnknownStoreError(LookupError):
@@ -64,8 +71,14 @@ class StoreMaster:
             if store.store_code in self._by_code:
                 raise ValueError(f"store_code が重複しています: {store.store_code}")
             self._by_code[store.store_code] = store
-            # 表示名・元名の両方から引けるようにする（取り込み元によって表記が違うため）
-            for name in (store.source_name, store.store_name, store.infomart_name):
+            # 表示名・元名・通称の全部から引けるようにする。取り込み元によって表記が
+            # 違ううえ、人（台帳・検索）が使うのは通称のほうなので、両方要る。
+            for name in (
+                store.source_name,
+                store.store_name,
+                store.infomart_name,
+                *store.aliases,
+            ):
                 if not name:
                     continue
                 key = store_key(name)
@@ -105,6 +118,8 @@ class StoreMaster:
                 abc_dept=bool(row.get("abc_dept", True)),
                 renewal_month=str(row.get("renewal_month", "") or ""),
                 former_name=str(row.get("former_name", "") or ""),
+                aliases=tuple(str(a) for a in (row.get("aliases") or []) if a),
+                yomi=tuple(str(y) for y in (row.get("yomi") or []) if y),
             )
             for row in data.get("stores", [])
         ]

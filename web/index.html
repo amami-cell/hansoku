@@ -2,8 +2,10 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#F6F7F9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1116" media="(prefers-color-scheme: dark)">
 <title>販促マネジメント</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,36 +13,92 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div class="wrap">
-  <header class="top">
-    <div class="brandline">
-      <div class="eyebrow">HASSIN／イニシエート</div>
-      <h1>販促マネジメント</h1>
-    </div>
-    <div class="today">
-      <span id="today"></span>
-      <button class="tbtn" id="themebtn" type="button">表示切替</button>
-      <a class="tbtn" id="logoutbtn" href="/logout">ログアウト</a>
-    </div>
-  </header>
 
-  <div class="controls">
-    <label for="metricsel">指標</label>
-    <select id="metricsel"></select>
-    <label for="storesel">店舗</label>
-    <select id="storesel"></select>
+<!-- 上部バー。スマホでは1行に畳み、PCでは検索を常設する。 -->
+<header class="appbar">
+  <div class="appbar-in">
+    <button class="brand" id="homebtn" type="button" title="最初の画面へ">
+      <span class="brand-sub">HASSIN／イニシエート</span>
+      <span class="brand-name">販促マネジメント</span>
+    </button>
+
+    <button class="searchopen" id="searchopen" type="button" aria-haspopup="dialog">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="M13.5 13.5 L18 18"/></svg>
+      <span class="searchopen-t">店舗・施策・商品をさがす</span>
+      <kbd class="searchopen-k">/ ・ ⌘K</kbd>
+    </button>
+
+    <div class="appbar-r">
+      <span id="today" class="today"></span>
+      <!-- 指標（売上・客数・原価率…）は、画面中の数字すべての意味を変える。
+           左ナビの中に置いていたが、左ナビはスマホでは出ないため、
+           スマホから指標を変える手段が無くなっていた。上部バーに移す。 -->
+      <select id="metricsel" class="metricsel" aria-label="指標"></select>
+      <button class="tbtn tbtn-ico" id="themebtn" type="button" aria-label="表示切替">
+        <span class="tbtn-ic" aria-hidden="true">◐</span><span class="tbtn-t">表示切替</span></button>
+      <a class="tbtn tbtn-ico" id="logoutbtn" href="/logout" aria-label="ログアウト">
+        <span class="tbtn-ic" aria-hidden="true">⏻</span><span class="tbtn-t">ログアウト</span></a>
+    </div>
   </div>
+</header>
+
+<div class="shell">
+  <!-- PC: 左に常設ナビ。スマホでは下部タブに置き換わる（CSSで切替）。 -->
+  <nav class="sidenav" aria-label="画面">
+    <div class="sn-group">
+      <div class="sn-h">わたし</div>
+      <button class="sn-i" data-nav="home"><span class="sn-ic">★</span>うちの店</button>
+      <button class="sn-i" data-nav="campaigns"><span class="sn-ic">◎</span>施策の効果</button>
+    </div>
+    <div class="sn-group">
+      <div class="sn-h">全店</div>
+      <button class="sn-i" data-nav="schedule"><span class="sn-ic">▤</span>スケジュール</button>
+      <button class="sn-i" data-nav="calendar"><span class="sn-ic">▦</span>カレンダー</button>
+      <button class="sn-i" data-nav="list"><span class="sn-ic">▩</span>店舗一覧</button>
+      <button class="sn-i" data-nav="manage"><span class="sn-ic">≡</span>店舗管理</button>
+    </div>
+    <div class="sn-group">
+      <div class="sn-h">まとめ</div>
+      <button class="sn-i" data-nav="year"><span class="sn-ic">◷</span>年間販促</button>
+      <button class="sn-i" data-nav="cross"><span class="sn-ic">◆</span>販促ターゲット</button>
+      <button class="sn-i" data-nav="overview"><span class="sn-ic">⊞</span>エリア・全店</button>
+      <button class="sn-i" data-nav="gallery"><span class="sn-ic">▧</span>制作物</button>
+    </div>
+    <div class="sn-group sn-ctl">
+      <div class="sn-h">店舗へ飛ぶ</div>
+      <select id="storesel" aria-label="店舗"></select>
+    </div>
+  </nav>
 
   <main id="app">
     <div class="empty">データを読み込んでいます…</div>
   </main>
-
-  <section style="margin-bottom:0">
-    <div class="notice" id="notice"></div>
-  </section>
 </div>
 
-<div class="tip" id="tip" role="status" aria-live="polite"></div>
+<div class="wrap notice-wrap"><div class="notice" id="notice"></div></div>
+
+<!-- スマホ: 親指の届く下部タブ -->
+<nav class="tabbar" aria-label="画面">
+  <button class="tb-i" data-nav="home"><span class="tb-ic">★</span>うちの店</button>
+  <button class="tb-i" data-nav="campaigns"><span class="tb-ic">◎</span>施策</button>
+  <button class="tb-i" data-nav="schedule"><span class="tb-ic">▤</span>全店</button>
+  <button class="tb-i" data-nav="cross"><span class="tb-ic">◆</span>まとめ</button>
+  <button class="tb-i" id="tabsearch"><span class="tb-ic">⌕</span>さがす</button>
+</nav>
+
+<!-- さがす（両デバイス共通のシート） -->
+<div class="sheet" id="searchsheet" role="dialog" aria-modal="true" aria-label="さがす" hidden>
+  <div class="sheet-bd" data-closesearch></div>
+  <div class="sheet-in">
+    <div class="sheet-hd">
+      <input id="searchinput" type="search" autocomplete="off" enterkeyhint="search"
+             placeholder="店名・通称・読みがな・施策名・商品名" aria-label="さがす">
+      <button class="tbtn" data-closesearch type="button">閉じる</button>
+    </div>
+    <div class="sheet-bdy" id="searchresults"></div>
+  </div>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>

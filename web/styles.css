@@ -50,13 +50,91 @@
 body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);
   font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;font-feature-settings:"palt" 1;}
 .wrap{max-width:1080px;margin:0 auto;padding:26px 20px 72px;}
-
-.top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
-  flex-wrap:wrap;padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:20px;}
-.brandline{display:flex;flex-direction:column;gap:3px;}
 .eyebrow{font-size:11px;letter-spacing:.16em;color:var(--ink-3);text-transform:uppercase;font-weight:500;}
 h1{font-family:var(--display);font-weight:700;font-size:clamp(23px,4vw,31px);margin:0;letter-spacing:.02em;}
-.today{font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:12px;}
+.today{font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+
+/* ══ 骨格 ═══════════════════════════════════════════════════════════════
+   スマホは「上に細いバー／下に親指の届くタブ」、PCは「上にバー／左に常設ナビ」。
+   同じHTMLをCSSだけで切り替える（画面ごとに別のマークアップを持たない）。 */
+
+.appbar{position:sticky;top:0;z-index:40;background:var(--surface);
+  border-bottom:1px solid var(--line);padding-top:env(safe-area-inset-top);}
+.appbar-in{max-width:1500px;margin:0 auto;padding:8px 16px;
+  display:flex;align-items:center;gap:14px;}
+.brand{display:flex;flex-direction:column;align-items:flex-start;gap:0;flex:none;
+  background:none;border:0;padding:4px 2px;cursor:pointer;font:inherit;color:inherit;text-align:left;}
+.brand-sub{font-size:10px;letter-spacing:.14em;color:var(--ink-3);}
+.brand-name{font-family:var(--display);font-weight:700;font-size:18px;letter-spacing:.02em;}
+.appbar-r{margin-left:auto;display:flex;align-items:center;gap:10px;flex:none;}
+
+/* さがす（開くボタン） */
+.searchopen{flex:1;min-width:0;display:flex;align-items:center;gap:9px;
+  font:inherit;font-size:13px;color:var(--ink-3);background:var(--bg);
+  border:1px solid var(--line-strong);border-radius:999px;padding:9px 14px;cursor:pointer;}
+.searchopen:hover{border-color:var(--accent);color:var(--accent);}
+.searchopen svg{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;}
+.searchopen-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.searchopen-k{margin-left:auto;font:inherit;font-size:11px;border:1px solid var(--line-strong);
+  border-radius:5px;padding:0 6px;color:var(--ink-3);}
+
+/* 指標（売上・客数・原価率…）。両デバイスで上部バーに常駐させる。 */
+.metricsel{font:inherit;font-size:12.5px;padding:5px 8px;max-width:140px;}
+.tbtn-ic{display:none;}
+
+.shell{max-width:1500px;margin:0 auto;display:grid;gap:26px;
+  grid-template-columns:216px minmax(0,1fr);padding:22px 16px 90px;}
+#app{min-width:0;}
+
+/* PC: 左の常設ナビ。7本の控えめリンクに埋もれていた画面を、常に見える所へ。 */
+.sidenav{position:sticky;top:74px;align-self:start;display:flex;flex-direction:column;gap:20px;
+  max-height:calc(100dvh - 96px);overflow-y:auto;padding-bottom:12px;}
+.sn-group{display:flex;flex-direction:column;gap:2px;}
+.sn-h{font-size:10.5px;letter-spacing:.12em;color:var(--ink-3);font-weight:600;
+  padding:0 10px 5px;text-transform:uppercase;}
+.sn-i{display:flex;align-items:center;gap:10px;font:inherit;font-size:13.5px;color:var(--ink-2);
+  background:none;border:0;border-radius:8px;padding:9px 10px;cursor:pointer;text-align:left;width:100%;}
+.sn-i:hover{background:var(--surface-2);color:var(--ink);}
+.sn-i.on{background:var(--accent-soft);color:var(--accent);font-weight:700;}
+.sn-ic{width:18px;text-align:center;flex:none;opacity:.8;}
+.sn-ctl select{width:100%;margin-bottom:12px;}
+.tabbar{display:none;}
+.notice-wrap{padding-top:0;}
+
+/* ══ スマホ ════════════════════════════════════════════════════════════ */
+@media (max-width:899px){
+  .shell{grid-template-columns:minmax(0,1fr);gap:0;padding:14px 13px 96px;}
+  .sidenav{display:none;}
+  .appbar-in{padding:6px 13px;gap:10px;}
+  .brand-sub{display:none;}
+  .brand-name{font-size:15px;}
+  .appbar-r .today{display:none;}   /* 日付は画面の中で言う。上部は操作に使う */
+  /* スマホの「さがす」は上部ではなく下部タブに置く。画面の上端は親指が届かず、
+     ここに置くと表示切替・ログアウトと横幅を取り合って 40px まで潰れる。
+     下部タブなら常に全幅・親指の位置にあるので、そちらを唯一の入口にする。 */
+  .searchopen{display:none;}
+  .wrap{padding:0 13px 24px;}
+
+  /* 表示切替・ログアウトは滅多に押さない。スマホの狭い上部バーでは
+     文字を畳んで記号だけにし、そのぶんの幅を指標セレクトに回す。
+     押せる大きさ（44px）は保つ。 */
+  .tbtn-ico .tbtn-t{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
+  .tbtn-ico .tbtn-ic{display:block;font-size:15px;line-height:1;}
+  .tbtn-ico{min-width:44px;min-height:44px;justify-content:center;display:inline-flex;
+    align-items:center;padding:0;border-radius:50%;}
+  .metricsel{max-width:112px;font-size:16px;padding:6px 6px;}
+
+  /* 親指の届く下部タブ。iPhone のホームバーぶんを避ける。 */
+  .tabbar{display:grid;grid-template-columns:repeat(5,1fr);position:fixed;left:0;right:0;bottom:0;
+    z-index:45;background:var(--surface);border-top:1px solid var(--line);
+    padding-bottom:env(safe-area-inset-bottom);}
+  .tb-i{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+    font:inherit;font-size:10.5px;color:var(--ink-3);background:none;border:0;
+    padding:8px 2px 7px;min-height:56px;cursor:pointer;}
+  .tb-i.on{color:var(--accent);font-weight:700;}
+  .tb-ic{font-size:17px;line-height:1;}
+}
+@media (min-width:900px){ .appbar-r .today{display:inline;} }
 .tbtn{font:inherit;font-size:12px;color:var(--ink-2);background:var(--surface);
   border:1px solid var(--line-strong);border-radius:999px;padding:5px 13px;cursor:pointer;}
 .tbtn:hover{border-color:var(--accent);color:var(--accent);}
@@ -932,3 +1010,34 @@ b.warn{color:var(--warning-ink);}
 .moredet>summary::-webkit-details-marker{display:none;}
 .moredet>summary::before{content:"▸ ";}
 .moredet[open]>summary::before{content:"▾ ";}
+
+/* ══ さがす（シート）══════════════════════════════════════════════════ */
+.sheet{position:fixed;inset:0;z-index:60;display:flex;}
+.sheet[hidden]{display:none;}
+.sheet-bd{position:absolute;inset:0;background:rgba(10,12,16,.42);}
+.sheet-in{position:relative;margin:auto auto 0;width:100%;max-width:640px;
+  background:var(--surface);border-radius:16px 16px 0 0;box-shadow:var(--shadow);
+  display:flex;flex-direction:column;max-height:86dvh;
+  padding-bottom:env(safe-area-inset-bottom);}
+@media (min-width:900px){
+  .sheet-in{margin:8vh auto auto;border-radius:14px;max-height:76dvh;}
+}
+.sheet-hd{display:flex;gap:10px;align-items:center;padding:14px 14px 10px;
+  border-bottom:1px solid var(--line);}
+.sheet-hd input{flex:1;min-width:0;font:inherit;font-size:16px;padding:11px 13px;
+  border:1px solid var(--line-strong);border-radius:10px;background:var(--bg);color:var(--ink);}
+.sheet-hd input:focus{outline:2px solid var(--accent);outline-offset:1px;}
+.sheet-bdy{overflow-y:auto;padding:6px 8px 14px;-webkit-overflow-scrolling:touch;}
+.sr-hint{margin:14px 12px;font-size:13px;color:var(--ink-3);line-height:1.8;}
+.sr-list{list-style:none;margin:0;padding:0;}
+.sr-item{display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+  font:inherit;background:none;border:0;border-radius:9px;padding:10px 10px;cursor:pointer;min-height:52px;}
+.sr-item:hover,.sr-item.on{background:var(--surface-2);}
+.sr-ico{flex:none;width:26px;height:26px;border-radius:7px;display:grid;place-items:center;
+  font-size:11.5px;font-weight:700;color:var(--on-accent);}
+.sr-store{background:var(--accent);}
+.sr-campaign{background:#C8791E;}
+.sr-product{background:#2E8B57;}
+.sr-body{display:flex;flex-direction:column;gap:1px;min-width:0;}
+.sr-label{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sr-sub{font-size:11.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}

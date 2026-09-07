@@ -319,6 +319,105 @@ function campCovers(code, c) {
   return effectOver(code, c, coversAt);
 }
 
+// ── さがす（店舗・施策・商品・部門を1本で）──────────────────────────
+// 24店 × 90施策 × 商品を、画面を渡り歩かずに1箇所から引けるようにする。
+// 索引は DATA から1回だけ作って使い回す（描画のたびに作り直さない）。
+let SEARCH_INDEX = null;
+
+function buildSearchIndex() {
+  const out = [];
+  for (const s of DATA.stores || []) {
+    out.push({
+      kind: "store", label: s.name,
+      // 通称を副題に出す。「大衆寿司酒場すさび湯」だけだと、梅田で探した人は
+      // 自分の店だと分からない。
+      sub: [(s.aliases || [])[0], s.region, s.brand_name].filter(Boolean).join("・"),
+      key: [s.name, ...(s.aliases || []), ...(s.yomi || []),
+            s.code, s.region, s.brand_name].filter(Boolean).join(" "),
+      view: { kind: "store", code: s.code },
+    });
+  }
+  for (const c of DATA.campaigns || []) {
+    out.push({
+      kind: "campaign", label: c.title,
+      sub: `${kindOf(c.kind).label}・${campScopeLabel(c)}・${campRange(c)}`,
+      key: [c.title, c.note, kindOf(c.kind).label, ...(c.items || []), c.bucket,
+            ...c.stores.map(storeName)].filter(Boolean).join(" "),
+      view: { kind: "campaign", id: c.id },
+    });
+  }
+  // 商品は店ごとに重複するので、名前でまとめて「出ている店」を持たせる
+  const prod = new Map();
+  for (const [code, items] of Object.entries(DATA.products || {})) {
+    for (const p of items) {
+      const e = prod.get(p.name) || { sales: 0, codes: new Set() };
+      e.sales += p.sales || 0; e.codes.add(code);
+      prod.set(p.name, e);
+    }
+  }
+  for (const [name, e] of prod) {
+    const codes = [...e.codes];
+    out.push({
+      kind: "product", label: name,
+      sub: `売れ筋・${codes.length === 1 ? storeName(codes[0]) : codes.length + "店で計上"}・${yen(e.sales)}`,
+      key: name,
+      view: { kind: "store", code: codes[0] },
+    });
+  }
+  return out;
+}
+
+// 表記ゆれを吸収して比べる。人は正式表記どおりには打たない。
+//  NFKC ……… 半角カナ→全角カナ（｢ｳﾒﾀﾞ｣→｢ウメダ｣。濁点も1文字に合成される）、
+//             全角英数→半角。スマホのキーボードは半角カナを普通に出す。
+//  かな→カナ … ｢ぷれみあむ｣で｢プレミアム｣に当たるように。
+//  記号落とし … 中黒・スラッシュ・長音・ハイフン・空白は店名や商品名で
+//             付いたり付かなかったりするので、両側から落として比べる。
+const foldKey = (s) => String(s || "").normalize("NFKC").toLowerCase()
+  .replace(/[ぁ-ゖ]/g, ch => String.fromCharCode(ch.charCodeAt(0) + 0x60))
+  .replace(/[\s　・／/ー\-‐−–—]/g, "");
+
+const KIND_ORDER = { store: 0, campaign: 1, product: 2 };
+
+function searchAll(q, limit = 24) {
+  const needle = foldKey(q);
+  if (!SEARCH_INDEX) SEARCH_INDEX = buildSearchIndex();
+  // 何も打っていないときは全店を並べる。スマホには店舗セレクトが無いので、
+  // ここが「名前を思い出せないときに一覧から選ぶ」入口も兼ねる。
+  if (needle.length < 1) {
+    return SEARCH_INDEX.filter(e => e.kind === "store")
+      .sort((a, b) => a.label.localeCompare(b.label, "ja"))
+      .slice(0, 40);
+  }
+  const hits = [];
+  for (const e of SEARCH_INDEX) {
+    const hay = foldKey(e.key);
+    const at = hay.indexOf(needle);
+    if (at < 0) continue;
+    // 先頭一致を上に、種類は 店舗→施策→商品 の順
+    hits.push({ ...e, score: (at === 0 ? 0 : 1) * 10 + KIND_ORDER[e.kind] });
+  }
+  hits.sort((a, b) => a.score - b.score || a.label.localeCompare(b.label, "ja"));
+  return hits.slice(0, limit);
+}
+
+const SEARCH_ICON = { store: "店", campaign: "販", product: "品" };
+
+function searchResultsHtml(q) {
+  const hits = searchAll(q);
+  const hint = !q
+    ? `<p class="sr-hint">店名・通称・読みがな・施策名・商品名で探せます。<br>
+       例: 「梅田」「うめだ」「忘年会」「唐揚げ」 ── 打たなければ全店の一覧です。</p>`
+    : "";
+  if (q && !hits.length) return `<p class="sr-hint">「${esc(q)}」に当たるものはありませんでした。</p>`;
+  return hint + `<ul class="sr-list">${hits.map((h, i) => `
+    <li><button class="sr-item" data-srindex="${i}">
+      <span class="sr-ico sr-${h.kind}">${SEARCH_ICON[h.kind]}</span>
+      <span class="sr-body"><span class="sr-label">${esc(h.label)}</span>
+        <span class="sr-sub">${esc(h.sub)}</span></span>
+    </button></li>`).join("")}</ul>`;
+}
+
 // ── URL（#）と画面の対応 ───────────────────────────────────────────────
 // 状態を URL に出さないと、戻るボタンでアプリごと抜け、リンクも送れず、
 // 店長は自分の店をホーム画面に置けない。VIEW は URL の写しとして扱う。
@@ -396,6 +495,97 @@ function setHomeStore(code) {
   } catch (e) { /* 保存できなくても表示は続く */ }
 }
 
+// ── ナビ（PCの左／スマホの下タブ。同じ data-nav で動く）──────────────
+// 「うちの店」は、決めていなければ全店スケジュールへ。決めていればその店へ。
+function navTo(key) {
+  if (key === "home") {
+    const h = homeStore();
+    go(h ? { kind: "store", code: h } : { kind: "schedule" });
+    return;
+  }
+  if (key === "year") { YEAR = new Date().getFullYear(); }
+  if (key === "calendar") { CAL_MONTH = CAL_MONTH || CURRENT_MONTH; }
+  go({ kind: key });
+}
+
+// いまどこにいるかをナビに反映する。
+function markNav() {
+  const cur = VIEW.kind === "store" && homeStore() === VIEW.code ? "home" : VIEW.kind;
+  document.querySelectorAll("[data-nav]").forEach(el =>
+    el.classList.toggle("on", el.dataset.nav === cur));
+}
+
+function wireNav() {
+  document.querySelectorAll("[data-nav]").forEach(el =>
+    el.addEventListener("click", () => navTo(el.dataset.nav)));
+  const home = document.getElementById("homebtn");
+  if (home) home.addEventListener("click", () => navTo("home"));
+}
+
+// ── さがすシート ──────────────────────────────────────────────────────
+let SEARCH_HITS = [];
+let SEARCH_AT = 0;
+
+function openSearch() {
+  const sheet = document.getElementById("searchsheet");
+  const input = document.getElementById("searchinput");
+  sheet.hidden = false;
+  input.value = "";
+  drawSearch("");
+  // スマホでキーボードが出るまで少し待つ端末があるので、次のフレームで当てる
+  requestAnimationFrame(() => input.focus());
+}
+function closeSearch() {
+  document.getElementById("searchsheet").hidden = true;
+}
+function drawSearch(q) {
+  SEARCH_HITS = searchAll(q);
+  SEARCH_AT = 0;
+  const box = document.getElementById("searchresults");
+  box.innerHTML = searchResultsHtml(q);
+  box.querySelectorAll("[data-srindex]").forEach(el =>
+    el.addEventListener("click", () => pickSearch(+el.dataset.srindex)));
+  markSearchCursor();
+}
+function markSearchCursor() {
+  const items = document.querySelectorAll("#searchresults .sr-item");
+  items.forEach((el, i) => el.classList.toggle("on", i === SEARCH_AT));
+  const cur = items[SEARCH_AT];
+  if (cur) cur.scrollIntoView({ block: "nearest" });
+}
+function pickSearch(i) {
+  const h = SEARCH_HITS[i];
+  if (!h) return;
+  closeSearch();
+  go(h.view);
+}
+
+function wireSearch() {
+  const input = document.getElementById("searchinput");
+  document.getElementById("searchopen").addEventListener("click", openSearch);
+  const tab = document.getElementById("tabsearch");
+  if (tab) tab.addEventListener("click", openSearch);
+  document.querySelectorAll("[data-closesearch]").forEach(el =>
+    el.addEventListener("click", closeSearch));
+  input.addEventListener("input", () => drawSearch(input.value.trim()));
+  input.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") { e.preventDefault(); SEARCH_AT = Math.min(SEARCH_AT + 1, SEARCH_HITS.length - 1); markSearchCursor(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); SEARCH_AT = Math.max(SEARCH_AT - 1, 0); markSearchCursor(); }
+    else if (e.key === "Enter") { e.preventDefault(); pickSearch(SEARCH_AT); }
+    else if (e.key === "Escape") { closeSearch(); }
+  });
+  // PC: 「/」または Ctrl/⌘+K でどこからでも開く。
+  // ⌘K は他のアプリで体に入っている人が多いので、入力中でも受ける。
+  // 「/」は文字なので、入力中は邪魔しない。
+  document.addEventListener("keydown", e => {
+    const t = e.target;
+    const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
+    if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); openSearch(); return; }
+    if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey) { e.preventDefault(); openSearch(); }
+    if (e.key === "Escape") closeSearch();
+  });
+}
+
 // ── 起動 ─────────────────────────────────────────────────────────────────
 async function boot() {
   document.getElementById("today").textContent = formatToday();
@@ -424,6 +614,8 @@ async function boot() {
   }
   buildMetricSelect();
   buildStoreJump();
+  wireNav();
+  wireSearch();
   render();
   syncHash(true);
   fillNotice();
@@ -561,7 +753,7 @@ function buildMetricSelect() {
 }
 function buildStoreJump() {
   const sel = document.getElementById("storesel");
-  const opts = ['<option value="">店舗をさがす…</option>']
+  const opts = ['<option value="">店舗をえらぶ…</option>']
     .concat(DATA.stores.filter(s => hasData(s.code))
       .map(s => `<option value="${s.code}">${s.name}（${s.region}）</option>`));
   sel.innerHTML = opts.join("");
@@ -618,6 +810,7 @@ function render() {
       render(); syncHash();
     }));
   wireEmphasis(app);
+  markNav();
 }
 function go(v, scroll) {
   VIEW = v; render(); syncHash();

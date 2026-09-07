@@ -30,6 +30,8 @@
 stores:
   - store_code: "1006"
     store_name: "大衆寿司酒場すさび湯"
+    aliases: ["すさび湯 梅田"]
+    yomi: ["すさびゆうめだ", "たいしゅうすしさかば"]
     source_name: "0001006_大衆寿司酒場すさび湯"
     infomart_code: "956"
     infomart_name: "すさび湯（ＨＡＳＳＩＮ）"
@@ -40,6 +42,7 @@ stores:
     active: true
   - store_code: "1015"
     store_name: "すさび湯 歌舞伎町"
+    yomi: ["すさびゆかぶきちょう"]
     source_name: "0001015_すさび湯 歌舞伎町"
     infomart_code: "1015"
     infomart_name: "すさび湯　歌舞伎町（ＨＡＳＳＩＮ）"
@@ -50,6 +53,7 @@ stores:
     active: true
   - store_code: "1069"
     store_name: "ひよこ飯店"
+    yomi: ["ひよこはんてん"]
     source_name: "0001069_ひよこ飯店"
     infomart_code: "926"
     infomart_name: "ひよこ飯店（ＨＡＳＳＩＮ）"
@@ -62,6 +66,7 @@ stores:
     abc_dept: false
   - store_code: "1097"
     store_name: "ARATA"
+    yomi: ["あらた"]
     source_name: "0001097_ARATA"
     infomart_code: "973"
     infomart_name: "ＡＲＡＴＡ（ＨＡＳＳＩＮ）"
@@ -82,6 +87,8 @@ stores:
     active: true
   - store_code: "1115"
     store_name: "大衆酒場 曲ル角ニハ泡喰ライ"
+    aliases: ["泡くらい"]
+    yomi: ["たいしゅうさかば", "まがりかどにはあわくらい"]
     source_name: "0001115_大衆酒場 曲ル角ニハ泡喰ライ"
     infomart_code: "925"
     infomart_name: "曲ル角ニハ泡喰ライ（ＨＡＳＳＩＮ）"
@@ -92,6 +99,7 @@ stores:
     active: true
   - store_code: "1131"
     store_name: "CRAFTMAN UMAMI"
+    yomi: ["くらふとまん", "うまみ"]
     source_name: "0001131_CRAFTMAN UMAMI"
     infomart_code: "960"
     infomart_name: "ＵＭＡＭＩ（ＨＡＳＳＩＮ）"
@@ -102,6 +110,7 @@ stores:
     active: true
   - store_code: "1137"
     store_name: "料理と酒 たいだい"
+    yomi: ["りょうりとさけたいだい"]
     source_name: "0001137_料理と酒 たいだい"
     infomart_code: "924"
     infomart_name: "料理と酒　たいだい（旧　にと）（ＨＡＳＳＩＮ）"
@@ -117,6 +126,7 @@ stores:
   # それ以前のABC・売上は旧店（ケジョン）のもので、またぐ前年比は別業態の比較になる。
   - store_code: "1151"
     store_name: "NagaGutsu"
+    yomi: ["ながぐつ"]
     renewal_month: "2026-05"
     former_name: "ケジョン（韓国料理）"
     source_name: "0001151_NagaGutsu"
@@ -129,6 +139,7 @@ stores:
     active: true
   - store_code: "1154"
     store_name: "熊の鳥焼"
+    yomi: ["くまのとりやき"]
     source_name: "0001154_熊の鳥焼"
     infomart_code: "922"
     infomart_name: "熊の鳥焼（ＨＡＳＳＩＮ）"
@@ -139,6 +150,7 @@ stores:
     active: true
   - store_code: "1160"
     store_name: "ルクアLargo"
+    yomi: ["るくあらるご"]
     source_name: "0001160_ルクアLargo"
     infomart_code: "1160"
     infomart_name: "パフェ＆ジェラート　ＬＡＲＧＯ　ルクア店（ＨＡＳＳＩＮ）"
@@ -149,6 +161,7 @@ stores:
     active: true
   - store_code: "1162"
     store_name: "味のたぬきや"
+    yomi: ["あじのたぬきや"]
     source_name: "0001162_味のたぬきや"
     infomart_code: "974"
     infomart_name: "味のたぬきや（ＨＡＳＳＩＮ）"
@@ -159,6 +172,8 @@ stores:
     active: true
   - store_code: "1163"
     store_name: "フレンチ酒場GOLD"
+    aliases: ["GOLD 東通り"]
+    yomi: ["ふれんちさかばごーるど", "ひがしどおり"]
     source_name: "0001163_フレンチ酒場GOLD"
     infomart_code: "1163"
     infomart_name: "フレンチ酒場ＧＯＬＤ（ＨＡＳＳＩＮ）"
@@ -169,6 +184,8 @@ stores:
     active: true
   - store_code: "1168"
     store_name: "GOLD京都ポルタ店"
+    aliases: ["GOLD ボルタ"]
+    yomi: ["ごーるどきょうとぽるた"]
     source_name: "0001168_GOLD京都ポルタ店"
     infomart_code: "1168"
     infomart_name: "フレンチ酒場ＧＯＬＤ　京都ポルタ店（ＨＡＳＳＩＮ）"
@@ -179,6 +196,8 @@ stores:
     active: true
   - store_code: "1169"
     store_name: "すさび湯三宮店"
+    aliases: ["すさび湯 三宮"]
+    yomi: ["すさびゆさんのみや"]
     source_name: "0001169_すさび湯三宮店"
     infomart_code: "1169"
     infomart_name: "すさび湯　三宮店（ＨＡＳＳＩＮ）"
@@ -189,6 +208,8 @@ stores:
     active: true
   - store_code: "1712"
     store_name: "すさび湯京都烏丸"
+    aliases: ["すさび湯 烏丸"]
+    yomi: ["すさびゆきょうとからすま"]
     source_name: "0001712_すさび湯京都烏丸"
     infomart_code: "1712"
     infomart_name: "すさび湯　京都烏丸（ＨＡＳＳＩＮ）"
@@ -199,6 +220,7 @@ stores:
     active: true
   - store_code: "1713"
     store_name: "門真Largo"
+    yomi: ["かどまらるご"]
     source_name: "0001713_門真Largo"
     infomart_code: "1713"
     infomart_name: "喫茶Ｌａｒｇｏ　門真（ＨＡＳＳＩＮ）"
@@ -209,6 +231,8 @@ stores:
     active: true
   - store_code: "1728"
     store_name: "すさび湯 天満橋店"
+    aliases: ["すさび湯 天満橋"]
+    yomi: ["すさびゆてんまばし"]
     source_name: "0001728_すさび湯 天満橋店"
     infomart_code: "1728"
     infomart_name: "すさび湯パナンテ京阪天満橋店（ＨＡＳＳＩＮ）"
@@ -219,6 +243,8 @@ stores:
     active: true
   - store_code: "1729"
     store_name: "フレンチ酒場GOLDお初"
+    aliases: ["GOLD お初"]
+    yomi: ["ふれんちさかばごーるどおはつ"]
     source_name: "0001729_フレンチ酒場GOLDお初"
     infomart_code: "1729"
     infomart_name: "フレンチ酒場ＧＯＬＤ　お初天神店（ＨＡＳＳＩＮ）"
@@ -229,6 +255,8 @@ stores:
     active: true
   - store_code: "1739"
     store_name: "ぎふや 天満橋店"
+    aliases: ["ぎふや パナンテ天満橋"]
+    yomi: ["ぎふやてんまばし", "ぱなんて"]
     source_name: "0001739_ぎふや 天満橋店"
     infomart_code: "1739"
     infomart_name: "ぎふやパナンテ天満橋（ＨＡＳＳＩＮ）"
@@ -239,6 +267,8 @@ stores:
     active: true
   - store_code: "1742"
     store_name: "すさび湯 京都三条店"
+    aliases: ["すさび湯 河原町三条店"]
+    yomi: ["すさびゆきょうとかわらまちさんじょう"]
     source_name: "0001742_すさび湯 京都三条店"
     infomart_code: "1742"
     infomart_name: "すさび湯　三条店（ＨＡＳＳＩＮ）"
@@ -249,6 +279,7 @@ stores:
     active: true
   - store_code: "1743"
     store_name: "すさび湯 新宿東口店"
+    yomi: ["すさびゆしんじゅくひがしぐち"]
     source_name: "0001743_すさび湯 新宿東口店"
     infomart_code: "1743"
     infomart_name: "すさび湯　新宿東口店（ＨＡＳＳＩＮ）"
@@ -259,6 +290,7 @@ stores:
     active: true
   - store_code: "1766"
     store_name: "ぎふや 福岡天神店"
+    yomi: ["ぎふやふくおかてんじん"]
     source_name: "0001766_ぎふや 福岡天神店"
     infomart_code: ""
     infomart_name: ""

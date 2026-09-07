@@ -619,6 +619,11 @@ def build(
                 # またぐ前年比には注意書きを出す（数字自体は消さない）。
                 "renewal_month": s.renewal_month or None,
                 "former_name": s.former_name or None,
+                # 通称（「すさび湯 梅田」など）。正式名は長いので、人はまず通称で
+                # 探す。検索の当たり判定に混ぜるためだけに出す。表示名は name のまま。
+                "aliases": list(s.aliases),
+                # 読みがな。かな入力のまま探せるように、検索の当たり判定にだけ混ぜる。
+                "yomi": list(s.yomi),
             }
             for s in master.active
         ],
