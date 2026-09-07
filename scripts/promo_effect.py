@@ -20,11 +20,11 @@ KEYS=("パフェ","スノー")
 def prods(wh, dfrom, dto):
     rows=wh.aggregate(AggregateQuery(date_from=dfrom,date_to=dto,grain=GRAIN_MONTH,
         metrics=["product_sales"],store_codes=[CODE],
-        group_by=("product_name","product_category")))
+        group_by=("product_name",)))
     d={}
     for r in rows:
         n=r.get("product_name") or ""
-        d[n]={"sales":(r["value"] or 0)+d.get(n,{}).get("sales",0),"rank":r.get("product_category")}
+        d[n]={"sales":(r["value"] or 0)+d.get(n,{}).get("sales",0)}
     return d
 
 def main():
@@ -39,8 +39,8 @@ def main():
         for n in data[label]:
             if any(k in n for k in KEYS): names.add(n)
     print("# ルクアLargo パフェ・スノー 一覧（商品別）")
-    print("| 商品 | 6月 | 7月 | 8月 | 前年8月 | 前年比 | ABC(8月) |")
-    print("|---|--:|--:|--:|--:|--:|:--:|")
+    print("| 商品 | 6月 | 7月 | 8月 | 前年8月 | 前年比 |")
+    print("|---|--:|--:|--:|--:|--:|")
     def g(label,n): return data[label].get(n,{}).get("sales",0)
     rows=sorted(names,key=lambda n:-g("2026-08",n))
     t26=t25=0
@@ -48,9 +48,8 @@ def main():
         a8=g("2026-08",n); p8=g("2025-08",n)
         t26+=a8; t25+=p8
         yoy=f"{(a8/p8-1)*100:+.0f}%" if (a8 and p8) else ("新" if a8 and not p8 else ("終売" if p8 and not a8 else "—"))
-        rank=data["2026-08"].get(n,{}).get("rank") or "—"
-        print(f"| {n} | {g('2026-06',n):,.0f} | {g('2026-07',n):,.0f} | {a8:,.0f} | {p8:,.0f} | {yoy} | {rank} |")
+        print(f"| {n} | {g('2026-06',n):,.0f} | {g('2026-07',n):,.0f} | {a8:,.0f} | {p8:,.0f} | {yoy} |")
     ty=f"{(t26/t25-1)*100:+.1f}%" if t25 else "—"
-    print(f"| **合計** |  |  | **{t26:,.0f}** | **{t25:,.0f}** | **{ty}** |  |")
+    print(f"| **合計** |  |  | **{t26:,.0f}** | **{t25:,.0f}** | **{ty}** |")
     return 0
 raise SystemExit(main())
