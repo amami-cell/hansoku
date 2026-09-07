@@ -1,0 +1,34 @@
+name: 販促の結果を測る（商品差分）
+
+# 台帳に対象商品を入れなくても、FWの商品ABCの差分で販促を切り出して測る。
+#   夏おすすめ = 直近春に無かった商品 / 月替わり = 前月に無かった商品
+# 読み取りだけ（push もコメントもしない）。結果はジョブのサマリとログに出す。
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  effect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+      - name: 販促の結果を測る
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          set -o pipefail
+          python scripts/promo_effect.py | tee -a "$GITHUB_STEP_SUMMARY"
