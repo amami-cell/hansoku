@@ -1,6 +1,4 @@
-"""GOLD京都ポルタ(1168) 部門「おすすめ」＝夏おすすめ の月次推移。
-dept_sales: product_name=部門名, product_category=原価率(数値文字列)。
-dept_qty:   product_name=部門名 の数量。→ 売上・構成比・単価・原価率を月次で。"""
+"""ルクアLargo(1160) パフェスノー一覧：商品別に月次売上・前年8月・ABCランク。"""
 from __future__ import annotations
 import sys
 from datetime import date
@@ -10,57 +8,49 @@ from hansoku.db import AggregateQuery, get_warehouse
 from hansoku.model import GRAIN_MONTH
 from hansoku.settings import load_settings
 
-CODE="1168"
-MONTHS=[(date(2026,m,1),date(2026,m+1,1)) for m in range(3,8)]+[(date(2026,8,1),date(2026,9,1))]
+CODE="1160"
+PERIODS={
+ "2026-06":(date(2026,6,1),date(2026,7,1)),
+ "2026-07":(date(2026,7,1),date(2026,8,1)),
+ "2026-08":(date(2026,8,1),date(2026,9,1)),
+ "2025-08":(date(2025,8,1),date(2025,9,1)),
+}
+KEYS=("パフェ","スノー")
+
+def prods(wh, dfrom, dto):
+    rows=wh.aggregate(AggregateQuery(date_from=dfrom,date_to=dto,grain=GRAIN_MONTH,
+        metrics=["product_sales"],store_codes=[CODE],
+        group_by=("product_name","product_category")))
+    d={}
+    for r in rows:
+        n=r.get("product_name") or ""
+        d[n]={"sales":(r["value"] or 0)+d.get(n,{}).get("sales",0),"rank":r.get("product_category")}
+    return d
 
 def main():
     s=load_settings()
-    dept={}   # (m, 部門名) -> {sales, rate}
-    qty={}    # (m, 部門名) -> qty
-    tot={}    # m -> 店売上
+    data={}
     with get_warehouse(s) as wh:
-        for dfrom,dto in MONTHS:
-            m=dfrom.strftime('%Y-%m')
-            for r in wh.aggregate(AggregateQuery(date_from=dfrom,date_to=dto,grain=GRAIN_MONTH,
-                    metrics=["dept_sales"],store_codes=[CODE],
-                    group_by=("product_name","product_category"))):
-                nm=r.get("product_name") or "(無)"
-                try: rate=float(r["product_category"]) if r["product_category"] else None
-                except: rate=None
-                e=dept.setdefault((m,nm),{"sales":0.0,"rate":rate})
-                e["sales"]+=r["value"] or 0
-                if rate is not None: e["rate"]=rate
-            for r in wh.aggregate(AggregateQuery(date_from=dfrom,date_to=dto,grain=GRAIN_MONTH,
-                    metrics=["dept_qty"],store_codes=[CODE],group_by=("product_name",))):
-                nm=r.get("product_name") or "(無)"
-                qty[(m,nm)]=qty.get((m,nm),0)+(r["value"] or 0)
-            trows=wh.aggregate(AggregateQuery(date_from=dfrom,date_to=dto,grain=GRAIN_MONTH,
-                    metrics=["sales"],store_codes=[CODE],group_by=("store_code",)))
-            tot[m]=sum(r["value"] or 0 for r in trows)
-    months=[d.strftime('%Y-%m') for d,_ in MONTHS]
-    names=sorted({nm for (_,nm) in dept})
-    print("# 1168 部門名一覧（dept_sales の product_name）")
-    print("／".join(names))
-    print()
-    print("# 部門別 月次売上（全部門）")
-    for m in months:
-        line=[f"{nm}={dept[(m,nm)]['sales']:,.0f}" for nm in names if (m,nm) in dept and dept[(m,nm)]['sales']]
-        print(f"- {m}（店売上¥{tot[m]:,.0f}）: " + " / ".join(line))
-    print()
-    osu=[nm for nm in names if "おすすめ" in nm or "オススメ" in nm]
-    print("## 「おすすめ」部門:", osu)
-    for nm in osu:
-        print(f"\n## {nm} 月次推移（売上／店売上比＝構成比／数量／単価／原価率）")
-        print("| 月 | 売上 | 構成比 | 数量 | 単価 | 原価率 |")
-        print("|---|--:|--:|--:|--:|--:|")
-        for m in months:
-            e=dept.get((m,nm)); q=qty.get((m,nm),0)
-            if not e: 
-                print(f"| {m} | ¥0 | — | 0 | — | — |"); continue
-            sales=e['sales']; rate=e['rate']
-            share=f"{sales/tot[m]*100:.2f}%" if tot[m] else "—"
-            unit=f"¥{sales/q:,.0f}" if q else "—"
-            crv=f"{rate:.1f}%" if rate is not None else "—"
-            print(f"| {m} | ¥{sales:,.0f} | {share} | {q:,.0f} | {unit} | {crv} |")
+        for label,(a,b) in PERIODS.items():
+            data[label]=prods(wh,a,b)
+    # パフェ/スノー商品を集める（全期間の和集合）
+    names=set()
+    for label in PERIODS:
+        for n in data[label]:
+            if any(k in n for k in KEYS): names.add(n)
+    print("# ルクアLargo パフェ・スノー 一覧（商品別）")
+    print("| 商品 | 6月 | 7月 | 8月 | 前年8月 | 前年比 | ABC(8月) |")
+    print("|---|--:|--:|--:|--:|--:|:--:|")
+    def g(label,n): return data[label].get(n,{}).get("sales",0)
+    rows=sorted(names,key=lambda n:-g("2026-08",n))
+    t26=t25=0
+    for n in rows:
+        a8=g("2026-08",n); p8=g("2025-08",n)
+        t26+=a8; t25+=p8
+        yoy=f"{(a8/p8-1)*100:+.0f}%" if (a8 and p8) else ("新" if a8 and not p8 else ("終売" if p8 and not a8 else "—"))
+        rank=data["2026-08"].get(n,{}).get("rank") or "—"
+        print(f"| {n} | {g('2026-06',n):,.0f} | {g('2026-07',n):,.0f} | {a8:,.0f} | {p8:,.0f} | {yoy} | {rank} |")
+    ty=f"{(t26/t25-1)*100:+.1f}%" if t25 else "—"
+    print(f"| **合計** |  |  | **{t26:,.0f}** | **{t25:,.0f}** | **{ty}** |  |")
     return 0
 raise SystemExit(main())
