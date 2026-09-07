@@ -88,6 +88,9 @@ class AggregateQuery:
     hours: Sequence[int] | None = None
     product_categories: Sequence[str] | None = None
     product_names: Sequence[str] | None = None
+    # 取り込み口で絞る。比率（原価率など）は分子と分母を同じ口から取らないと、
+    # 口ごとに定義が違うとき（税込/税抜）に意味の無い数字になる。
+    sources: Sequence[str] | None = None
     # 出力の束ね方。store_code / date / hour / metric から選ぶ。
     group_by: Sequence[str] = ("store_code", "metric")
 
@@ -149,6 +152,7 @@ def build_aggregate_sql(
         ("hours", query.hours, "hour"),
         ("product_categories", query.product_categories, "product_category"),
         ("product_names", query.product_names, "product_name"),
+        ("sources", query.sources, "source"),
     ):
         if values:
             where.append(array_in.format(column=column, param=name))

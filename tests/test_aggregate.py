@@ -278,3 +278,46 @@ class Test取り込み口の優先順位:
             )
         )
         assert [r["value"] for r in rows] == [23_014_088.0]
+
+
+class Test比率は同じ取り込み口の中で割る:
+    """理論原価は店長会シート（fw_sheet）の1枚から来る。同じ表の売上で割らないと
+    意味を成さない。売上は fw_sheet（税抜）と fw_uriage_suii（税込）の両方が
+    書いていて、既定では税込が採られる。そのまま割ると分子だけ税抜になり、
+    原価率が実態より低く出る（低いほど良い指標なので危ない方向にずれる）。"""
+
+    def _seed(self, warehouse):
+        from datetime import datetime
+
+        common = dict(store_code="1006", date=date(2026, 8, 1), grain=GRAIN_MONTH, kind="確定")
+        at = datetime(2026, 9, 1, 3)
+        rows = [
+            # 店長会シート（税抜）: 売上2000万・理論原価600万 → 30.0%
+            ActualRow(**common, metric="sales", value=20_000_000.0, source="fw_sheet", ingested_at=at),
+            ActualRow(**common, metric="food_theory_cost", value=4_000_000.0, source="fw_sheet", ingested_at=at),
+            ActualRow(**common, metric="drink_theory_cost", value=2_000_000.0, source="fw_sheet", ingested_at=at),
+            # 売上推移（税込）: 2200万。SOURCE_PRIORITY はこちらを採る
+            ActualRow(**common, metric="sales", value=22_000_000.0, source="fw_uriage_suii", ingested_at=at),
+        ]
+        warehouse.ensure_schema()
+        warehouse.replace_actuals(rows)
+
+    def test_原価率は税抜どうしで割る(self, warehouse):
+        self._seed(warehouse)
+        [v] = analytics.ratio(
+            warehouse, "cost_rate",
+            date_from=date(2026, 8, 1), date_to=date(2026, 8, 31), store_codes=["1006"],
+        )
+        # 600万 / 2000万 = 30.0%。税込2200万で割ると 27.3% になってしまう。
+        assert round(v.value * 100, 1) == 30.0
+
+    def test_売上そのものは税込が採られる(self, warehouse):
+        """原価率の分母を絞っても、売上指標そのものの優先順位は変わらない。"""
+        self._seed(warehouse)
+        rows = warehouse.aggregate(
+            AggregateQuery(
+                date(2026, 8, 1), date(2026, 8, 31), GRAIN_MONTH,
+                metrics=["sales"], store_codes=["1006"], group_by=("store_code",),
+            )
+        )
+        assert [r["value"] for r in rows] == [22_000_000.0]

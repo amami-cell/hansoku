@@ -107,9 +107,13 @@ async function editGoal(id) {
   const cur = API_OK ? (t && t.value) : (id in GOALS ? GOALS[id] : GOALS[bareId(id)]);
   const c = (DATA.campaigns || []).find(x => campKey(x) === id || x.id === bareId(id));
   const basis = c ? goalBasisLabel(c) : null;
+  const per = c && goalIsMonthly(c) ? "1ヶ月あたりの" : "期間ぜんぶの";
   const v = window.prompt(
     basis
-      ? `目標を入力してください（円・空欄で削除）\n\nこの施策の実績は「${basis}」で見ています。同じものへの目標を入れてください。`
+      ? `${per}目標を入力してください（円・空欄で削除）\n\n`
+        + `この施策の実績は「${basis}」で見ています。同じものへの目標を入れてください。`
+        + (c && goalIsMonthly(c)
+            ? "\n終了日を決めていない施策なので、直近の確定月と比べます。" : "")
       : "この販促の目標売上（円）を入力してください（空欄で削除）",
     cur == null ? "" : String(cur));
   if (v === null) return;
@@ -232,12 +236,39 @@ function campProgress(c) {
 // 店全体の売上（数千万）÷300万 で達成率が数千%と出る。1回でもそんな数字を
 // 見たら、この画面の数字は二度と信用されない。
 // いまは主指標（その施策が効く部門・商品／GM改定は店全体）で割る。
+// 終了日未定の施策（GM改定・ランチ変更など）は、実績が開始月から積み上がり続ける。
+// 目標は1つなので、そのまま割ると達成率が伸び続ける（実測 4533%）。
+// 終わりが無いものの目標は「1ヶ月あたり」と決め、直近確定月と比べる。
+const goalIsMonthly = c => !!c.open_ended;
+
 function campGoalRate(c) {
   const t = targetOf(c);
   if (t == null || !t) return null;
+  if (goalIsMonthly(c)) {
+    const m = latestCampMonth(c);
+    if (!m) return null;
+    const tg = campTargeted(c, null, { from: m, to: m });
+    if (!tg || !tg.cur) return null;
+    return { rate: tg.cur / t * 100, cur: tg.cur, target: t, label: tg.label, monthly: true, month: m };
+  }
   const tg = campTargeted(c);
   if (!tg || !tg.cur) return null;
-  return { rate: tg.cur / t * 100, cur: tg.cur, target: t, label: tg.label };
+  return { rate: tg.cur / t * 100, cur: tg.cur, target: t, label: tg.label, monthly: false };
+}
+
+// その施策の期間内で、実績が出ている直近の月。
+function latestCampMonth(c) {
+  const sM = c.start.slice(0, 7), eM = campEndM(c);
+  for (let i = DATA.months.length - 1; i >= 0; i--) {
+    const m = DATA.months[i];
+    if (m >= CURRENT_MONTH || m < sM || m > eM) continue;
+    const has = c.stores.some(code => {
+      const t = campTargeted(c, code, { from: m, to: m });
+      return t && t.cur;
+    });
+    if (has) return m;
+  }
+  return null;
 }
 // 目標を入力してもらうときに「何に対する目標か」を必ず言う。
 function goalBasisLabel(c) {
@@ -621,7 +652,11 @@ function reviewProgressStrip() {
   // 目標達成（実施中で目標入り）
   const goals = live.map(campGoalRate).filter(Boolean);
   const achieved = goals.filter(g => g.rate >= 100).length;
-  const avgRate = goals.length ? Math.round(goals.reduce((a, g) => a + g.rate, 0) / goals.length) : null;
+  // 規模の違う施策の率を単純平均すると、小さい施策1件の大きな率が全体を支配する。
+  // 実績の合計 ÷ 目標の合計 にする。
+  const goalSum = goals.reduce((a, g) => a + g.target, 0);
+  const curSum = goals.reduce((a, g) => a + g.cur, 0);
+  const avgRate = goalSum ? Math.round(curSum / goalSum * 100) : null;
   // 振り返り（終了のうち記入済み）
   const needs = done.filter(needsReview).length;
   const reviewed = done.length - needs;
@@ -642,7 +677,7 @@ function reviewProgressStrip() {
       ${tile("campaigns",
         goals.length ? `${achieved}<small>/${goals.length}</small>` : "―",
         "目標達成（実施中）",
-        goals.length ? `平均達成率 ${avgRate}%` : "目標未入力", goals.length && avgRate < 100 ? "warn" : "")}
+        goals.length ? `全体の達成率 ${avgRate}%` : "目標未入力", goals.length && avgRate < 100 ? "warn" : "")}
       ${tile("campaigns",
         done.length ? `${rvPct}<small>%</small>` : "―",
         "振り返り記入率", needs ? `未記入 ${needs}件が残っています` : (done.length ? "やりっぱなし ゼロ" : "終了施策なし"),
@@ -1208,15 +1243,17 @@ function campBasis(c) {
   return null;
 }
 
-function campTargeted(c, onlyCode) {
+// range を渡すと、その月だけを見る（終了日未定の施策で「1ヶ月あたり」を出すため）。
+function campTargeted(c, onlyCode, range) {
   const basis = campBasis(c);
   if (!basis) return null;
   const stores0 = onlyCode ? [onlyCode] : c.stores;
   if (basis.kind === "store") {
     // 店全体が範囲。ただし重なっている施策の数は必ず添えて読ませる。
+    const scoped = range ? { ...c, start: range.from + "-01", end: range.to + "-28", open_ended: false } : c;
     const sum = onlyCode
-      ? campaignSummary({ ...c, stores: [onlyCode] }, salesAt)
-      : campaignSummary(c, salesAt);
+      ? campaignSummary({ ...scoped, stores: [onlyCode] }, salesAt)
+      : campaignSummary(scoped, salesAt);
     if (!sum.stores) return null;
     return {
       basis, label: "店全体の売上", storeWide: true,
@@ -1224,7 +1261,8 @@ function campTargeted(c, onlyCode) {
       months: sum.months, stores: sum.stores,
     };
   }
-  const sM = c.start.slice(0, 7), eM = campEndM(c);
+  const sM = range ? range.from : c.start.slice(0, 7);
+  const eM = range ? range.to : campEndM(c);
   let cur = 0, prev = 0, prevOk = true;
   const months = new Set(), stores = new Set();
   for (const code of stores0) {
@@ -1479,7 +1517,7 @@ function renderCampaign(id) {
     // 目標は円（売上）で立てるので、達成率は必ず売上で割る。
     const gr = campGoalRate(c);
     const goalKpi = tgt != null
-      ? `<div class="kpi"><div class="lbl">目標達成${gr && gr.label ? `（${esc(gr.label)}）` : ""}</div>
+      ? `<div class="kpi"><div class="lbl">目標達成${gr && gr.label ? `（${esc(gr.label)}${gr.monthly ? `・${gr.month}の1ヶ月` : ""}）` : ""}</div>
           <div class="big ${gr && gr.rate >= 100 ? "up" : "down"}">${gr ? gr.rate.toFixed(0) + "%" : "―"}</div>
           <div class="delta">目標 ${man(tgt)} → 実績 ${gr ? man(gr.cur) : "―"}</div></div>` : "";
     const covKpi = (METRIC === "sales" && sum.covers != null)

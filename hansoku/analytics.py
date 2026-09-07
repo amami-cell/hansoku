@@ -28,6 +28,19 @@ RATIO_METRICS: dict[str, tuple[tuple[str, ...], str]] = {
     "avg_check": ((METRIC_SALES,), METRIC_COVERS),
 }
 
+# 分子と分母を同じ取り込み口から取る比率。
+#
+# 理論原価は店長会シート（fw_sheet）の1枚から来る。同じ表の売上で割らないと
+# 意味を成さない。売上は fw_sheet（税抜）と fw_uriage_suii（税込）の両方が
+# 書いていて、SOURCE_PRIORITY は税込を採る。そのまま割ると分子だけ税抜になり、
+# 原価率が実態より約2.7pt 低く出る（低いほど良い指標なので、全店が実力より
+# 優秀に見える方向にずれる）。
+#
+# どちらの税基準かを当てにいくのではなく、「1つの表の中で割る」ことで揃える。
+SAME_SOURCE_RATIOS: dict[str, tuple[str, ...]] = {
+    "cost_rate": ("fw_sheet",),
+}
+
 
 @dataclass(frozen=True)
 class MetricValue:
@@ -45,6 +58,7 @@ def totals(
     store_codes: Sequence[str] | None = None,
     grain: str = GRAIN_MONTH,
     hours: Sequence[int] | None = None,
+    sources: Sequence[str] | None = None,
 ) -> dict[tuple[str, str], float]:
     """(store_code, metric) → 合計値。"""
     query = AggregateQuery(
@@ -54,6 +68,7 @@ def totals(
         metrics=list(metrics),
         store_codes=list(store_codes) if store_codes else None,
         hours=list(hours) if hours else None,
+        sources=list(sources) if sources else None,
         group_by=("store_code", "metric"),
     )
     return {(r["store_code"], r["metric"]): r["value"] for r in warehouse.aggregate(query)}
@@ -87,6 +102,8 @@ def ratio(
         store_codes=store_codes,
         grain=grain,
         hours=hours,
+        # 分子と分母を1つの表の中で取る比率は、その口に絞る。
+        sources=SAME_SOURCE_RATIOS.get(metric),
     )
     codes = sorted({code for code, _ in sums})
     results: list[MetricValue] = []

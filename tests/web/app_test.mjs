@@ -311,6 +311,36 @@ test("店ごとの主指標を出せる（同じ店の施策が全部同じ数�
   assert.equal(call(ctx, `campTargeted(${JSON.stringify(c)}).cur`), 1400000);
 });
 
+test("終了日未定の施策の目標は「1ヶ月あたり」。積み上がらない", () => {
+  // 開始月から今月まで実績が積み上がるのに目標は1つ。そのまま割ると
+  // 達成率が伸び続ける（実測 4533%）。直近確定月と比べる。
+  const months = [];
+  for (let y = 2025; y <= 2026; y++) for (let m = 1; m <= 12; m++)
+    months.push(`${y}-${String(m).padStart(2, "0")}`);
+  const dm = {}, mon = {};
+  for (const m of months) { dm[m] = bucket("コース", 1000000, 8000000); mon[m] = { sales: 8000000 }; }
+  const data = { ...base, months, monthly: { 1006: mon }, departments_monthly: { 1006: dm } };
+
+  const open = camp({ id: "g1", bucket: "コース", start: "2025-04-01", end: "2025-04-01" });
+  open.key = "g1@2025"; open.open_ended = true;
+  const ctx = loadApp({ ...data, campaigns: [open] });
+  call(ctx, `API_OK = true; SERVER_TARGETS = { "g1@2025": { value: 3000000 } };`);
+  const gr = call(ctx, `campGoalRate(${JSON.stringify(open)})`);
+  assert.equal(gr.monthly, true);
+  assert.equal(gr.cur, 1000000, "1ヶ月ぶんであるべき");
+  assert.equal(Math.round(gr.rate), 33);
+  assert.ok(gr.rate < 100, `積み上がっている: ${gr.rate}%`);
+
+  // 終了日があるものは従来どおり期間ぜんぶの合計
+  const closed = camp({ id: "g2", bucket: "コース", start: "2025-04-01", end: "2025-05-31" });
+  closed.key = "g2@2025";
+  const ctx2 = loadApp({ ...data, campaigns: [closed] });
+  call(ctx2, `API_OK = true; SERVER_TARGETS = { "g2@2025": { value: 3000000 } };`);
+  const gr2 = call(ctx2, `campGoalRate(${JSON.stringify(closed)})`);
+  assert.equal(gr2.monthly, false);
+  assert.equal(gr2.cur, 2000000, "2ヶ月ぶんの合計であるべき");
+});
+
 console.log("原価率の前月比（costTrend）");
 
 const crBase = (cost_rate, months) => ({
