@@ -160,3 +160,18 @@ def test_実績の無い店も一覧に載る(payload, master):
     for s in payload["stores"]:
         assert s["has_actuals"] == (s["code"] in payload["monthly"])
         assert s["pos"]
+
+
+def test_通称と読みがなが画面に渡る(payload, master):
+    """正式名だけだと「梅田」で探せない（1006 は大衆寿司酒場すさび湯）。
+    画面のさがす欄は通称・読みがなを当て判定に混ぜるので、書き出しに要る。
+    表示名（name）は正式名のまま変えない。"""
+    by_code = {s["code"]: s for s in payload["stores"]}
+    for s in master.active:
+        row = by_code[s.store_code]
+        assert row["aliases"] == list(s.aliases)
+        assert row["yomi"] == list(s.yomi)
+        assert row["name"] == s.store_name
+    # マスタに通称が入っている店が実際にある（空配列だけ通って気づかない、を防ぐ）
+    assert any(row["aliases"] for row in payload["stores"])
+    assert any(row["yomi"] for row in payload["stores"])

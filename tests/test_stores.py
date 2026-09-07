@@ -116,3 +116,16 @@ def test_大阪が最多の16店(master):
 def test_エリアで店舗を引ける(master):
     tokyo = {s.store_name for s in master.in_region("東京")}
     assert "んだんだ" in tokyo
+
+
+def test_通称でも店を引ける(master):
+    """台帳（schedule.yaml）は店名でも書けると案内している。
+    現場が書くのは通称なので、通称が引けないとその案内が嘘になる。"""
+    found = master.find_by_name("すさび湯 梅田")
+    assert found is not None and found.store_code == "1006"
+
+
+def test_読みがなでは引かない(master):
+    """読みがなは検索専用。かなだけの文字列は緩すぎて、新店の名前が
+    既存店に化けて吸い込まれうる。取り込みの照合には通さない。"""
+    assert master.find_by_name("すさびゆうめだ") is None
