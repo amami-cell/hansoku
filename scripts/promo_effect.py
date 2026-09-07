@@ -1,54 +1,53 @@
-"""ルクアLargo(1160) 理論値の確認：
- (1) 店全体の理論原価率(cost_rate)の月次推移＝ポーションダウンの全体影響
- (2) 部門(dept)データがあるか。あれば デザート部門の 売上/数量/原価率 月次。
-"""
+"""全店の8月「おすすめ部門」数値（売上・数量・原価率）。店売上・FDは出さない。
+dept_sales: product_name=部門名, product_category=原価率。dept_qty: 部門名の数量。"""
 from __future__ import annotations
 import calendar, sys
 from datetime import date
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from hansoku.db import AggregateQuery, get_warehouse
-from hansoku.analytics import ratio
 from hansoku.model import GRAIN_MONTH
 from hansoku.settings import load_settings
+from hansoku.stores import StoreMaster
 
-CODE="1160"
-def mr(y,m): return date(y,m,1), date(y,m,calendar.monthrange(y,m)[1])
-MONTHS=[("2026-05",*mr(2026,5)),("2026-06",*mr(2026,6)),("2026-07",*mr(2026,7)),
-        ("2026-08",*mr(2026,8)),("2025-08",*mr(2025,8))]
-
+A=(date(2026,8,1), date(2026,8,31))
 def main():
-    s=load_settings()
+    s=load_settings(); m=StoreMaster.load(); smap={x.store_code:x for x in m.active}
     with get_warehouse(s) as wh:
-        print("## 店全体の理論原価率（cost_rate）月次")
-        for label,a,b in MONTHS:
-            rows=ratio(wh,"cost_rate",date_from=a,date_to=b,store_codes=[CODE],grain=GRAIN_MONTH)
-            v=next((r.value for r in rows if r.store_code==CODE), None)
-            print(f"- {label}: {v*100:.1f}%" if v is not None else f"- {label}: —（未取得）")
-        print()
-        print("## 部門(dept_sales) が取れるか：2026-08 の部門一覧")
-        a,b=mr(2026,8)
-        deptrows=wh.aggregate(AggregateQuery(date_from=a,date_to=b,grain=GRAIN_MONTH,
-            metrics=["dept_sales"],store_codes=[CODE],group_by=("product_name","product_category")))
-        if not deptrows:
-            print("  → 部門データなし（1160はABC部門未取込。全体cost_rateのみ）")
+        ds=wh.aggregate(AggregateQuery(date_from=A[0],date_to=A[1],grain=GRAIN_MONTH,
+            metrics=["dept_sales"],group_by=("store_code","product_name","product_category")))
+        dq=wh.aggregate(AggregateQuery(date_from=A[0],date_to=A[1],grain=GRAIN_MONTH,
+            metrics=["dept_qty"],group_by=("store_code","product_name")))
+    qmap={}
+    for r in dq: qmap[(r["store_code"],r.get("product_name"))]=r["value"] or 0
+    # 部門データがある店
+    have=set(r["store_code"] for r in ds)
+    # おすすめ部門を集める
+    osu={}  # code -> list of (部門名, 売上, 原価率, 数量)
+    for r in ds:
+        nm=r.get("product_name") or ""
+        if "おすすめ" in nm or "オススメ" in nm:
+            try: rate=float(r["product_category"]) if r["product_category"] else None
+            except: rate=None
+            osu.setdefault(r["store_code"],[]).append(
+                (nm, r["value"] or 0, rate, qmap.get((r["store_code"],nm),0)))
+    print("## 部門データがある店:", len(have), "/", len(smap))
+    print("## 「おすすめ部門」がある店:", len(osu))
+    print()
+    print("## 8月 おすすめ部門の数値（全店）")
+    print("| 店 | 部門 | 売上 | 数量 | 原価率 |")
+    print("|---|---|--:|--:|--:|")
+    REG=['大阪','東京','京都','兵庫','福岡']
+    def key(c): return (REG.index(smap[c].region) if smap[c].region in REG else 9, c)
+    for c in sorted(smap, key=key):
+        nmn=smap[c].store_name
+        if c in osu:
+            for dn,v,rate,q in sorted(osu[c],key=lambda x:-x[1]):
+                cr=f"{rate:.1f}%" if rate is not None else "—"
+                print(f"| {nmn} | {dn} | ¥{v:,.0f} | {q:,.0f} | {cr} |")
+        elif c in have:
+            print(f"| {nmn} | （おすすめ部門なし） | — | — | — |")
         else:
-            for r in sorted(deptrows,key=lambda r:-(r["value"] or 0)):
-                nm=r.get("product_name"); rate=r.get("product_category")
-                print(f"  {nm}: 売上¥{(r['value'] or 0):,.0f} 原価率{rate}")
-        print()
-        # デザート部門の月次（あれば）
-        print("## デザート部門らしき部門の月次（売上/数量/原価率）")
-        for label,a,b in MONTHS:
-            ds=wh.aggregate(AggregateQuery(date_from=a,date_to=b,grain=GRAIN_MONTH,
-                metrics=["dept_sales"],store_codes=[CODE],group_by=("product_name","product_category")))
-            dq=wh.aggregate(AggregateQuery(date_from=a,date_to=b,grain=GRAIN_MONTH,
-                metrics=["dept_qty"],store_codes=[CODE],group_by=("product_name",)))
-            qmap={r.get("product_name"):(r["value"] or 0) for r in dq}
-            for r in ds:
-                nm=r.get("product_name") or ""
-                if "デザート" in nm or "パフェ" in nm or "スイーツ" in nm:
-                    q=qmap.get(nm,0); v=r["value"] or 0; rate=r.get("product_category")
-                    print(f"- {label} {nm}: 売上¥{v:,.0f} 数量{q:,.0f} 原価率{rate}")
+            print(f"| {nmn} | 部門データなし | — | — | — |")
     return 0
 raise SystemExit(main())
