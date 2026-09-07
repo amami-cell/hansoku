@@ -20,6 +20,14 @@ const JSON_HEADERS = {
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
 
+// 例外の本文はブラウザに返さない。@neondatabase/serverless は接続文字列が
+// 不正なとき、その接続文字列（＝パスワード入り）をメッセージに含めることがある。
+// 調べるための情報はログにだけ出す。
+const serverError = (e) => {
+  console.error("[hansoku]", e && e.stack ? e.stack : String(e));
+  return json({ error: "server-error" }, 500);
+};
+
 /** 合言葉が正しければセッションを発行する。 */
 async function handleLogin(request, env) {
   if (!env.APP_PASSWORD || !env.COOKIE_SECRET) {
@@ -61,7 +69,7 @@ export default {
       try {
         return await handleLogin(request, env);
       } catch (e) {
-        return json({ error: String((e && e.message) || e) }, 500);
+        return serverError(e);
       }
     }
     if (url.pathname === "/logout") {
@@ -92,14 +100,14 @@ export default {
       try {
         return await handleTargets(request, env, me.who);
       } catch (e) {
-        return json({ error: String((e && e.message) || e) }, 500);
+        return serverError(e);
       }
     }
     if (url.pathname === "/api/notes") {
       try {
         return await handleNotes(request, env, me.who);
       } catch (e) {
-        return json({ error: String((e && e.message) || e) }, 500);
+        return serverError(e);
       }
     }
     // 制作物PDF（R2）。Access の内側で同一ドメイン配信する。
@@ -107,7 +115,7 @@ export default {
       try {
         return await handleCreative(url, env);
       } catch (e) {
-        return json({ error: String((e && e.message) || e) }, 500);
+        return serverError(e);
       }
     }
     // それ以外は静的アセット（web/）を返す

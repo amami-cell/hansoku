@@ -2307,6 +2307,84 @@ function storeTargetChip(code) {
     <button class="linkbtn stlink" data-view="cross">横断で見る →</button></div>`;
 }
 
+// ── 店舗詳細の先頭サマリ（店長が5秒で見るもの）──────────────────────
+// 店長が知りたいのは3つだけ: 今月うちはどうか／いまの販促は効いているか／
+// 次に何をするか。以前はこの3つに答える前に、期間合計から始まるKPI6枚と
+// 収益性3枚が並び、「この店の販促」はスマホで約1,200px下にあった。
+//
+// 数字はすべて既存の関数の使い回し。新しい計算はしていない。
+function storeSummary(code) {
+  const last = latestConfirmed(code);
+  const y = yoy(code);
+  const br = budgetRate(code);
+  const pf = storeProfit(code);
+
+  const line = (label, value, tone) =>
+    `<span class="ssm-i"><span class="ssm-l">${label}</span><span class="ssm-v ${tone || ""}">${value}</span></span>`;
+
+  const head = last
+    ? `<div class="ssm-big">${last.m.slice(5)}月の${METRIC_LABELS[METRIC]}
+         <b>${METRIC === "cost_rate" ? pct(last.v) : yen(last.v)}</b></div>`
+    : `<div class="ssm-big muted">締めが終わった月がまだありません</div>`;
+
+  const facts = [
+    y ? line("前年同月比", `${signed(y.pct)}%${y.renewal ? " ⚠" : ""}`,
+             y.renewal ? "" : (y.pct >= 0 ? "up" : "down")) : "",
+    br ? line("予算対比", `${br.rate.toFixed(0)}%`, br.rate >= 100 ? "up" : "down") : "",
+    pf.kt != null ? line("客単価", yen(pf.kt)) : "",
+  ].filter(Boolean).join("");
+
+  // 「今月」の沈黙を埋める。月次データなので当月はまだ出せない、と先に言う。
+  const waiting = `<div class="ssm-note">${CURRENT_MONTH.slice(5)}月ぶんは締め後（翌月上旬）に入ります。${
+    last ? `いま出ているのは ${last.m} までです。` : ""}</div>`;
+
+  // いま動いている販促
+  const live = (DATA.campaigns || [])
+    .filter(c => c.stores.includes(code) && campStatus(c).k === "live");
+  const liveRows = live.slice(0, 4).map(c => {
+    const t = campTargeted(c, code);
+    const v = campVerdict(c);
+    const num = t
+      ? (t.pct != null
+          ? `<span class="${t.pct >= 0 ? "up" : "down"}">${esc(t.label)} ${signed(t.pct)}%</span>`
+          : `<span class="muted">${esc(t.label)} ${man(t.cur)}円</span>`)
+      : `<span class="muted">${campBasis(c) ? "確定待ち" : "測り方が未設定"}</span>`;
+    return `<li data-camp="${c.id}"><span class="kdot" style="--kc:${kindOf(c.kind).color}"></span>
+      <span class="ssm-cn">${esc(c.title)}</span>${num}
+      <span class="ssm-vb ${v.tone}">${v.label}</span></li>`;
+  }).join("");
+
+  // 振り返りが残っているもの（この店ぶんだけ）
+  const needs = (DATA.campaigns || [])
+    .filter(c => c.stores.includes(code) && campStatus(c).k === "done" && needsReview(c));
+
+  // 次にやると効きそうなこと（title= に隠していた数字を本文に出す）
+  const aims = crossTargets().filter(t => t.code === code).slice(0, 2).map(t =>
+    `<li><b>${t.flag}</b><span class="ssm-why">この店 ${Math.round(t.v * 100)}%・同ブランド平均 ${Math.round(t.avg * 100)}%／${esc(t.why)}</span></li>`).join("");
+
+  return `<section class="block ssm">
+    ${head}
+    ${facts ? `<div class="ssm-facts">${facts}</div>` : ""}
+    ${waiting}
+    <div class="ssm-sec">
+      <div class="ssm-h">いま動いている販促 ${live.length}件</div>
+      ${liveRows ? `<ul class="ssm-list">${liveRows}</ul>` : `<p class="muted ssm-empty">実施中の販促はありません</p>`}
+      ${live.length > 4 ? `<button class="linkbtn" data-view="campaigns">ほか ${live.length - 4}件を見る →</button>` : ""}
+    </div>
+    ${needs.length ? `<div class="ssm-sec ssm-todo">
+      <div class="ssm-h">振り返りが ${needs.length}件 残っています</div>
+      <ul class="ssm-list">${needs.slice(0, 3).map(c =>
+        `<li data-camp="${c.id}"><span class="kdot" style="--kc:${kindOf(c.kind).color}"></span>
+          <span class="ssm-cn">${esc(c.title)}</span>
+          <span class="ssm-go">振り返る →</span></li>`).join("")}</ul>
+    </div>` : ""}
+    ${aims ? `<div class="ssm-sec">
+      <div class="ssm-h">次にやると効きそうなこと</div>
+      <ul class="ssm-aims">${aims}</ul>
+    </div>` : ""}
+  </section>`;
+}
+
 function renderStore(code) {
   const s = store(code);
   const months = DATA.months;
@@ -2350,6 +2428,7 @@ function renderStore(code) {
   const isHome = homeStore() === code;
   const homeBtn = `<button class="tbtn homebtn${isHome ? " on" : ""}" data-home="${esc(code)}">${
     isHome ? "★ うちの店（次から最初に開きます）" : "☆ うちの店にする"}</button>`;
+  const homeBtnRow = `<div class="homerow">${homeBtn}</div>`;
   const kpis = `
     <div class="kpis">
       <div class="kpi"><div class="lbl">期間合計（${METRIC_LABELS[METRIC]}）</div>
@@ -2490,12 +2569,15 @@ function renderStore(code) {
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
     <section class="block">
       <div class="shd"><span class="rtag" style="--rc:${color}">${s.region}</span>
-        <h2 class="sname">${s.name}</h2>${s.shared_facility ? '<span class="tagx">共営施設</span>' : ""}
-        ${homeBtn}</div>
-      ${kpis}
-      ${storeTargetChip(code)}
+        <h2 class="sname">${s.name}</h2>${s.shared_facility ? '<span class="tagx">共営施設</span>' : ""}</div>
+      ${homeBtnRow}
     </section>
-    ${renderProfitability(code)}
+    ${storeSummary(code)}
+    <details class="moredet">
+      <summary>詳しい数字をすべて見る</summary>
+      <section class="block">${kpis}${storeTargetChip(code)}</section>
+      ${renderProfitability(code)}
+    </details>
     <section class="block">
       <div class="bhead"><h2>この店の販促</h2>
         <span class="bnote">${myCamps.length}件</span></div>

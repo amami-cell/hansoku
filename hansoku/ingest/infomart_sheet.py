@@ -124,5 +124,9 @@ def ingest(
         raise RuntimeError("インフォマート棚卸の取り込みに取りこぼしがあります:\n" + report.summary())
 
     warehouse.ensure_schema()
-    report.rows_loaded = warehouse.replace_actuals(rows)
+    # 取れた店・取れた指標だけを入れ替える。
+    # 同上。棚卸が一部の店・一部の指標しか取れなかった月に、既存を巻き添えにしない。
+    report.rows_loaded = warehouse.replace_actuals(
+        rows, scope_stores=True, scope_metrics=True
+    )
     return report

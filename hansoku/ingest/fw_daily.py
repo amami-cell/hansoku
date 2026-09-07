@@ -814,9 +814,10 @@ def ingest_hourly(
         print("[時間帯別] dry-run のため書き込みはしません")
         return 1 if skipped else 0
     warehouse.ensure_schema()
-    # 取れた店ぶんだけを入れ替える。店を含めないと、取りこぼした店の既存データまで
-    # 同じ (source, grain, date) に巻き込まれて消える。
-    loaded = warehouse.replace_actuals(collected, scope_stores=True)
+    # 取れた店・取れた指標だけを入れ替える。店を含めないと取りこぼした店の
+    # 既存データが巻き添えで消える。指標を含めないと、ある帯で売上は取れて
+    # 客数が0だったとき（val > 0 でしか行を作らない）既存の客数が消える。
+    loaded = warehouse.replace_actuals(collected, scope_stores=True, scope_metrics=True)
     print(f"[時間帯別] warehouse へ {loaded} 件 書き込みました")
     if not collected:
         print("::error::[時間帯別] 1件も取り込めませんでした")

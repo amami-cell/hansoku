@@ -188,5 +188,11 @@ def ingest(
         raise RuntimeError("FW共有シートの取り込みに取りこぼしがあります:\n" + report.summary())
 
     warehouse.ensure_schema()
-    report.rows_loaded = warehouse.replace_actuals(rows)
+    # 取れた店・取れた指標だけを入れ替える。
+    # 毎日走る主経路。--month 指定が無いと全履歴が削除対象になる。ある月に売上タブ
+    # だけ更新され、他タブがその月ぶん空だと、同じ (source, grain, date) を共有する
+    # 理論原価・仕入・F/D売上・予算が全店ぶん消える。原価率の分子はここから来る。
+    report.rows_loaded = warehouse.replace_actuals(
+        rows, scope_stores=True, scope_metrics=True
+    )
     return report

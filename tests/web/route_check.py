@@ -69,6 +69,30 @@ with sync_playwright() as pw:
     ok("読めないURLは全店に落ちる", pg2.evaluate("() => VIEW.kind") == "schedule", pg2.evaluate("()=>VIEW.kind"))
     pg2.close()
 
+    print("店舗詳細の先頭サマリ（店長が5秒で見るもの）")
+    pg4 = ctx.new_page()
+    pg4.goto(BASE + "#/store/1006", wait_until="networkidle"); pg4.wait_for_timeout(700)
+    html = pg4.content()
+    ok("直近確定月の数字が先頭にある", ".ssm-big" in html or "月の売上" in html)
+    ok("当月がまだ出ない理由を書いている", "締め後" in html)
+    top = pg4.evaluate("() => { const e = document.querySelector('.ssm-sec');"
+                       "  return e ? Math.round(e.getBoundingClientRect().top + window.scrollY) : 99999; }")
+    ok("販促が最初の1画面に近い（1200px下ではない）", top < 900, f"{top}px")
+    ok("細かい数字は畳んである", pg4.evaluate("() => !!document.querySelector('.moredet')"))
+    ok("畳んだ中に期間合計がある",
+       pg4.evaluate("""() => { const d = document.querySelector('.moredet');
+         return !!d && d.textContent.includes('期間合計'); }"""))
+    # サマリの行から施策詳細へ飛べるか（押せる見た目なら押せること）
+    has_row = pg4.evaluate("() => !!document.querySelector('.ssm-list li[data-camp]')")
+    if has_row:
+        pg4.evaluate("() => document.querySelector('.ssm-list li[data-camp]').click()")
+        pg4.wait_for_timeout(400)
+        ok("サマリの行から施策詳細へ飛べる", pg4.evaluate("() => VIEW.kind") == "campaign",
+           pg4.evaluate("()=>VIEW.kind"))
+    else:
+        ok("サマリの行から施策詳細へ飛べる（対象行なし・確認省略）", True)
+    pg4.close()
+
     print("うちの店を覚える")
     pg3 = ctx.new_page()
     pg3.goto(BASE + "#/store/1015", wait_until="networkidle"); pg3.wait_for_timeout(700)

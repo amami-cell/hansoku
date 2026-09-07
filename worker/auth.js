@@ -88,14 +88,21 @@ export const clearCookie = () =>
   `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
 
 /**
- * 誰として扱うかを決める。null なら入れない。
- *   1. Cloudflare Access が残っていればそのメール（記録が正確なので優先）
- *   2. 合言葉のセッション（署名クッキー）
- * 合言葉が未設定なら 2 は成立しない ＝ 誰も入れない（開けっ放しにしない）。
+ * 誰として扱うかを決める。null なら入れない。判断材料は署名クッキーだけ。
+ *
+ * ここで Cf-Access-Authenticated-User-Email を信用してはいけない。
+ * このヘッダは、Cloudflare Access が実際にそのルートを覆っているときだけ
+ * Cloudflare が付けるもので、それ以外では**クライアントが自由に付けられる**。
+ * docs/deploy.md は合言葉方式にあたって Access アプリを削除するよう案内して
+ * いるので、覆いは無い。信用すると
+ *     curl -H 'Cf-Access-Authenticated-User-Email: x@y' <URL>
+ * の1行で合言葉もクッキーも素通りし、全店の売上が見える（実際に再現した）。
+ *
+ * 将来ふたたび Access を前段に置くなら、ヘッダではなく
+ * Cf-Access-Jwt-Assertion を Cloudflare の公開鍵(JWKS)で検証すること。
+ * 検証しないヘッダは、無いのと同じ。
  */
 export async function identify(request, env) {
-  const email = request.headers.get("Cf-Access-Authenticated-User-Email");
-  if (email) return { who: email, via: "access" };
   if (!env.APP_PASSWORD || !env.COOKIE_SECRET) return null;
   const token = readCookie(request.headers.get("cookie"), COOKIE);
   const v = token && (await readToken(env.COOKIE_SECRET, token));

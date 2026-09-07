@@ -83,3 +83,40 @@ class Test冪等性:
         ingest(reader, master, warehouse, year_months={"2026-08"}, strict=False)
         after = warehouse.query("SELECT count(*) c FROM f_actuals")[0]["c"]
         assert after == before
+
+    def test_一部の指標しか取れなくても他の指標を消さない(
+        self, reader, master, warehouse
+    ):
+        """毎日走る主経路。ある月に売上タブだけ更新され、他タブがその月ぶん
+        空になっていると、以前は同じ (source, grain, date) を共有する
+        理論原価・仕入・F/D売上などが全店ぶん黙って消えていた。
+        原価率の分子はここから来るので、消えると画面の原価率が狂う。"""
+        from hansoku.model import METRIC_SALES
+
+        ingest(reader, master, warehouse, year_months={"2026-08"}, strict=False)
+        before = warehouse.query(
+            "SELECT metric, count(*) c FROM f_actuals GROUP BY metric ORDER BY metric"
+        )
+        assert len(before) > 1, "指標が1つしか無いとこのテストは意味を成さない"
+
+        # 売上だけが取れた回を再現する（他の指標は行が0件）
+        rows, _ = build_rows(reader, master, year_months={"2026-08"})
+        sales_only = [r for r in rows if r.metric == METRIC_SALES]
+        assert sales_only
+        warehouse.replace_actuals(sales_only, scope_stores=True, scope_metrics=True)
+
+        after = warehouse.query(
+            "SELECT metric, count(*) c FROM f_actuals GROUP BY metric ORDER BY metric"
+        )
+        assert after == before, "売上だけ入れ直したのに他の指標が変わっている"
+
+    def test_一部の店しか取れなくても他店を消さない(self, reader, master, warehouse):
+        ingest(reader, master, warehouse, year_months={"2026-08"}, strict=False)
+        before = warehouse.query("SELECT count(*) c FROM f_actuals")[0]["c"]
+
+        rows, _ = build_rows(reader, master, year_months={"2026-08"})
+        one = [r for r in rows if r.store_code == rows[0].store_code]
+        warehouse.replace_actuals(one, scope_stores=True, scope_metrics=True)
+
+        after = warehouse.query("SELECT count(*) c FROM f_actuals")[0]["c"]
+        assert after == before, "1店だけ入れ直したのに他店が消えている"

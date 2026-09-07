@@ -132,11 +132,34 @@ await test("合言葉が無ければAPIも止める", async () => {
   assert.equal((await call("/api/targets", {}, NOENV)).status, 401);
 });
 
-console.log("Cloudflare Access が前段に残っている場合");
+console.log("Cloudflare Access のヘッダを騙られても通さない");
 
-await test("Access のメールがあれば合言葉なしでも通る", async () => {
+// このヘッダは Access が前段に無ければクライアントが自由に付けられる。
+// 以前ここを信用しており、curl -H 'Cf-Access-Authenticated-User-Email: x@y' の
+// 1行で全店の売上が見える状態だった。以後この形で固定する。
+await test("ヘッダを偽装しても本編は見られない", async () => {
+  const res = await call("/", { headers: { "Cf-Access-Authenticated-User-Email": "attacker@evil.example" } });
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.get("location"), "/login");
+});
+
+await test("ヘッダを偽装してもAPIは通らない", async () => {
+  const res = await call("/api/targets", { headers: { "Cf-Access-Authenticated-User-Email": "attacker@evil.example" } });
+  assert.equal(res.status, 401);
+});
+
+await test("ヘッダを偽装しても書き込めない", async () => {
+  const res = await call("/api/targets", {
+    method: "POST",
+    headers: { "Cf-Access-Authenticated-User-Email": "attacker@evil.example", "content-type": "application/json" },
+    body: JSON.stringify({ id: "他店の施策@2026", target: 999999999 }),
+  });
+  assert.equal(res.status, 401);
+});
+
+await test("合言葉が未設定なら、ヘッダがあっても全部止まる", async () => {
   const res = await call("/", { headers: { "Cf-Access-Authenticated-User-Email": "amami@8sin.co.jp" } }, NOENV);
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 503);
 });
 
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
