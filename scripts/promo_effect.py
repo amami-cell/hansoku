@@ -1,6 +1,6 @@
-"""GOLD京都ポルタ(1168) の部門「おすすめ」＝夏おすすめ の月次推移。
-売上・構成比・単価（=売上/数量）を直近数ヶ月で並べる。原価が部門で
-取れるかも確認する（取れなければ店単位の原価率を別途出す）。"""
+"""GOLD京都ポルタ(1168) 部門「おすすめ」＝夏おすすめ の月次推移。
+dept_sales: product_name=部門名, product_category=原価率(数値文字列)。
+dept_qty:   product_name=部門名 の数量。→ 売上・構成比・単価・原価率を月次で。"""
 from __future__ import annotations
 import sys
 from datetime import date
@@ -11,57 +11,57 @@ from hansoku.model import GRAIN_MONTH
 from hansoku.settings import load_settings
 
 CODE="1168"
-MONTHS=[(date(2026,m,1), date(2026,m+1,1)) for m in range(3,8)]+[(date(2026,8,1),date(2026,9,1))]
-
-def agg(wh, metric, dfrom, dto, groupby):
-    return wh.aggregate(AggregateQuery(date_from=dfrom, date_to=dto, grain=GRAIN_MONTH,
-        metrics=[metric], store_codes=[CODE], group_by=groupby))
-
-def month_cat(wh, metric):
-    """{('YYYY-MM',cat): value}"""
-    out={}
-    for dfrom,dto in MONTHS:
-        for r in agg(wh, metric, dfrom, dto, ("product_category",)):
-            out[(dfrom.strftime('%Y-%m'), r.get('product_category') or '(無)')]=r['value'] or 0
-    return out
+MONTHS=[(date(2026,m,1),date(2026,m+1,1)) for m in range(3,8)]+[(date(2026,8,1),date(2026,9,1))]
 
 def main():
     s=load_settings()
+    dept={}   # (m, 部門名) -> {sales, rate}
+    qty={}    # (m, 部門名) -> qty
+    tot={}    # m -> 店売上
     with get_warehouse(s) as wh:
-        sales=month_cat(wh,"product_sales")
-        qty=month_cat(wh,"dept_qty")
-        # 店全体の売上（構成比の分母）と原価率（部門で取れるか確認）
-        tot={}
         for dfrom,dto in MONTHS:
-            rows=agg(wh,"sales",dfrom,dto,("store_code",))
-            tot[dfrom.strftime('%Y-%m')]=sum(r['value'] or 0 for r in rows)
+            m=dfrom.strftime('%Y-%m')
+            for r in wh.aggregate(AggregateQuery(date_from=dfrom,date_to=dto,grain=GRAIN_MONTH,
+                    metrics=["dept_sales"],store_codes=[CODE],
+                    group_by=("product_name","product_category"))):
+                nm=r.get("product_name") or "(無)"
+                try: rate=float(r["product_category"]) if r["product_category"] else None
+                except: rate=None
+                e=dept.setdefault((m,nm),{"sales":0.0,"rate":rate})
+                e["sales"]+=r["value"] or 0
+                if rate is not None: e["rate"]=rate
+            for r in wh.aggregate(AggregateQuery(date_from=dfrom,date_to=dto,grain=GRAIN_MONTH,
+                    metrics=["dept_qty"],store_codes=[CODE],group_by=("product_name",))):
+                nm=r.get("product_name") or "(無)"
+                qty[(m,nm)]=qty.get((m,nm),0)+(r["value"] or 0)
+            trows=wh.aggregate(AggregateQuery(date_from=dfrom,date_to=dto,grain=GRAIN_MONTH,
+                    metrics=["sales"],store_codes=[CODE],group_by=("store_code",)))
+            tot[m]=sum(r["value"] or 0 for r in trows)
     months=[d.strftime('%Y-%m') for d,_ in MONTHS]
-    cats=sorted({c for (_,c) in sales})
-    print("# GOLD京都ポルタ(1168) 部門一覧（月×部門の売上）")
-    print("月 \\ 部門:", "／".join(cats))
+    names=sorted({nm for (_,nm) in dept})
+    print("# 1168 部門名一覧（dept_sales の product_name）")
+    print("／".join(names))
+    print()
+    print("# 部門別 月次売上（全部門）")
     for m in months:
-        print(f"- {m}: " + "／".join(f"{c}={sales.get((m,c),0):,.0f}" for c in cats))
+        line=[f"{nm}={dept[(m,nm)]['sales']:,.0f}" for nm in names if (m,nm) in dept and dept[(m,nm)]['sales']]
+        print(f"- {m}（店売上¥{tot[m]:,.0f}）: " + " / ".join(line))
     print()
-    # 「おすすめ」を含む部門を夏おすすめとして抽出
-    osusume=[c for c in cats if "おすすめ" in c or "オススメ" in c or c.startswith("01")]
-    print("## 夏おすすめ部門と判定:", osusume)
+    osu=[nm for nm in names if "おすすめ" in nm or "オススメ" in nm]
+    print("## 「おすすめ」部門:", osu)
     print()
-    print("## おすすめ部門 月次推移（売上／店売上に占める構成比／単価=売上÷数量）")
-    print("| 月 | おすすめ売上 | 店売上 | 構成比 | おすすめ数量 | 単価 |")
+    print("## おすすめ部門 月次推移")
+    print("| 月 | おすすめ売上 | 構成比 | 数量 | 単価 | 原価率 |")
     print("|---|--:|--:|--:|--:|--:|")
     for m in months:
-        osu=sum(sales.get((m,c),0) for c in osusume)
-        q=sum(qty.get((m,c),0) for c in osusume)
-        t=tot.get(m,0)
-        share=f"{osu/t*100:.1f}%" if t else "—"
-        unit=f"¥{osu/q:,.0f}" if q else "—"
-        print(f"| {m} | ¥{osu:,.0f} | ¥{t:,.0f} | {share} | {q:,.0f} | {unit} |")
-    print()
-    # 原価が部門で取れるか（theory_cost を部門で引けるか）確認
-    with get_warehouse(load_settings()) as wh:
-        cost_rows=agg(wh,"food_theory_cost",date(2026,8,1),date(2026,9,1),("product_category",))
-    print("## 部門別の原価(食)を引けるか:", "引ける" if cost_rows else "引けない（原価は店単位のみ）")
-    for r in cost_rows[:5]:
-        print("  ", r.get('product_category'), r['value'])
+        sset_=[(dept[(m,nm)]['sales'], dept[(m,nm)]['rate'], qty.get((m,nm),0)) for nm in osu if (m,nm) in dept]
+        sales=sum(x[0] for x in set_); q=sum(x[2] for x in set_)
+        # 原価率は売上加重
+        rated=[(x[0],x[1]) for x in set_ if x[1] is not None]
+        cr=(sum(a*b for a,b in rated)/sum(a for a,_ in rated)) if rated and sum(a for a,_ in rated) else None
+        share=f"{sales/tot[m]*100:.1f}%" if tot[m] else "—"
+        unit=f"¥{sales/q:,.0f}" if q else "—"
+        crv=f"{cr:.1f}%" if cr is not None else "—"
+        print(f"| {m} | ¥{sales:,.0f} | {share} | {q:,.0f} | {unit} | {crv} |")
     return 0
 raise SystemExit(main())
