@@ -162,9 +162,6 @@ await test("合言葉が未設定なら、ヘッダがあっても全部止ま�
   assert.equal(res.status, 503);
 });
 
-console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
-process.exit(failed ? 1 : 0);
-
 console.log("開放モード（OPEN_ACCESS=1）");
 const OPEN_ENV = { ...ENV, OPEN_ACCESS: "1", ASSETS: ENV.ASSETS };
 
@@ -177,3 +174,20 @@ await test("開放モードを外すと（未設定）またログインへ", as
   const res = await call("/", {}, ENV);
   assert.equal(res.status, 303);
 });
+
+await test("開放モードは閲覧専用：POSTで書き込めない（403）", async () => {
+  const res = await call("/api/targets", { method: "POST", body: JSON.stringify({ id: "x", target: 100 }) }, OPEN_ENV);
+  assert.equal(res.status, 403);
+});
+await test("開放モードは閲覧専用：制作物の削除も止める（403）", async () => {
+  const res = await call("/api/creatives", { method: "DELETE", body: JSON.stringify({ id: "x" }) }, OPEN_ENV);
+  assert.equal(res.status, 403);
+});
+await test("開放モードでもGET（閲覧）は通る", async () => {
+  const res = await call("/api/creatives", {}, OPEN_ENV);
+  // DBが無いテスト環境では 503（no-db）になるが、403（read-only）にはならない＝GETは弾かれていない
+  assert.notEqual(res.status, 403);
+});
+
+console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
+process.exit(failed ? 1 : 0);

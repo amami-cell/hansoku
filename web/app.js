@@ -793,6 +793,12 @@ function render() {
   else if (VIEW.kind === "calendar") app.innerHTML = renderCalendar();
   else app.innerHTML = renderSchedule();
 
+  // 開放モード（閲覧専用）は、書き込み系ボタン（追加/削除/目標/メモ）を丸ごと外す。
+  // サーバも 403 で弾くが、押せるボタンを残さない。
+  if (!WRITE_OK) {
+    app.querySelectorAll("[data-upload],[data-crdel],[data-goal],[data-memo]").forEach(el => el.remove());
+  }
+
   app.querySelectorAll("[data-camp]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "campaign", id: el.dataset.camp }); }));
   app.querySelectorAll("[data-store]").forEach(el =>
@@ -1403,6 +1409,9 @@ const campById = id => (DATA.campaigns || []).find(c => c.id === id) || null;
 // アプリ内アップロードの制作物（/api/creatives）。台帳(yaml)由来と統合して表示する。
 let UPLOADED_CREATIVES = [];
 let CREATIVES_API_OK = false;
+// 書き込み可否。開放モード（ログイン無し公開）は閲覧専用なので、追加/削除/目標/メモの
+// ボタンを出さない（サーバも 403 で弾くが、押せないほうが親切）。
+let WRITE_OK = true;
 async function fetchServerCreatives() {
   try {
     const res = await fetch("/api/creatives", { headers: { accept: "application/json" }, cache: "no-store" });
@@ -1410,6 +1419,7 @@ async function fetchServerCreatives() {
     if (!res.ok || !ct.includes("application/json")) return;   // プレビューはHTML→アップロード不可
     const data = await res.json();
     if (data && Array.isArray(data.creatives)) { UPLOADED_CREATIVES = data.creatives; CREATIVES_API_OK = true; }
+    if (data && data.readonly) WRITE_OK = false;
   } catch (e) { /* API 無し → 台帳ぶんだけ表示 */ }
 }
 const allCreatives = () => (DATA.creatives || []).concat(UPLOADED_CREATIVES);

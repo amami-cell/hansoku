@@ -99,6 +99,13 @@ export default {
       });
     }
 
+    // 開放モード（ログイン無し）は「閲覧専用」。誰でも見られるが、共有データ
+    // （制作物POP・目標・要因メモ）の書き換え・削除・アップロードはさせない。
+    // 書き込みは本人が特定できる入口（合言葉／Access）の内側だけに限る。
+    if (me.via === "open" && url.pathname.startsWith("/api/") && request.method !== "GET") {
+      return json({ error: "read-only", detail: "開放モードは閲覧専用です" }, 403);
+    }
+
     if (url.pathname === "/api/targets") {
       try {
         return await handleTargets(request, env, me.who);
@@ -201,7 +208,8 @@ async function handleCreatives(request, env, who) {
       date: r.doc_date || "", by: r.set_by || "", uploaded: true,
       url: "/" + String(r.r2_key).replace(/^\/+/, ""),
     }));
-    return json({ creatives });
+    // 開放モードは閲覧専用。画面が「追加/削除」ボタンを出さないための目印。
+    return json({ creatives, readonly: who === "オープン" });
   }
 
   if (request.method === "POST") {
