@@ -1,17 +1,17 @@
-店	販促	制作物	期間	driveId	filename
-ルクアLargo	ケーキ	5月ケーキ	2025-05-26〜2025-09-21	1o6PP_HPzdhsFI3xvJuULkkgnYTi7DhNS	LG3_cakePOP_2505.pdf
-ルクアLargo	ケーキ	9月ケーキ	2025-09-22〜2025-11-26	1TANlMtTpgo70RuJsiZZ6yTi3rtjG7XzO	LG3_cakePOP_2509.pdf
-ルクアLargo	ケーキ	クリスマスケーキ	2025-11-27〜2025-12-25	15AGHyNG8bn9hTmhksqdPCAKjQkLIU5b9	LG3_cakePOP_2512.pdf
-ルクアLargo	ケーキ	1月ケーキ	2025-12-26〜2026-01-31	1VqfVjk_5Ddvh4GA4BjwaRyGctHB4sj5B	LG3_cakePOP_2601.pdf
-ルクアLargo	ケーキ	2月ケーキ（バレンタイン）	2026-02-01〜2026-02-14	1j5C5ZWN25JvzarIeOMj92Czft3gOpodm	LG3_cakePOP_2602_valentine.pdf
-ルクアLargo	ケーキ	2月ケーキ	2026-02-15〜2026-03-18	11fzE04SjooUJjqvW-QWeXuB_BpBBbQaL	LG3_cakePOP_2602.pdf
-ルクアLargo	パフェ/ジェラート	3月4月 ショートケーキパフェ・テイクアウトジェラート	2026-03〜2026-04	1P1kwKyjU3X1or9cAda9x5Ei_OmY-cZUj	LG3_scparfait_gelato_2603.pdf
-ルクアLargo	パフェ	5月パフェ ライチ	2025-05-08〜2025-05-31	1UNEgcky507jRu-0sxpcJYfsoZJ_nlEYZ	LG3_parfait_lychee_2505.pdf
-ルクアLargo	パフェ	パフェスノー	2025-06-01〜2025-09-30	1f_954jNK9nMyZNcS1ZrnoSnBS8DbOU0M	LG3_parfait_snow_2506.pdf
-ルクアLargo	パフェ	ハロウィンパフェ・テイクアウトジェラート	2025-09-30〜2025-10-31	1ZgKf_7AnPsDl8a5x1hWyJD6cQUVkw6I6	LG3_parfait_halloween_2510.pdf
-ルクアLargo	パフェ	いちじくパフェ・テイクアウトジェラート	2025-10-31〜2025-12-01	1ufcqRxP-C9dtF62dSWnK3qW4fY1Pi8VL	LG3_parfait_ichijiku_2511.pdf
-ルクアLargo	パフェ	ノエル（クリスマスパフェ）・テイクアウトジェラート	2025-12-02〜2025-12-25	1596EgFaReRc9H2KjxZcmr1ElSEowQBd9	LG3_parfait_noel_2512.pdf
-ルクアLargo	パフェ	みかんパフェ・テイクアウトジェラート	2026-01-02〜2026-02-01	1GxK-KA05Ccta8R3nmxcjas0B9XNTV6Yu	LG3_parfait_mikan_2601.pdf
-ルクアLargo	パフェ	ショートケーキパフェ・テイクアウトジェラート	2026-02-02〜	1BosnHtVbjqL2yOmCM_F5eEJ1YjW_avsh	LG3_parfait_shortcake_2602.pdf
-ルクアLargo	コラボ	白桃パフェDaysコラボ	2025-07-25〜2025-07-27	1IDZI9YT_n2kgpnOP-93Q5J-FF74Z0tT0	LG3_collab_hakuto_2507.pdf
-ルクアLargo	コラボ	くまもとモンコラボ	2025-11-01〜2025-11-30	1eMj4yIvLIHSyrstRJRYsC4JkH7urnvJo	LG3_collab_kumamon_2511.pdf
+店	販促	制作物	期間	driveId	filename	campaign_id
+ルクアLargo	ケーキ	5月ケーキ	2025-05-26〜2025-09-21	1o6PP_HPzdhsFI3xvJuULkkgnYTi7DhNS	LG3_cakePOP_2505.pdf	c1160-cake-2505
+ルクアLargo	ケーキ	9月ケーキ	2025-09-22〜2025-11-26	1TANlMtTpgo70RuJsiZZ6yTi3rtjG7XzO	LG3_cakePOP_2509.pdf	c1160-cake-2509
+ルクアLargo	ケーキ	クリスマスケーキ	2025-11-27〜2025-12-25	15AGHyNG8bn9hTmhksqdPCAKjQkLIU5b9	LG3_cakePOP_2512.pdf	c1160-cake-2512
+ルクアLargo	ケーキ	1月ケーキ	2025-12-26〜2026-01-31	1VqfVjk_5Ddvh4GA4BjwaRyGctHB4sj5B	LG3_cakePOP_2601.pdf	c1160-cake-2601
+ルクアLargo	ケーキ	2月ケーキ（バレンタイン）	2026-02-01〜2026-02-14	1j5C5ZWN25JvzarIeOMj92Czft3gOpodm	LG3_cakePOP_2602_valentine.pdf	c1160-cake-2602v
+ルクアLargo	ケーキ	2月ケーキ	2026-02-15〜2026-03-18	11fzE04SjooUJjqvW-QWeXuB_BpBBbQaL	LG3_cakePOP_2602.pdf	c1160-cake-2602
+ルクアLargo	パフェ/ジェラート	3月4月 ショートケーキパフェ・テイクアウトジェラート	2026-03-01〜2026-04-30	1P1kwKyjU3X1or9cAda9x5Ei_OmY-cZUj	LG3_scparfait_gelato_2603.pdf	c1160-parfait-shortcake
+ルクアLargo	パフェ	5月パフェ ライチ	2025-05-08〜2025-05-31	1UNEgcky507jRu-0sxpcJYfsoZJ_nlEYZ	LG3_parfait_lychee_2505.pdf	c1160-parfait-lychee
+ルクアLargo	パフェ	パフェスノー	2025-06-01〜2025-09-30	1f_954jNK9nMyZNcS1ZrnoSnBS8DbOU0M	LG3_parfait_snow_2506.pdf	c1160-parfait-snow
+ルクアLargo	パフェ	ハロウィンパフェ・テイクアウトジェラート	2025-09-30〜2025-10-31	1ZgKf_7AnPsDl8a5x1hWyJD6cQUVkw6I6	LG3_parfait_halloween_2510.pdf	c1160-parfait-halloween
+ルクアLargo	パフェ	いちじくパフェ・テイクアウトジェラート	2025-10-31〜2025-12-01	1ufcqRxP-C9dtF62dSWnK3qW4fY1Pi8VL	LG3_parfait_ichijiku_2511.pdf	c1160-parfait-ichijiku
+ルクアLargo	パフェ	ノエル（クリスマスパフェ）・テイクアウトジェラート	2025-12-02〜2025-12-25	1596EgFaReRc9H2KjxZcmr1ElSEowQBd9	LG3_parfait_noel_2512.pdf	c1160-parfait-noel
+ルクアLargo	パフェ	みかんパフェ・テイクアウトジェラート	2026-01-02〜2026-02-01	1GxK-KA05Ccta8R3nmxcjas0B9XNTV6Yu	LG3_parfait_mikan_2601.pdf	c1160-parfait-mikan
+ルクアLargo	パフェ	ショートケーキパフェ・テイクアウトジェラート	2026-02-02〜2026-05-07	1BosnHtVbjqL2yOmCM_F5eEJ1YjW_avsh	LG3_parfait_shortcake_2602.pdf	c1160-parfait-shortcake
+ルクアLargo	コラボ	白桃パフェDaysコラボ	2025-07-25〜2025-07-27	1IDZI9YT_n2kgpnOP-93Q5J-FF74Z0tT0	LG3_collab_hakuto_2507.pdf	c1160-collab-hakuto
+ルクアLargo	コラボ	くまもとモンコラボ	2025-11-01〜2025-11-30	1eMj4yIvLIHSyrstRJRYsC4JkH7urnvJo	LG3_collab_kumamon_2511.pdf	c1160-collab-kumamon

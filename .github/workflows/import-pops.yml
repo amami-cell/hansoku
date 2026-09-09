@@ -1,0 +1,30 @@
+name: import-pops
+# config/creatives_inbox.tsv の Drive公開POPを Worker の /api/creatives へ流し込む。
+# ランナーは自由にネットへ出られるので、サンドボックスからは届かない Drive も落とせる。
+on:
+  workflow_dispatch:
+    inputs:
+      worker_base_url:
+        description: "取り込み先の Worker URL"
+        required: false
+        default: "https://hansoku.amami-c1e.workers.dev"
+      store_code:
+        description: "店コード（既定 1160=ルクアLargo）"
+        required: false
+        default: "1160"
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: POPを取り込む
+        env:
+          WORKER_BASE_URL: ${{ github.event.inputs.worker_base_url }}
+          STORE_CODE: ${{ github.event.inputs.store_code }}
+        run: |
+          chmod +x scripts/import_pop_inbox.sh
+          ./scripts/import_pop_inbox.sh
