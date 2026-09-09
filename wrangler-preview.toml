@@ -1,10 +1,23 @@
-# デザイン確認用のプレビュー（認証なし・公開）。
-# 本番と同じ画面（web/）を配るが、Access を付けないので誰でも開ける。
-# データはデプロイ時に本番Neonから生成して web/data に置く。
-# 全店の実データが載る点に注意（確認用。不要になったら wrangler delete で消す）。
+# 公開プレビュー（認証なし・誰でも開ける）。本番 hansoku とは別 Worker で、
+# Cloudflare Access を付けていないので前段のサインインが無い。
+# 本番と同じ Worker コード（/api/* と /creatives/* も動く）＝POP・目標・メモも出る。
+# データはデプロイ時に本番Neonから生成して同梱。全店の実データが載る点に注意。
+# 不要になったら `wrangler delete --name hansoku-preview` で消す。
 name = "hansoku-preview"
+main = "worker/index.js"
 compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
 
 [assets]
 directory = "./web"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
+
+# 制作物（POP）の実体は本番と同じ R2 バケットから返す。
+[[r2_buckets]]
+binding = "CREATIVES"
+bucket_name = "hansoku-creatives"
+
+# 開放モード（ログイン無し）。合言葉もAccessも無しで誰でも入れる。
+[vars]
+OPEN_ACCESS = "1"

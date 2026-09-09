@@ -35,12 +35,17 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           python -m hansoku.cli export-web \
-            --date-from 2025-01-01 --date-to 2026-12-31 --out web/data
+            --date-from 2023-01-01 --date-to 2026-12-31 --out web/data
+
+      - name: 依存（worker用 npm）をインストール
+        run: npm install
 
       - name: Cloudflare へ公開（プレビュー・認証なし）
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          COOKIE_SECRET: ${{ secrets.HANSOKU_COOKIE_SECRET }}
         run: |
           set -o pipefail
           TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]\"'"'")"
@@ -49,4 +54,12 @@ jobs:
           export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT"
           npx wrangler deploy --config wrangler-preview.toml 2>&1 | tee /tmp/wr.log
           url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/wr.log | head -1 || true)
-          [ -n "$url" ] && { echo "## 確認用URL（認証なし）" >> "$GITHUB_STEP_SUMMARY"; echo "**$url**" >> "$GITHUB_STEP_SUMMARY"; }
+          # /api/*（POP一覧・目標・メモ）を動かすため、プレビューWorkerにも DATABASE_URL を入れる
+          if [ -n "$NEON_DATABASE_URL" ]; then
+            printf '%s' "$NEON_DATABASE_URL" | npx wrangler secret put DATABASE_URL --config wrangler-preview.toml 2>&1 | tail -2 || \
+              echo "::warning::preview DATABASE_URL の設定に失敗"
+          fi
+          if [ -n "$COOKIE_SECRET" ]; then
+            printf '%s' "$COOKIE_SECRET" | npx wrangler secret put COOKIE_SECRET --config wrangler-preview.toml 2>&1 | tail -2 || true
+          fi
+          [ -n "$url" ] && { echo "## 公開URL（認証なし）" >> "$GITHUB_STEP_SUMMARY"; echo "**$url**" >> "$GITHUB_STEP_SUMMARY"; }
