@@ -164,3 +164,16 @@ await test("合言葉が未設定なら、ヘッダがあっても全部止ま�
 
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);
+
+console.log("開放モード（OPEN_ACCESS=1）");
+const OPEN_ENV = { ...ENV, OPEN_ACCESS: "1", ASSETS: ENV.ASSETS };
+
+await test("開放モードなら合言葉なしで本編が見られる", async () => {
+  const res = await call("/", {}, OPEN_ENV);
+  assert.equal(res.status, 200);
+  assert.match(await res.text(), /本編/);
+});
+await test("開放モードを外すと（未設定）またログインへ", async () => {
+  const res = await call("/", {}, ENV);
+  assert.equal(res.status, 303);
+});

@@ -24,3 +24,8 @@ not_found_handling = "single-page-application"
 [[r2_buckets]]
 binding = "CREATIVES"
 bucket_name = "hansoku-creatives"
+
+# 開放モード（ログイン無し）。合言葉を外して誰でも入れる。
+#   1 = 開放（全店の実売上がURLだけで見える）／ 消す or "0" = 合言葉ログインに戻す。
+[vars]
+OPEN_ACCESS = "1"

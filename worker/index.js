@@ -80,7 +80,10 @@ export default {
     }
 
     // ここから先は入口の内側。誰として扱うかが決まらなければ通さない。
-    const me = await identify(request, env);
+    // OPEN_ACCESS=1 のときは「開放モード」＝ログイン無しで誰でも入れる（合言葉を外す）。
+    //   ※全店の実売上がURLだけで見えるようになる。戻すときは vars の OPEN_ACCESS を消す。
+    let me = await identify(request, env);
+    if (!me && env.OPEN_ACCESS === "1") me = { who: "オープン", via: "open" };
     if (!me) {
       if (url.pathname.startsWith("/api/")) return json({ error: "unauthenticated" }, 401);
       if (!env.APP_PASSWORD || !env.COOKIE_SECRET) {

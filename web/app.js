@@ -1445,6 +1445,9 @@ function openCreativePreview(url, mime, title) {
       : `<div class="crprev-dl">この形式は小窓で表示できません。<br><a href="${url}" target="_blank" rel="noopener">開く ↗</a></div>`;
   ov.querySelector(".crprev-title").textContent = title || "";
   ov.querySelector(".crprev-open").href = url;
+  ov.querySelector(".crprev-box").classList.remove("crprev-big");
+  // 押したら拡大（もう一度で元に戻す）。画像・PDFとも、携帯/PC共通。
+  body.onclick = () => ov.querySelector(".crprev-box").classList.toggle("crprev-big");
   ov.hidden = false;
 }
 function closeCreativePreview() {
@@ -2606,7 +2609,9 @@ function creativeCard(cr) {
   const k = kindOf(cr.kind);
   const mime = cr.mime || "";
   const isImg = mime.startsWith("image/");
-  const label = mime.includes("pdf") ? "PDF"
+  const isPdf = mime.includes("pdf");
+  const canPreview = isImg || isPdf;   // 画像・PDFは小窓プレビュー、Excel等はボタンで開く/DL
+  const label = isPdf ? "PDF"
     : isImg ? "画像"
     : /spreadsheet|excel|csv/.test(mime) ? "表"
     : ((cr.url || "").split(".").pop() || "資料").toUpperCase().slice(0, 4);
@@ -2619,7 +2624,9 @@ function creativeCard(cr) {
   const view = `data-crurl="${cr.url}" data-crmime="${esc(mime)}" data-crtitle="${esc(cr.title)}"`;
   const thumb = isImg
     ? `<button type="button" class="cthumb cimg" ${view} style="--kc:${k.color}" title="小窓で開く"><img src="${cr.url}" alt="${esc(cr.title)}" loading="lazy"></button>`
-    : `<button type="button" class="cthumb" ${view} style="--kc:${k.color}" title="小窓で開く"><span class="cext">${label}</span></button>`;
+    : canPreview
+      ? `<button type="button" class="cthumb" ${view} style="--kc:${k.color}" title="小窓で開く"><span class="cext">${label}</span></button>`
+      : `<a class="cthumb" href="${cr.url}" target="_blank" rel="noopener" style="--kc:${k.color}" title="開く"><span class="cext">${label}</span></a>`;
   const del = (cr.uploaded && cr.id) ? `<button class="crdel" data-crdel="${cr.id}" title="削除" aria-label="削除">×</button>` : "";
   return `<div class="ccard">
     ${thumb}
@@ -2627,7 +2634,9 @@ function creativeCard(cr) {
       <span class="kchip" style="--kc:${k.color}">${k.label}</span>
       <div class="cctitle">${esc(cr.title)}</div>
       <div class="ccmeta">${esc(meta)}</div>
-      <button type="button" class="pdfbtn" data-crurl="${cr.url}" data-crmime="${esc(mime)}" data-crtitle="${esc(cr.title)}">${label}を開く</button>
+      ${canPreview
+        ? `<button type="button" class="pdfbtn" ${view}>${label}を開く</button>`
+        : `<a class="pdfbtn" href="${cr.url}" target="_blank" rel="noopener" download>${label}を開く ↗</a>`}
     </div>${del}
   </div>`;
 }
