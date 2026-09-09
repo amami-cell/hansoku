@@ -214,6 +214,11 @@ function campStatus(c) {
   if (TODAY > c.end) return { k: "done", label: "終了" };
   return { k: "live", label: "実施中" };
 }
+// 目標数値は「2026年10月分」から運用する。過ぎた（10月前に終わる）施策には
+// 目標を出さない。終了日未定（GM/ランチ変更など継続）は対象に含める。
+const GOAL_START = "2026-10-01";
+const goalEligible = c => !c.end || c.end >= GOAL_START;
+
 // 効果を見る期間の終わり。終了日未定なら「今」まで（＝直近確定月まで見る）。
 const campEndM = c => (c.open_ended ? CURRENT_MONTH : (c.end || c.start).slice(0, 7));
 // 画面に出す期間の文字。終了日未定は「〜 継続中」。
@@ -902,7 +907,7 @@ function actionPanel() {
     .filter(x => campStatus(x.c).k === "soon" && x.d >= 0 && x.d <= 21)
     .sort((a, b) => a.d - b.d).slice(0, 8);
   // 実施中なのに目標が未入力（その場で入れられる）
-  const noGoal = camps.filter(c => campStatus(c).k === "live" && targetOf(c) == null).slice(0, 8);
+  const noGoal = camps.filter(c => campStatus(c).k === "live" && goalEligible(c) && targetOf(c) == null).slice(0, 8);
   // 終了したのに振り返り(要因メモ/次回提案)が未記入＝やりっぱなし
   const review = camps.filter(needsReview).sort((a, b) => a.end < b.end ? 1 : -1).slice(0, 8);
   if (!soon.length && !noGoal.length && !review.length) return "";
@@ -1753,10 +1758,11 @@ function renderCampaign(id) {
   const prog = campTimeProgress(c);
   const isRatio = METRIC === "cost_rate";
 
-  // 目標（進捗欄で編集）
-  const goalBtn = tgt != null
-    ? `<button class="goalbtn" data-goal="${campKey(c)}" title="目標を編集">目標 ${man(tgt)}円 ✎</button>`
-    : `<button class="goalbtn add" data-goal="${campKey(c)}">＋ 目標を入力</button>`;
+  // 目標（進捗欄で編集）。目標は2026年10月分から。過ぎた施策には出さない。
+  const goalBtn = !goalEligible(c) ? ""
+    : tgt != null
+      ? `<button class="goalbtn" data-goal="${campKey(c)}" title="目標を編集">目標 ${man(tgt)}円 ✎</button>`
+      : `<button class="goalbtn add" data-goal="${campKey(c)}">＋ 目標を入力</button>`;
 
   // 全体結果（確定月・全店合算）
   let overall;
@@ -2855,7 +2861,7 @@ function renderStore(code) {
             ? ` ・ 実績(確定) ${man(actual)}円 ・ <span class="${rate >= 100 ? "up" : "down"}">達成 ${rate.toFixed(0)}%</span>`
             : ` ・ <span class="sub">実績は確定月が出てから</span>`;
           goalHtml = `<div class="cgoal">目標 <b>${man(tgt)}円</b>${prog} <button class="goalbtn" data-goal="${campKey(c)}" title="目標を編集">✎</button></div>`;
-        } else {
+        } else if (goalEligible(c)) {
           goalHtml = `<div class="cgoal muted"><button class="goalbtn add" data-goal="${campKey(c)}">＋ 目標を入力</button></div>`;
         }
         // 要因メモ（アプリ内で入力・共有）
