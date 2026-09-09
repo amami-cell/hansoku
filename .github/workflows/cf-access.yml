@@ -1,0 +1,72 @@
+name: cf-access
+# Cloudflare Access（前段SSO）を確認/変更する。
+#   mode=probe  … いまのApplicationとポリシーを一覧（読み取りのみ・既定）
+#   mode=any    … 「everyone を allow」ポリシーを足す＝サインインは残るが“どのアカウントでも”通す（B）
+#   mode=public … 「everyone を bypass」＝サインインも不要の完全公開（A・全店売上が誰でも見える）
+#   mode=delete … Application自体を削除（Workerの開放モードが全員に配信＝Aと同じ）
+# 対象は host に一致する Application。
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "probe / any / public / delete"
+        required: false
+        default: "probe"
+      host:
+        description: "対象ホスト（既定 hansoku.amami-c1e.workers.dev）"
+        required: false
+        default: "hansoku.amami-c1e.workers.dev"
+
+permissions:
+  contents: read
+
+jobs:
+  cf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      MODE: ${{ github.event.inputs.mode }}
+      HOST: ${{ github.event.inputs.host }}
+    steps:
+      - name: Access を確認/変更
+        run: |
+          set -euo pipefail
+          ACCT="$(printf '%s' "$CF_ACCOUNT" | tr -d '[:space:]"'\''')"
+          TOK="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]"'\''')"
+          api() { curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" "$@"; }
+          BASE="https://api.cloudflare.com/client/v4/accounts/$ACCT/access/apps"
+
+          echo "== token 権限確認 =="
+          api "https://api.cloudflare.com/client/v4/user/tokens/verify" | jq '{success, errors}' || true
+
+          echo "== Access Applications 一覧 =="
+          apps="$(api "$BASE?per_page=200")"
+          echo "$apps" | jq -r '.success, (.errors // [])'
+          echo "$apps" | jq -r '.result[]? | "\(.id)\t\(.domain)\t\(.name)"' || true
+
+          APPID="$(echo "$apps" | jq -r --arg h "$HOST" '.result[]? | select((.domain // "")|test($h)) | .id' | head -1)"
+          echo "対象アプリID: ${APPID:-（見つからない）}"
+          [ -z "${APPID:-}" ] && { echo "対象ホストの Access アプリが見つかりませんでした。"; exit 0; }
+
+          echo "== 現在のポリシー =="
+          api "$BASE/$APPID/policies" | jq -r '.result[]? | "\(.id)\t\(.decision)\t\(.name)"' || true
+
+          if [ "$MODE" = "any" ]; then
+            echo "== everyone を allow するポリシーを追加（サインインは残す＝B）=="
+            api -X POST "$BASE/$APPID/policies" \
+              --data '{"name":"allow-any-account","decision":"allow","include":[{"everyone":{}}]}' \
+              | jq '{success, errors, result:{id:.result.id, decision:.result.decision}}'
+            echo "→ 反映まで数十秒。サインインは出るが、どのアカウントでも通れば成功。"
+          elif [ "$MODE" = "public" ]; then
+            echo "== everyone を bypass するポリシーを追加（サインイン不要＝A）=="
+            api -X POST "$BASE/$APPID/policies" \
+              --data '{"name":"public-open","decision":"bypass","include":[{"everyone":{}}]}' \
+              | jq '{success, errors, result:{id:.result.id, decision:.result.decision}}'
+          elif [ "$MODE" = "delete" ]; then
+            echo "== Application を削除（Workerの開放モードが全員に配信）=="
+            api -X DELETE "$BASE/$APPID" | jq '{success, errors}'
+          else
+            echo "probe のみ。変更するなら mode=any（B）/ public（A）/ delete で再実行してください。"
+          fi
