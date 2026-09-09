@@ -8,7 +8,11 @@
 from __future__ import annotations
 
 import os
+import sys
 from datetime import date
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from hansoku.db import get_warehouse
 from hansoku.db.warehouse import AggregateQuery
