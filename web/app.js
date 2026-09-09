@@ -199,6 +199,66 @@ async function editMemo(id) {
   render();
 }
 
+// 販促の手動ステータス（保留/中止/今季なし/完了）。目標・メモと同じく本番=Neon
+// (/api/status)共有、無い所は端末内。空＝自動判定（実施中/予定/終了）に戻す。
+const STATUS_OPTIONS = ["保留", "中止", "今季なし", "完了"];
+let SERVER_STATUS = {};          // id → {value, by, at}
+let LOCAL_STATUS = {};           // id → 値（端末内フォールバック）
+function loadStatus() { try { return JSON.parse(localStorage.getItem("hansoku_status") || "{}"); } catch (e) { return {}; } }
+function saveStatus() { try { localStorage.setItem("hansoku_status", JSON.stringify(LOCAL_STATUS)); } catch (e) { /* 保存不可でも表示は続く */ } }
+async function fetchServerStatus() {
+  try {
+    const res = await fetch("/api/status", { headers: { accept: "application/json" }, cache: "no-store" });
+    const ct = res.headers.get("content-type") || "";
+    if (!res.ok || !ct.includes("application/json")) return;
+    const data = await res.json();
+    if (data && data.status) SERVER_STATUS = data.status;
+  } catch (e) { /* API 無し → 端末内 */ }
+}
+// 手動ステータス（あれば）。無ければ null（＝自動判定を使う）
+function manualStatusOf(c) {
+  if (API_OK) { const s = pickByKey(SERVER_STATUS, c); return s && s.value ? s.value : null; }
+  const v = pickByKey(LOCAL_STATUS, c);
+  return v || null;
+}
+async function editStatus(id) {
+  const c = (DATA.campaigns || []).find(x => campKey(x) === id || x.id === bareId(id));
+  const cur = API_OK
+    ? ((SERVER_STATUS[id] || SERVER_STATUS[bareId(id)] || {}).value || "")
+    : (LOCAL_STATUS[id] || LOCAL_STATUS[bareId(id)] || "");
+  const v = window.prompt(
+    `この販促の手動ステータス（空＝自動に戻す）\n\n次のいずれかを入力: ${STATUS_OPTIONS.join(" / ")}\n`
+    + "※ 実施中/予定/終了は日付から自動で出ます。保留・中止・今季なし・完了 だけ手で設定します。",
+    cur);
+  if (v === null) return;
+  const s = String(v).trim();
+  if (s && !STATUS_OPTIONS.includes(s)) { alert(`「${STATUS_OPTIONS.join("」「")}」のいずれかを入力してください（空で自動に戻す）。`); return; }
+  if (API_OK) {
+    try {
+      const res = await fetch("/api/status", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id, status: s }),
+      });
+      if (res.status === 401 || res.status === 403) { alert("ステータスの保存にはログイン（本番）が必要です。"); return; }
+      if (!res.ok) { alert("ステータスの保存に失敗しました。"); return; }
+      if (!s) delete SERVER_STATUS[id]; else SERVER_STATUS[id] = { value: s, by: "自分", at: new Date().toISOString() };
+    } catch (e) { alert("ステータスの保存に失敗しました（通信エラー）。"); return; }
+  } else {
+    if (!s) delete LOCAL_STATUS[id]; else LOCAL_STATUS[id] = s;
+    saveStatus();
+  }
+  render();
+}
+// ステータス表示＋編集（自動バッジの隣に置く）。手動があれば手動を主に、自動は括弧で添える。
+function statusControl(c, autoLabel, autoKind) {
+  const man = manualStatusOf(c);
+  const badge = man
+    ? `<span class="cstat man">${esc(man)}</span><span class="cstat ${autoKind} sub">${autoLabel}</span>`
+    : `<span class="cstat ${autoKind}">${autoLabel}</span>`;
+  const edit = WRITE_OK ? `<button class="stbtn" data-status="${campKey(c)}" title="ステータスを設定">状態 ✎</button>` : "";
+  return badge + edit;
+}
+
 const CURRENT_MONTH = (() => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -617,8 +677,10 @@ async function boot() {
   YEAR = new Date().getFullYear();
   GOALS = loadGoals();
   NOTES = loadNotes();
+  LOCAL_STATUS = loadStatus();
   await fetchServerTargets();   // 本番は Neon の共有目標を読む。無ければ端末内保存で動く
   await fetchServerNotes();     // 要因メモも同様（本番=共有、無ければ端末内）
+  await fetchServerStatus();    // 手動ステータス（本番=共有、無ければ端末内）
   await fetchServerCreatives(); // アップロード制作物（本番のみ・無ければ台帳ぶんだけ）
   // URL が指定されていればそれに従う。無ければ「うちの店」。それも無ければ全店。
   if (location.hash && location.hash !== "#") {
@@ -798,7 +860,7 @@ function render() {
   // 開放モード（閲覧専用）は、書き込み系ボタン（追加/削除/目標/メモ）を丸ごと外す。
   // サーバも 403 で弾くが、押せるボタンを残さない。
   if (!WRITE_OK) {
-    app.querySelectorAll("[data-upload],[data-crdel],[data-goal],[data-memo]").forEach(el => el.remove());
+    app.querySelectorAll("[data-upload],[data-crdel],[data-goal],[data-memo],[data-status]").forEach(el => el.remove());
   }
 
   app.querySelectorAll("[data-camp]").forEach(el =>
@@ -861,6 +923,8 @@ function render() {
     el.addEventListener("click", e => { e.stopPropagation(); editGoal(el.dataset.goal); }));
   app.querySelectorAll("[data-memo]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); editMemo(el.dataset.memo); }));
+  app.querySelectorAll("[data-status]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); editStatus(el.dataset.status); }));
   app.querySelectorAll("[data-upload]").forEach(el =>
     el.addEventListener("click", e => {
       e.stopPropagation();
@@ -3129,7 +3193,7 @@ function renderStoreMonth(code, m) {
     // 管理者（ログイン済み）はこの月の販促に、その場でPOPを足せる。公開（閲覧専用）では出さない。
     const add = (CREATIVES_API_OK && WRITE_OK) ? `<button class="upbtn sm" data-upload="campaign:${c.id}">＋ POP・資料を追加</button>` : "";
     return `<li data-camp="${c.id}"><span class="kchip" style="--kc:${k.color}">${k.label}</span>
-      <div class="cbody"><div class="ctitle">${esc(c.title)}<span class="cstat ${st.k}">${st.label}</span></div>
+      <div class="cbody"><div class="ctitle">${esc(c.title)}${statusControl(c, st.label, st.k)}</div>
         <div class="cnote">${campRange(c)}</div>${eff}${pops}${add}
         <div class="cgo">販促の詳細 →</div></div></li>`;
   }).join("")}</ul>` : `<div class="empty">この月に走っていた販促はありません。</div>`;
@@ -3381,7 +3445,7 @@ function renderStore(code) {
         return `<li data-camp="${c.id}">
           <span class="kchip" style="--kc:${k.color}">${k.label}</span>
           <div class="cbody">
-            <div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}<span class="cstat ${st.k}">${st.label}</span></div>
+            <div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}${statusControl(c, st.label, st.k)}</div>
             ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
             ${effHtml}
             ${campHeadline(c)}

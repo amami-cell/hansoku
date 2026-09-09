@@ -629,5 +629,36 @@ test("年タブが選べる（実績年＋販促年）", () => {
   assert.ok(html.includes('data-syear="2026"'));
 });
 
+// ── 手動ステータス（保留/中止/今季なし/完了）─────────────────────────────
+console.log("手動ステータス（manualStatusOf / statusControl）");
+
+test("手動ステータス：サーバ値を回ごとに拾う", () => {
+  const c = camp({ id: "c1", start: "2026-01-01" });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  call(ctx, `API_OK = true; SERVER_STATUS = { "c1@2026": { value: "保留" } };`);
+  assert.equal(call(ctx, `manualStatusOf(${JSON.stringify({ ...c, key: "c1@2026" })})`), "保留");
+});
+
+test("手動ステータス：無ければ null（自動判定を使う）", () => {
+  const c = camp({ id: "c2", start: "2026-01-01" });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  call(ctx, `API_OK = true; SERVER_STATUS = {};`);
+  assert.equal(call(ctx, `manualStatusOf(${JSON.stringify({ ...c, key: "c2@2026" })})`), null);
+});
+
+test("statusControl：手動があれば手動バッジ＋自動を小さく、編集ボタンはWRITE_OK時のみ", () => {
+  const c = camp({ id: "c3", start: "2026-01-01" });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  call(ctx, `API_OK = true; WRITE_OK = true; SERVER_STATUS = { "c3@2026": { value: "中止" } };`);
+  const html = call(ctx, `statusControl(${JSON.stringify({ ...c, key: "c3@2026" })}, "実施中", "live")`);
+  assert.ok(html.includes("cstat man") && html.includes("中止"), "手動バッジ");
+  assert.ok(html.includes("実施中"), "自動も添える");
+  assert.ok(html.includes('data-status="c3@2026"'), "編集ボタン");
+  // 閲覧専用では編集ボタンを出さない
+  call(ctx, `WRITE_OK = false;`);
+  const ro = call(ctx, `statusControl(${JSON.stringify({ ...c, key: "c3@2026" })}, "実施中", "live")`);
+  assert.ok(!ro.includes("data-status"), "閲覧専用では編集不可");
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);

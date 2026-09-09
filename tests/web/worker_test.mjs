@@ -189,5 +189,14 @@ await test("開放モードでもGET（閲覧）は通る", async () => {
   assert.notEqual(res.status, 403);
 });
 
+await test("開放モードは閲覧専用：手動ステータスのPOSTも403", async () => {
+  const res = await call("/api/status", { method: "POST", body: JSON.stringify({ id: "x", status: "保留" }) }, OPEN_ENV);
+  assert.equal(res.status, 403);
+});
+await test("ステータスAPIは未ログインだとPOST不可（401）", async () => {
+  const res = await call("/api/status", { method: "POST", headers: { "Cf-Access-Authenticated-User-Email": "a@b" }, body: JSON.stringify({ id: "x", status: "保留" }) });
+  assert.equal(res.status, 401);
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);

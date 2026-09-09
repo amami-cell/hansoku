@@ -120,6 +120,13 @@ export default {
         return serverError(e);
       }
     }
+    if (url.pathname === "/api/status") {
+      try {
+        return await handleStatus(request, env, me.who);
+      } catch (e) {
+        return serverError(e);
+      }
+    }
     if (url.pathname === "/api/creatives") {
       try {
         return await handleCreatives(request, env, me.who);
@@ -177,6 +184,50 @@ async function handleNotes(request, env, who) {
       ON CONFLICT (campaign_id) DO UPDATE
         SET note = EXCLUDED.note, set_by = EXCLUDED.set_by, set_at = now()`;
     return json({ ok: true, id, note, by: email });
+  }
+
+  return json({ error: "method" }, 405);
+}
+
+// 販促の手動ステータス。GET=一覧 / POST {id,status} 保存（空/未許可で削除＝自動に戻す）。
+const STATUS_ALLOWED = ["保留", "中止", "今季なし", "完了"];
+async function handleStatus(request, env, who) {
+  if (!env.DATABASE_URL) return json({ error: "no-db" }, 503);
+  const sql = neon(env.DATABASE_URL);
+
+  if (request.method === "GET") {
+    const rows = await sql`SELECT campaign_id, status, set_by, set_at FROM promo_status`;
+    const status = {};
+    for (const r of rows) {
+      if ((r.status || "").trim()) status[r.campaign_id] = { value: r.status, by: r.set_by, at: r.set_at };
+    }
+    return json({ status });
+  }
+
+  if (request.method === "POST") {
+    const email = who || "";
+    if (!email) return json({ error: "unauthenticated" }, 401);
+
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "bad-json" }, 400);
+    }
+    const id = typeof body.id === "string" ? body.id.slice(0, 128) : "";
+    if (!id) return json({ error: "no-id" }, 400);
+
+    const s = typeof body.status === "string" ? body.status.trim() : "";
+    if (!s || !STATUS_ALLOWED.includes(s)) {
+      await sql`DELETE FROM promo_status WHERE campaign_id = ${id}`;
+      return json({ ok: true, id, status: null });
+    }
+    await sql`
+      INSERT INTO promo_status (campaign_id, status, set_by, set_at)
+      VALUES (${id}, ${s}, ${email}, now())
+      ON CONFLICT (campaign_id) DO UPDATE
+        SET status = EXCLUDED.status, set_by = EXCLUDED.set_by, set_at = now()`;
+    return json({ ok: true, id, status: s, by: email });
   }
 
   return json({ error: "method" }, 405);
