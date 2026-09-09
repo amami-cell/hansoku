@@ -138,6 +138,28 @@ campaigns:
       start: "2026-09-15", end: "2026-10-31",
       note: "FW部門『パフェ』（当店最大）。“パフェスノー”(夏いちご/マンゴー/メロン等)は夏限定のおすすめ→夏のみ計上、春など直近非シーズンは空欄。月次の商品内訳(表示)で季節性がそのまま見えます。" }
 
+  # ── ルクアLargo 2025→2026サイクルの「回」（前年実績＋POPの受け皿）─────────
+  #   ケーキ枠・パフェ枠・コラボ枠を回ごとに。各回のページにPOPを紐づけて貼る。
+  #   数値（出数・売上・構成比）はFWから自動。期間はスプレッドシート/POP由来。
+  # ケーキ枠
+  - { id: c1160-cake-2505, stores: ["1160"], title: 5月ケーキ, kind: dev, bucket: ケーキ, start: "2025-05-26", end: "2025-09-21" }
+  - { id: c1160-cake-2509, stores: ["1160"], title: 9月ケーキ, kind: dev, bucket: ケーキ, start: "2025-09-22", end: "2025-11-26" }
+  - { id: c1160-cake-2512, stores: ["1160"], title: クリスマスケーキ, kind: dev, bucket: ケーキ, start: "2025-11-27", end: "2025-12-25" }
+  - { id: c1160-cake-2601, stores: ["1160"], title: 1月ケーキ, kind: dev, bucket: ケーキ, start: "2025-12-26", end: "2026-01-31" }
+  - { id: c1160-cake-2602v, stores: ["1160"], title: 2月ケーキ（バレンタイン）, kind: dev, bucket: ケーキ, start: "2026-02-01", end: "2026-02-14" }
+  - { id: c1160-cake-2602, stores: ["1160"], title: 2月ケーキ, kind: dev, bucket: ケーキ, start: "2026-02-15", end: "2026-03-18" }
+  # パフェ枠（ショートケーキパフェ→ライチ→パフェスノー→ハロウィン→いちじく→ノエル→みかん）
+  - { id: c1160-parfait-lychee, stores: ["1160"], title: 5月パフェ ライチ, kind: dev, bucket: パフェ, start: "2025-05-08", end: "2025-05-31" }
+  - { id: c1160-parfait-snow, stores: ["1160"], title: パフェスノー（夏限定・4種）, kind: dev, bucket: パフェ, start: "2025-06-01", end: "2025-09-30" }
+  - { id: c1160-parfait-halloween, stores: ["1160"], title: ハロウィンパフェ, kind: dev, bucket: パフェ, start: "2025-09-30", end: "2025-10-31" }
+  - { id: c1160-parfait-ichijiku, stores: ["1160"], title: いちじくパフェ, kind: dev, bucket: パフェ, start: "2025-10-31", end: "2025-12-01" }
+  - { id: c1160-parfait-noel, stores: ["1160"], title: ノエル（クリスマスパフェ）, kind: dev, bucket: パフェ, start: "2025-12-02", end: "2025-12-25" }
+  - { id: c1160-parfait-mikan, stores: ["1160"], title: みかんパフェ, kind: dev, bucket: パフェ, start: "2026-01-02", end: "2026-02-01" }
+  - { id: c1160-parfait-shortcake, stores: ["1160"], title: ショートケーキパフェ, kind: dev, bucket: パフェ, start: "2026-02-02", end: "2026-05-07" }
+  # コラボ枠
+  - { id: c1160-collab-hakuto, stores: ["1160"], title: 白桃パフェDaysコラボ, kind: dev, bucket: パフェ, start: "2025-07-25", end: "2025-07-27", note: 期間限定コラボ }
+  - { id: c1160-collab-kumamon, stores: ["1160"], title: くまもとモンコラボ, kind: dev, bucket: パフェ, start: "2025-11-01", end: "2025-11-30", note: 期間限定コラボ }
+
   # ── 門真Largo（1713）───────────────────────────────
   - { id: r1713-osusume, stores: ["1713"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-11-20" }
   - { id: r1713-fair, stores: ["1713"], title: 秋フェア（エクレア他）, kind: dev, start: "2026-09-01", end: "2026-11-20", note: ドーナツは検討 }
