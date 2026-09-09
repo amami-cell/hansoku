@@ -2911,6 +2911,8 @@ function storeAnnual(code) {
 }
 
 // チャート（帯・ガント）。1年ぶん、販促を期間の帯で並べる。帯クリックで詳細。
+// 上に売上ミニ棒（前年比で色）を月軸に重ね、帯は種類色＋効果判定（◎/△）マーカー付き。
+const VERDICT_MARK = { good: "◎", warn: "△", flat: "" };
 function storeAnnualChart(code, year) {
   const ys = `${year}-01-01`, ye = `${year}-12-31`;
   const camps = (DATA.campaigns || [])
@@ -2918,23 +2920,48 @@ function storeAnnualChart(code, year) {
     .sort((a, b) => a.start < b.start ? -1 : 1);
   const head = Array.from({ length: 12 }, (_, i) =>
     `<button class="gmh" data-smonth="${code}:${year}-${String(i + 1).padStart(2, "0")}">${i + 1}</button>`).join("");
+
+  // 売上ミニ棒（12ヶ月）。高さは年内最大に対する割合、色は前年同月比。
+  const salesArr = Array.from({ length: 12 }, (_, i) => salesAtC(code, `${year}-${String(i + 1).padStart(2, "0")}`));
+  const maxS = Math.max(1, ...salesArr.filter(v => typeof v === "number"));
+  const salesRow = salesArr.map((v, i) => {
+    const m = `${year}-${String(i + 1).padStart(2, "0")}`;
+    if (typeof v !== "number") return `<div class="gscell"></div>`;
+    const yv = salesAtC(code, prevYearM(m));
+    const yoy = (typeof yv === "number" && yv) ? (v / yv - 1) * 100 : null;
+    const cls = yoy == null ? "" : (yoy >= 0 ? " up" : " down");
+    const h = Math.max(6, Math.round(v / maxS * 100));
+    return `<button class="gscell" data-smonth="${code}:${m}" title="${i + 1}月 売上 ${man(v)}円${yoy != null ? `・前年${signed(yoy)}%` : ""}">
+      <span class="gsbar${cls}" style="height:${h}%"></span></button>`;
+  }).join("");
+
   const rows = camps.map(c => {
     const k = kindOf(c.kind), st = campStatus(c);
     const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
     const sM = s < ys ? 1 : +s.slice(5, 7);
     const eM = e > ye ? 12 : +e.slice(5, 7);
     const left = (sM - 1) / 12 * 100, w = Math.max(1, (eM - sM + 1)) / 12 * 100;
+    const mark = VERDICT_MARK[campVerdict(c).tone] || "";
     return `<div class="grow">
-      <button class="glabel" data-camp="${c.id}"><span class="kdot" style="background:${k.color}"></span>${esc(c.title)}</button>
+      <button class="glabel" data-camp="${c.id}"><span class="kdot" style="background:${k.color}"></span>${mark ? `<span class="gvm ${campVerdict(c).tone}">${mark}</span>` : ""}${esc(c.title)}</button>
       <div class="gtrack">
         <button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${k.color}"
           title="${esc(c.title)}｜${campRange(c)}"><span class="gbt">${esc(c.title)}</span></button>
       </div></div>`;
   }).join("");
+
+  // 凡例（その年に出ている種類）
+  const kinds = [...new Set(camps.map(c => c.kind))];
+  const legend = kinds.length
+    ? `<div class="glegend">${kinds.map(kk => `<span class="glg"><i style="background:${kindOf(kk).color}"></i>${kindOf(kk).label}</span>`).join("")}
+        <span class="glg"><i class="gvm good">◎</i>効果あり</span><span class="glg"><i class="gvm warn">△</i>要改善</span></div>`
+    : "";
+
   return `<div class="panel gantt">
     <div class="grow ghead"><div class="glabel gh">販促 / 月</div><div class="gmonths">${head}</div></div>
+    <div class="grow gsales"><div class="glabel gh sub">売上</div><div class="gsrow">${salesRow}</div></div>
     ${camps.length ? rows : `<div class="empty">${year}年に走った販促はありません。</div>`}
-  </div>`;
+  </div>${legend}`;
 }
 
 // カレンダー表＝月を縦に一覧。各月に 予算/売上/集客/客単価 と品目区分の構成比。

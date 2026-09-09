@@ -842,6 +842,20 @@ tbody tr:last-child td{border-bottom:0;}
 .gbar.done{opacity:.6;}
 .gbt{pointer-events:none;}
 .kdot{display:inline-block;width:9px;height:9px;border-radius:999px;flex:0 0 auto;}
+/* 売上ミニ棒（月軸に重ねる） */
+.grow.gsales{min-width:540px;align-items:end;padding:0 0 4px;}
+.glabel.gh.sub{font-weight:600;color:var(--ink-3);align-self:end;}
+.gsrow{display:grid;grid-template-columns:repeat(12,1fr);align-items:end;height:44px;gap:2px;}
+.gscell{display:flex;align-items:flex-end;justify-content:center;height:100%;background:none;border:none;cursor:pointer;padding:0;}
+.gsbar{display:block;width:70%;min-height:3px;background:var(--ink-3);border-radius:3px 3px 0 0;opacity:.55;}
+.gsbar.up{background:var(--good-ink);opacity:.7;} .gsbar.down{background:var(--critical-ink);opacity:.7;}
+.gscell:hover .gsbar{opacity:1;}
+/* 効果判定マーカー・凡例 */
+.gvm{font-size:11px;font-weight:700;margin-right:2px;}
+.gvm.good{color:var(--good-ink);} .gvm.warn{color:var(--warning-ink);}
+.glegend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:11px;color:var(--ink-2);}
+.glg{display:inline-flex;align-items:center;gap:5px;}
+.glg i{width:10px;height:10px;border-radius:3px;display:inline-block;font-style:normal;font-size:11px;line-height:1;}
 /* カレンダー表 */
 .calgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;}
 .ccell{border:1px solid var(--line);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:6px;min-height:72px;}
