@@ -60,6 +60,8 @@ let VIEW = { kind: "schedule" };   // schedule(TOP) | calendar | store,code | li
 let METRIC = "sales";
 let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"）
 let YEAR = null;                   // 年間販促ビューで表示中の年（数値）
+let STORE_YEAR = null;             // 店ページの年間スケジュールで見ている年（文字列 "YYYY"）
+let STORE_ANNUAL_VIEW = "chart";   // 店ページ年間スケジュールの表示（chart=既定 / calendar）
 let CAMP_FILTER = { status: "all", kind: "all" };   // 施策の効果ビューの絞り込み
 // 販促の目標（施策id→円）。本番は Neon（/api/targets）に共有保存、
 // プレビュー等 API が無い所では端末内（localStorage）に保存する。
@@ -807,6 +809,10 @@ function render() {
       const [c, m, cat] = el.dataset.scat.split(":");
       go({ kind: "storecat", code: c, month: m, cat: decodeURIComponent(cat) });
     }));
+  app.querySelectorAll("[data-savw]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); STORE_ANNUAL_VIEW = el.dataset.savw; render(); }));
+  app.querySelectorAll("[data-syear]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); STORE_YEAR = el.dataset.syear; render(); }));
   app.querySelectorAll("[data-lunch]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "lunch", code: el.dataset.lunch }); }));
   app.querySelectorAll("[data-home]").forEach(el =>
@@ -2838,35 +2844,85 @@ function campPrevOccurrence(c) {
 }
 
 // 年間スケジュール（全月をカードで。押すと月の詳細へ）
+// 年間スケジュール本体。チャート（帯・既定）とカレンダー表を切替、年を選べる。
+// 販促（帯・チップ）を押すと販促詳細へ、月を押すと月ドリルへ。
 function storeAnnual(code) {
   const mkeys = Object.keys((DATA.monthly || {})[code] || {});
-  if (!mkeys.length) return "";
-  const mset = new Set(mkeys);
-  const years = [...new Set(mkeys.map(m => m.slice(0, 4)))].sort();
-  const rows = years.map(y => {
-    const cells = [];
-    for (let mo = 1; mo <= 12; mo++) {
-      const m = `${y}-${String(mo).padStart(2, "0")}`;
-      if (!mset.has(m)) { cells.push(`<div class="mcell off"><span class="mm">${mo}月</span></div>`); continue; }
-      const sales = salesAtC(code, m);
-      const yv = salesAtC(code, prevYearM(m));
-      const yoy = (typeof yv === "number" && yv) ? (sales / yv - 1) * 100 : null;
-      const prov = m >= CURRENT_MONTH;
-      const nc = campsInMonth(code, m).length;
-      cells.push(`<button class="mcell${prov ? " prov" : ""}" data-smonth="${code}:${m}">
-        <span class="mm">${mo}月${prov ? "（暫定）" : ""}</span>
-        <span class="mval">${sales != null ? man(sales) + "円" : "―"}</span>
-        ${yoy != null ? `<span class="myoy ${yoy >= 0 ? "up" : "down"}">前年${signed(yoy)}%</span>` : ""}
-        ${nc ? `<span class="mcamp">販促${nc}件</span>` : ""}
-      </button>`);
-    }
-    return `<div class="myear"><div class="mylbl">${y}年</div><div class="mgrid">${cells.join("")}</div></div>`;
-  }).join("");
+  const camps = (DATA.campaigns || []).filter(c => (c.stores || []).includes(code));
+  if (!mkeys.length && !camps.length) return "";
+  // 選べる年 ＝ 実績のある年 ∪ 販促のある年
+  const yset = new Set(mkeys.map(m => m.slice(0, 4)));
+  camps.forEach(c => {
+    const a = +c.start.slice(0, 4), b = +((c.end || c.start).slice(0, 4));
+    for (let y = a; y <= b; y++) yset.add(String(y));
+  });
+  const years = [...yset].sort();
+  const cur = String(STORE_YEAR && years.includes(String(STORE_YEAR)) ? STORE_YEAR : years[years.length - 1]);
+  const view = STORE_ANNUAL_VIEW === "calendar" ? "calendar" : "chart";
+  const yearTabs = years.map(y => `<button class="ytab${y === cur ? " on" : ""}" data-syear="${y}">${y}年</button>`).join("");
+  const toggle = `<div class="viewtabs">
+    <button class="vtab${view === "chart" ? " on" : ""}" data-savw="chart">チャート</button>
+    <button class="vtab${view === "calendar" ? " on" : ""}" data-savw="calendar">カレンダー表</button></div>`;
+  const body = view === "calendar" ? storeAnnualCalendar(code, cur) : storeAnnualChart(code, cur);
   return `<section class="block" id="annual">
     <div class="bhead"><h2>年間スケジュール</h2>
-      <span class="bnote">月を押すと構成比・客単価・集客・その月の販促が出ます</span></div>
-    <div class="panel annual">${rows}</div>
+      <span class="bnote">${view === "chart" ? "帯＝販促期間。押すと販促詳細／月を押すと月の詳細" : "月を押すと月の詳細／販促を押すと詳細"}</span></div>
+    <div class="annualbar">${toggle}<div class="ytabs">${yearTabs}</div></div>
+    ${body}
   </section>`;
+}
+
+// チャート（帯・ガント）。1年ぶん、販促を期間の帯で並べる。帯クリックで詳細。
+function storeAnnualChart(code, year) {
+  const ys = `${year}-01-01`, ye = `${year}-12-31`;
+  const camps = (DATA.campaigns || [])
+    .filter(c => (c.stores || []).includes(code) && c.start.slice(0, 10) <= ye && (c.end || c.start).slice(0, 10) >= ys)
+    .sort((a, b) => a.start < b.start ? -1 : 1);
+  const head = Array.from({ length: 12 }, (_, i) =>
+    `<button class="gmh" data-smonth="${code}:${year}-${String(i + 1).padStart(2, "0")}">${i + 1}</button>`).join("");
+  const rows = camps.map(c => {
+    const k = kindOf(c.kind), st = campStatus(c);
+    const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
+    const sM = s < ys ? 1 : +s.slice(5, 7);
+    const eM = e > ye ? 12 : +e.slice(5, 7);
+    const left = (sM - 1) / 12 * 100, w = Math.max(1, (eM - sM + 1)) / 12 * 100;
+    return `<div class="grow">
+      <button class="glabel" data-camp="${c.id}"><span class="kdot" style="background:${k.color}"></span>${esc(c.title)}</button>
+      <div class="gtrack">
+        <button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${k.color}"
+          title="${esc(c.title)}｜${campRange(c)}"><span class="gbt">${esc(c.title)}</span></button>
+      </div></div>`;
+  }).join("");
+  return `<div class="panel gantt">
+    <div class="grow ghead"><div class="glabel gh">販促 / 月</div><div class="gmonths">${head}</div></div>
+    ${camps.length ? rows : `<div class="empty">${year}年に走った販促はありません。</div>`}
+  </div>`;
+}
+
+// カレンダー表。12ヶ月をマスで並べ、各月に販促チップ（クリックで詳細）と売上・前年比。
+function storeAnnualCalendar(code, year) {
+  const mset = new Set(Object.keys((DATA.monthly || {})[code] || {}));
+  const cells = [];
+  for (let mo = 1; mo <= 12; mo++) {
+    const m = `${year}-${String(mo).padStart(2, "0")}`;
+    const has = mset.has(m);
+    const prov = m >= CURRENT_MONTH;
+    const sales = has ? salesAtC(code, m) : null;
+    const yv = salesAtC(code, prevYearM(m));
+    const yoy = (has && typeof yv === "number" && yv) ? (sales / yv - 1) * 100 : null;
+    const chips = campsInMonth(code, m).map(c => {
+      const k = kindOf(c.kind);
+      return `<button class="pchip" data-camp="${c.id}" style="--kc:${k.color}">${esc(c.title)}</button>`;
+    }).join("");
+    cells.push(`<div class="ccell${has ? "" : " off"}">
+      <button class="cchd"${has ? ` data-smonth="${code}:${m}"` : ""}>
+        <span class="cmn">${mo}月${prov ? "（暫定）" : ""}</span>
+        ${sales != null ? `<span class="csm">${man(sales)}円</span>` : ""}
+        ${yoy != null ? `<span class="myoy ${yoy >= 0 ? "up" : "down"}">${signed(yoy)}%</span>` : ""}</button>
+      <div class="cchips">${chips || '<span class="muted">—</span>'}</div>
+    </div>`);
+  }
+  return `<div class="panel calgrid">${cells.join("")}</div>`;
 }
 
 // 月の詳細（構成比・客単価・集客＋その月の販促）

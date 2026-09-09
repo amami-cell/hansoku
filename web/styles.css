@@ -817,6 +817,40 @@ tbody tr:last-child td{border-bottom:0;}
 .catrow .catgo{font-size:11px;color:var(--accent);white-space:nowrap;}
 .cgrid.mini{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-top:8px;}
 
+/* 年間スケジュール：チャート/カレンダー切替バー */
+.annualbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px;}
+.annualbar .ytabs{display:flex;flex-wrap:wrap;gap:4px;}
+/* チャート（帯・ガント） */
+.gantt{overflow-x:auto;}
+.grow{display:grid;grid-template-columns:160px 1fr;align-items:center;gap:8px;padding:3px 0;}
+.grow.ghead{border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:4px;}
+.glabel{font-size:12px;font-weight:600;color:var(--ink);text-align:left;background:none;border:none;cursor:pointer;
+  display:flex;align-items:center;gap:6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:0;}
+.glabel.gh{font-weight:700;color:var(--ink-3);cursor:default;}
+.glabel:not(.gh):hover{text-decoration:underline;}
+.gtrack{position:relative;height:22px;background:var(--line);border-radius:6px;}
+.gmonths{display:grid;grid-template-columns:repeat(12,1fr);}
+.gmh{font-size:11px;color:var(--ink-3);text-align:center;background:none;border:none;cursor:pointer;padding:2px 0;}
+.gmh:hover{color:var(--accent);text-decoration:underline;}
+.gbar{position:absolute;top:2px;bottom:2px;background:var(--kc);border:none;border-radius:5px;cursor:pointer;
+  color:#fff;font-size:10px;line-height:18px;padding:0 6px;overflow:hidden;white-space:nowrap;min-width:12px;opacity:.92;}
+.gbar:hover{opacity:1;box-shadow:0 1px 6px rgba(0,0,0,.18);}
+.gbar.done{opacity:.6;}
+.gbt{pointer-events:none;}
+.kdot{display:inline-block;width:9px;height:9px;border-radius:999px;flex:0 0 auto;}
+/* カレンダー表 */
+.calgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;}
+.ccell{border:1px solid var(--line);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:6px;min-height:72px;}
+.ccell.off{opacity:.45;border-style:dashed;}
+.cchd{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;background:none;border:none;cursor:pointer;padding:0;text-align:left;}
+.cchd .cmn{font-size:12px;font-weight:700;color:var(--ink);}
+.cchd .csm{font-size:12px;font-weight:600;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+.cchd:hover .cmn{text-decoration:underline;}
+.cchips{display:flex;flex-wrap:wrap;gap:4px;}
+.pchip{font-size:11px;color:#fff;background:var(--kc);border:none;border-radius:6px;padding:2px 7px;cursor:pointer;
+  max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.pchip:hover{opacity:.85;}
+
 /* 販促ターゲット（横断） */
 .crumb{margin-bottom:14px;}
 .muted{color:var(--ink-3);}

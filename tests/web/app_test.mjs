@@ -552,5 +552,49 @@ test("campPrevOccurrence: 同じ区分の前回の回を返す", () => {
   assert.equal(call(ctx, `campPrevOccurrence(${JSON.stringify(camps[0])}).id`), "lychee");
 });
 
+// ── 年間スケジュール（チャート/カレンダー切替・年選択・販促クリック）─────────────
+console.log("年間スケジュール（storeAnnual）");
+
+const annualData = {
+  ...luqa,
+  campaigns: [
+    { id: "snow", stores: ["1160"], scope_all: false, title: "パフェスノー", kind: "dev", bucket: "パフェ", start: "2025-06-01", end: "2025-09-30" },
+    { id: "cake9", stores: ["1160"], scope_all: false, title: "9月ケーキ", kind: "dev", bucket: "ケーキ", start: "2025-09-22", end: "2025-11-26" },
+  ],
+};
+
+test("既定はチャート表示（vtab chart が on）", () => {
+  const ctx = loadApp(annualData);
+  call(ctx, `STORE_ANNUAL_VIEW = "chart"; STORE_YEAR = null;`);
+  const html = call(ctx, `storeAnnual("1160")`);
+  assert.match(html, /data-savw="chart"[^>]*class=|class="vtab on" data-savw="chart"|vtab on" data-savw="chart"/);
+  assert.ok(html.includes('data-savw="chart"') && html.includes('data-savw="calendar"'), "両方の切替がある");
+  assert.ok(html.includes("年間スケジュール"));
+});
+
+test("チャート：販促が帯（data-camp）で出て、月見出しは data-smonth", () => {
+  const ctx = loadApp(annualData);
+  const html = call(ctx, `STORE_YEAR="2025"; storeAnnualChart("1160","2025")`);
+  assert.ok(html.includes('data-camp="snow"'), "パフェスノーの帯");
+  assert.ok(html.includes('data-camp="cake9"'), "9月ケーキの帯");
+  assert.ok(html.includes('data-smonth="1160:2025-09"'), "月見出しから月ドリル");
+});
+
+test("カレンダー表：その月の販促がチップ（data-camp）で出る", () => {
+  const ctx = loadApp(annualData);
+  const html = call(ctx, `storeAnnualCalendar("1160","2025")`);
+  // 9月は パフェスノー と 9月ケーキ が重なる
+  assert.ok(html.includes('data-camp="snow"'));
+  assert.ok(html.includes('data-camp="cake9"'));
+  assert.ok(html.includes('data-smonth="1160:2025-08"'), "月マスから月ドリル");
+});
+
+test("年タブが選べる（実績年＋販促年）", () => {
+  const ctx = loadApp(annualData);
+  const html = call(ctx, `storeAnnual("1160")`);
+  assert.ok(html.includes('data-syear="2025"'));
+  assert.ok(html.includes('data-syear="2026"'));
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);
