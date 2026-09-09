@@ -441,6 +441,8 @@ const PATH_VIEWS = Object.fromEntries(Object.entries(VIEW_PATHS).map(([k, v]) =>
 function viewToHash(v = VIEW) {
   let path = "";
   if (v.kind === "store") path = `store/${encodeURIComponent(v.code)}`;
+  else if (v.kind === "storemonth") path = `store/${encodeURIComponent(v.code)}/${encodeURIComponent(v.month)}`;
+  else if (v.kind === "storecat") path = `store/${encodeURIComponent(v.code)}/${encodeURIComponent(v.month)}/${encodeURIComponent(v.cat)}`;
   else if (v.kind === "lunch") path = `lunch/${encodeURIComponent(v.code)}`;
   else if (v.kind === "campaign") path = `campaign/${encodeURIComponent(v.id)}`;
   else if (v.kind === "year") path = `year/${YEAR}`;
@@ -462,7 +464,10 @@ function hashToView(hash) {
   const q = new URLSearchParams(query || "");
   const metric = q.get("metric");
   if (metric && METRIC_LABELS[metric]) METRIC = metric;
-  const [head, arg] = path.split("/").map(x => (x ? decodeURIComponent(x) : x));
+  const seg = path.split("/").map(x => (x ? decodeURIComponent(x) : x));
+  const [head, arg, arg2, arg3] = seg;
+  if (head === "store" && arg && arg2 && arg3) return { kind: "storecat", code: arg, month: arg2, cat: arg3 };
+  if (head === "store" && arg && arg2) return { kind: "storemonth", code: arg, month: arg2 };
   if (head === "store" && arg) return { kind: "store", code: arg };
   if (head === "lunch" && arg) return { kind: "lunch", code: arg };
   if (head === "campaign" && arg) return { kind: "campaign", id: arg };
@@ -772,6 +777,8 @@ function buildStoreJump() {
 function render() {
   const app = document.getElementById("app");
   if (VIEW.kind === "store") app.innerHTML = renderStore(VIEW.code);
+  else if (VIEW.kind === "storemonth") app.innerHTML = renderStoreMonth(VIEW.code, VIEW.month);
+  else if (VIEW.kind === "storecat") app.innerHTML = renderStoreCat(VIEW.code, VIEW.month, VIEW.cat);
   else if (VIEW.kind === "lunch") app.innerHTML = renderLunch(VIEW.code);
   else if (VIEW.kind === "campaign") app.innerHTML = renderCampaign(VIEW.id);
   else if (VIEW.kind === "manage") app.innerHTML = renderManage();
@@ -788,6 +795,18 @@ function render() {
     el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "campaign", id: el.dataset.camp }); }));
   app.querySelectorAll("[data-store]").forEach(el =>
     el.addEventListener("click", () => go({ kind: "store", code: el.dataset.store })));
+  app.querySelectorAll("[data-smonth]").forEach(el =>
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const [c, m] = el.dataset.smonth.split(":");
+      go({ kind: "storemonth", code: c, month: m });
+    }));
+  app.querySelectorAll("[data-scat]").forEach(el =>
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const [c, m, cat] = el.dataset.scat.split(":");
+      go({ kind: "storecat", code: c, month: m, cat: decodeURIComponent(cat) });
+    }));
   app.querySelectorAll("[data-lunch]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "lunch", code: el.dataset.lunch }); }));
   app.querySelectorAll("[data-home]").forEach(el =>
@@ -1512,6 +1531,52 @@ const deptBucketAtM = (code, m, name) =>
   resolveDept(((DATA.departments_monthly || {})[code] || {})[m], name);
 const prodsAtM = (code, m) => ((DATA.products_monthly || {})[code] || {})[m] || [];
 
+// ── 店の品目区分（config/store_categories.yaml 由来）──────────────────────────
+// FWの部門が粗い店（ルクア=フード/ドリンクのみ）で、商品名から ケーキ/パフェ/
+// ジェラート… に束ね直して売上構成を見る。ルールが無い店は null（従来どおり部門で見る）。
+const catRules = code => (DATA.store_categories || {})[code] || null;
+const hasCats = code => !!((DATA.categories_monthly || {})[code]);
+function classifyCat(name, code) {
+  const r = catRules(code);
+  if (!r) return null;
+  const nm = name || "";
+  for (const c of (r.categories || [])) {
+    for (const kw of (c.keywords || [])) { if (kw && nm.includes(kw)) return c.name; }
+  }
+  return r.other || "その他";
+}
+// その店・その月の区分別構成。焼き込み（categories_monthly）を優先、無ければ商品から都度算出。
+function catsAtM(code, m) {
+  const pre = ((DATA.categories_monthly || {})[code] || {})[m];
+  if (pre && pre.length) return pre;
+  const items = prodsAtM(code, m);
+  const r = catRules(code);
+  if (!items.length || !r) return [];
+  const total = items.reduce((a, p) => a + (p.sales || 0), 0) || 1;
+  const agg = {};
+  for (const p of items) {
+    const c = classifyCat(p.name, code);
+    (agg[c] = agg[c] || { sales: 0, count: 0 });
+    agg[c].sales += p.sales || 0; agg[c].count += 1;
+  }
+  const order = (r.categories || []).map(c => c.name).concat(r.other || "その他");
+  return order.filter(n => agg[n]).map(n => ({
+    name: n, sales: Math.round(agg[n].sales), count: agg[n].count, share: agg[n].sales / total,
+  }));
+}
+const catAtM = (code, m, cat) => catsAtM(code, m).find(c => c.name === cat) || null;
+const prodsInCat = (code, m, cat) => prodsAtM(code, m).filter(p => classifyCat(p.name, code) === cat);
+// 部門（コース/ランチ…）で引けなければ品目区分（パフェ/ケーキ…）で引く統一アクセサ。
+// 施策の効果・構成比を、店に合った粒度で出すために両対応にする。qty は区分では
+// 「出数」ではなく品目数なので、区分由来のときは点数を出さない（null）。
+function bucketOrCatAtM(code, m, name) {
+  const b = deptBucketAtM(code, m, name);
+  if (b) return b;
+  const c = catAtM(code, m, name);
+  if (c) return { name, sales: c.sales, share: c.share, qty: null, count: c.count, viaCategory: true };
+  return null;
+}
+
 // 施策の対象店の書き方。1〜3店なら店名、それ以上は件数。
 // 「1店」とだけ出しても、どの店の施策か分からない。
 function campScopeLabel(c, withData) {
@@ -1576,10 +1641,10 @@ function campTargeted(c, onlyCode, range) {
           .filter(p => basis.items.some(kw => (p.name || "").includes(kw)));
         pv = ph.length ? ph.reduce((a, p) => a + (p.sales || 0), 0) : null;
       } else {
-        const b = deptBucketAtM(code, m, basis.bucket);
+        const b = bucketOrCatAtM(code, m, basis.bucket);
         if (!b) continue;
         v = b.sales;
-        const pb = deptBucketAtM(code, prevYearM(m), basis.bucket);
+        const pb = bucketOrCatAtM(code, prevYearM(m), basis.bucket);
         pv = pb ? pb.sales : null;
       }
       cur += v; months.add(m); stores.add(code);
@@ -1637,12 +1702,12 @@ function campDeptCardMonthly(c) {
   // ① 関連部門の月次（売上・構成比・前年比）
   if (bname) {
     const blocks = c.stores.map(code => {
-      const ms = abcMonths(code).filter(m => deptBucketAtM(code, m, bname)).slice(0, ABC_MONTHS_SHOWN);
+      const ms = abcMonths(code).filter(m => bucketOrCatAtM(code, m, bname)).slice(0, ABC_MONTHS_SHOWN);
       if (!ms.length) return "";
       const rows = ms.map(m => {
-        const b = deptBucketAtM(code, m, bname);
+        const b = bucketOrCatAtM(code, m, bname);
         const share = Math.round((b.share || 0) * 100);
-        const py = deptBucketAtM(code, prevYearM(m), bname);
+        const py = bucketOrCatAtM(code, prevYearM(m), bname);
         const yoy = (py && py.sales)
           ? `<span class="${b.sales >= py.sales ? "up" : "down"}">${signed((b.sales / py.sales - 1) * 100)}%</span>`
           : `<span class="muted">―</span>`;
@@ -1667,7 +1732,7 @@ function campDeptCardMonthly(c) {
     const blocks = c.stores.map(code => {
       const ms = abcMonths(code).slice(0, ABC_MONTHS_SHOWN);
       const monthRows = ms.map(m => {
-        const b = bname ? deptBucketAtM(code, m, bname) : null;
+        const b = bname ? bucketOrCatAtM(code, m, bname) : null;
         const denom = (b && b.sales) ? b.sales : (((DATA.departments_monthly || {})[code] || {})[m] || {}).total_sales || 0;
         const matched = prodsAtM(code, m).filter(p => items.some(kw => (p.name || "").includes(kw)));
         if (!matched.length) return "";
@@ -2747,6 +2812,222 @@ function storeSummary(code) {
   </section>`;
 }
 
+// ── 年間スケジュール → 月 → 品目区分 → 商品 のドリル ─────────────────────────
+// 店ページの主眼。月を押すと構成比・単価・集客とその月の販促、区分を押すと商品詳細。
+const jpMonth = m => { const [y, mo] = m.split("-"); return `${y}年${+mo}月`; };
+const salesAtC = (code, m) => ((DATA.monthly[code] || {})[m] || {}).sales;
+
+// その店・その月に走っている施策（販促期間が月に掛かるもの）。開始日順。
+function campsInMonth(code, m) {
+  return (DATA.campaigns || [])
+    .filter(c => (c.stores || []).includes(code)
+      && c.start.slice(0, 7) <= m && campEndM(c) >= m)
+    .sort((a, b) => a.start < b.start ? -1 : 1);
+}
+// 同じ店・同じ区分（bucket）の“前回の回”。前回比（直近比較）に使う。
+function campPrevOccurrence(c) {
+  const mine = new Set(c.stores || []);
+  const start = c.start;
+  const cands = (DATA.campaigns || []).filter(o =>
+    o.id !== c.id
+    && (o.stores || []).some(x => mine.has(x))
+    && ((c.bucket && o.bucket === c.bucket) || (!c.bucket && o.kind === c.kind))
+    && (o.end || o.start) < start
+  ).sort((a, b) => (a.end || a.start) < (b.end || b.start) ? 1 : -1);
+  return cands[0] || null;
+}
+
+// 年間スケジュール（全月をカードで。押すと月の詳細へ）
+function storeAnnual(code) {
+  const mkeys = Object.keys((DATA.monthly || {})[code] || {});
+  if (!mkeys.length) return "";
+  const mset = new Set(mkeys);
+  const years = [...new Set(mkeys.map(m => m.slice(0, 4)))].sort();
+  const rows = years.map(y => {
+    const cells = [];
+    for (let mo = 1; mo <= 12; mo++) {
+      const m = `${y}-${String(mo).padStart(2, "0")}`;
+      if (!mset.has(m)) { cells.push(`<div class="mcell off"><span class="mm">${mo}月</span></div>`); continue; }
+      const sales = salesAtC(code, m);
+      const yv = salesAtC(code, prevYearM(m));
+      const yoy = (typeof yv === "number" && yv) ? (sales / yv - 1) * 100 : null;
+      const prov = m >= CURRENT_MONTH;
+      const nc = campsInMonth(code, m).length;
+      cells.push(`<button class="mcell${prov ? " prov" : ""}" data-smonth="${code}:${m}">
+        <span class="mm">${mo}月${prov ? "（暫定）" : ""}</span>
+        <span class="mval">${sales != null ? man(sales) + "円" : "―"}</span>
+        ${yoy != null ? `<span class="myoy ${yoy >= 0 ? "up" : "down"}">前年${signed(yoy)}%</span>` : ""}
+        ${nc ? `<span class="mcamp">販促${nc}件</span>` : ""}
+      </button>`);
+    }
+    return `<div class="myear"><div class="mylbl">${y}年</div><div class="mgrid">${cells.join("")}</div></div>`;
+  }).join("");
+  return `<section class="block" id="annual">
+    <div class="bhead"><h2>年間スケジュール</h2>
+      <span class="bnote">月を押すと構成比・客単価・集客・その月の販促が出ます</span></div>
+    <div class="panel annual">${rows}</div>
+  </section>`;
+}
+
+// 月の詳細（構成比・客単価・集客＋その月の販促）
+function renderStoreMonth(code, m) {
+  const s = store(code);
+  const color = regionColor(s.region);
+  const sales = salesAtC(code, m);
+  const cov = coversAt(code, m);
+  const yv = salesAtC(code, prevYearM(m));
+  const pv = salesAtC(code, addMonth(m, -1));
+  const yoy = (typeof yv === "number" && yv) ? (sales / yv - 1) * 100 : null;
+  const mom = (typeof pv === "number" && pv) ? (sales / pv - 1) * 100 : null;
+  const spp = (sales && cov) ? Math.round(sales / cov) : null;
+  const covY = coversAt(code, prevYearM(m));
+  const covYoy = (typeof covY === "number" && covY && cov) ? (cov / covY - 1) * 100 : null;
+  const prov = m >= CURRENT_MONTH;
+
+  // フード/ドリンクの原価率（FW部門）
+  const dm = ((DATA.departments_monthly || {})[code] || {})[m];
+  const crRow = dm && dm.raw ? dm.raw.filter(r => r.cost_rate != null)
+    .map(r => `${esc(r.name)} 原価${r.cost_rate}%`).join("　") : "";
+
+  const kpi = (lbl, big, sub, tone) => `<div class="kpi"><div class="lbl">${lbl}</div>
+    <div class="big ${tone || ""}">${big}</div>${sub ? `<div class="delta">${sub}</div>` : ""}</div>`;
+  const kpis = `<div class="kpis">
+    ${kpi("売上" + (prov ? "（暫定）" : ""), sales != null ? man(sales) + "円" : "―",
+      yoy != null ? `前年 <span class="${yoy >= 0 ? "up" : "down"}">${signed(yoy)}%</span>` : "前年 ―")}
+    ${kpi("集客（客数）", cov != null ? nin(cov) : "―",
+      covYoy != null ? `前年 <span class="${covYoy >= 0 ? "up" : "down"}">${signed(covYoy)}%</span>` : "前年 ―")}
+    ${kpi("客単価", spp != null ? yen(spp) : "―", cov != null ? `${nin(cov)}で割った値` : "")}
+    ${kpi("前月比", mom != null ? signed(mom) + "%" : "―", pv != null ? `前月 ${man(pv)}円` : "前月 ―", mom != null ? (mom >= 0 ? "up" : "down") : "")}
+  </div>${crRow ? `<div class="mcr">${crRow}</div>` : ""}`;
+
+  // 品目区分の構成比（部門名のみ→押すと商品詳細）
+  const cats = catsAtM(code, m);
+  const catTotal = cats.reduce((a, c) => a + c.sales, 0) || 1;
+  const catBlock = cats.length ? `<section class="block">
+    <div class="bhead"><h2>品目区分の構成比</h2><span class="bnote">区分を押すと商品詳細　合計 ${yen(catTotal)}</span></div>
+    <div class="panel"><ul class="dlist">${cats.map(c => {
+      const pctv = Math.round(c.share * 100);
+      const w = Math.max(2, pctv);
+      const py = catAtM(code, prevYearM(m), c.name);
+      const cyoy = (py && py.sales) ? (c.sales / py.sales - 1) * 100 : null;
+      return `<li><button class="catrow" data-scat="${code}:${m}:${encodeURIComponent(c.name)}">
+        <span class="dname">${esc(c.name)}</span>
+        <span class="dbar"><span class="dfill" style="width:${w}%"></span></span>
+        <span class="dpct">${pctv}%</span>
+        <span class="dsales">${yen(c.sales)}</span>
+        <span class="dqty">${c.count}品</span>
+        ${cyoy != null ? `<span class="myoy ${cyoy >= 0 ? "up" : "down"}">${signed(cyoy)}%</span>` : ""}
+        <span class="catgo">商品 →</span></button></li>`;
+    }).join("")}</ul></div></section>`
+    : `<section class="block"><div class="bhead"><h2>品目区分の構成比</h2></div>
+       <div class="empty">この月の商品データ（FW ABC）はまだありません。</div></section>`;
+
+  // その月の販促（複数重なればすべて。期間・売上・構成比・昨対比・POP）
+  const camps = campsInMonth(code, m);
+  const promoBlock = camps.length ? `<ul class="clist">${camps.map(c => {
+    const k = kindOf(c.kind); const st = campStatus(c);
+    const tg = campTargeted(c, code, { from: m, to: m });
+    const share = (tg && tg.cur && sales) ? Math.round(tg.cur / sales * 100) : null;
+    let eff;
+    if (tg && tg.cur) {
+      eff = `<div class="ceff">${esc(tg.label)} <b>${man(tg.cur)}円</b>${share != null ? `・構成比 ${share}%` : ""}${tg.pct != null ? `・<span class="${tg.pct >= 0 ? "up" : "down"}">昨対 ${signed(tg.pct)}%</span>` : ""}</div>`;
+      // 通期の前回比（同じ区分の前回の回と、施策まるごとで比べる）
+      const prevOcc = campPrevOccurrence(c);
+      if (prevOcc) {
+        const a = campTargeted(c), b = campTargeted(prevOcc);
+        if (a && a.cur && b && b.cur) {
+          const d = (a.cur / b.cur - 1) * 100;
+          eff += `<div class="ceff sub2">前回比 <span class="${d >= 0 ? "up" : "down"}">${signed(d)}%</span><span class="sub">（前回 ${esc(prevOcc.title)}｜通期 ${man(b.cur)}→${man(a.cur)}円）</span></div>`;
+        }
+      }
+    } else if (!campBasis(c)) {
+      eff = `<div class="ceff muted">測り方が未設定（対象の区分か商品名を決めると数字が出ます）</div>`;
+    } else {
+      eff = `<div class="ceff muted">この月のこの販促の数値はまだ出ていません</div>`;
+    }
+    const crs = creativesForCampaign(c.id);
+    const pops = crs.length ? `<div class="cgrid mini">${crs.map(creativeCard).join("")}</div>` : "";
+    return `<li data-camp="${c.id}"><span class="kchip" style="--kc:${k.color}">${k.label}</span>
+      <div class="cbody"><div class="ctitle">${esc(c.title)}<span class="cstat ${st.k}">${st.label}</span></div>
+        <div class="cnote">${campRange(c)}</div>${eff}${pops}
+        <div class="cgo">販促の詳細 →</div></div></li>`;
+  }).join("")}</ul>` : `<div class="empty">この月に走っていた販促はありません。</div>`;
+
+  return `
+    <div class="crumbs"><button class="linkbtn" data-store="${code}">← ${esc(s.name)}</button>
+      <button class="linkbtn" data-view="schedule">全店</button></div>
+    <section class="block">
+      <div class="shd"><span class="rtag" style="--rc:${color}">${s.region}</span>
+        <h2 class="sname">${esc(s.name)}　${jpMonth(m)}</h2></div>
+    </section>
+    <section class="block">${kpis}</section>
+    ${catBlock}
+    <section class="block">
+      <div class="bhead"><h2>この月の販促</h2><span class="bnote">${camps.length}件${camps.length > 1 ? "（重なり）" : ""}</span></div>
+      ${promoBlock}
+    </section>`;
+}
+
+// 品目区分の商品詳細（その月・前年比つき）＋関連販促
+function renderStoreCat(code, m, cat) {
+  const s = store(code);
+  const color = regionColor(s.region);
+  const c = catAtM(code, m, cat);
+  const prods = prodsInCat(code, m, cat).slice().sort((a, b) => b.sales - a.sales);
+  const py = catAtM(code, prevYearM(m), cat);
+  const pm = catAtM(code, addMonth(m, -1), cat);
+  const cyoy = (c && py && py.sales) ? (c.sales / py.sales - 1) * 100 : null;
+  const cmom = (c && pm && pm.sales) ? (c.sales / pm.sales - 1) * 100 : null;
+  const sales = salesAtC(code, m);
+  const share = (c && c.sales && sales) ? Math.round(c.sales / sales * 100) : null;
+
+  const prevByName = {};
+  prodsInCat(code, prevYearM(m), cat).forEach(p => { prevByName[p.name] = p.sales; });
+  const rows = prods.map(p => {
+    const yv = prevByName[p.name];
+    const yoy = yv ? (p.sales / yv - 1) * 100 : null;
+    return `<tr><td>${esc(p.name)}</td><td class="num"><b>${yen(p.sales)}</b></td>
+      <td class="num">${p.rank || ""}</td>
+      <td class="num">${yoy != null ? `<span class="${yoy >= 0 ? "up" : "down"}">${signed(yoy)}%</span>` : "―"}</td></tr>`;
+  }).join("");
+
+  const kpi = (lbl, big, sub, tone) => `<div class="kpi"><div class="lbl">${lbl}</div>
+    <div class="big ${tone || ""}">${big}</div>${sub ? `<div class="delta">${sub}</div>` : ""}</div>`;
+  const kpis = `<div class="kpis">
+    ${kpi("売上", c ? man(c.sales) + "円" : "―", share != null ? `店の構成比 ${share}%` : "")}
+    ${kpi("品目数", c ? c.count + "品" : "―", "")}
+    ${kpi("昨対比", cyoy != null ? signed(cyoy) + "%" : "―", py ? `前年 ${man(py.sales)}円` : "前年 ―", cyoy != null ? (cyoy >= 0 ? "up" : "down") : "")}
+    ${kpi("前月比", cmom != null ? signed(cmom) + "%" : "―", pm ? `前月 ${man(pm.sales)}円` : "前月 ―", cmom != null ? (cmom >= 0 ? "up" : "down") : "")}
+  </div>`;
+
+  // この区分に紐づく販促（bucket 一致）で、この月に走っているもの
+  const camps = campsInMonth(code, m).filter(x => x.bucket === cat);
+  const promo = camps.length ? `<ul class="clist">${camps.map(x => {
+    const k = kindOf(x.kind); const st = campStatus(x);
+    const crs = creativesForCampaign(x.id);
+    const pops = crs.length ? `<div class="cgrid mini">${crs.map(creativeCard).join("")}</div>` : "";
+    return `<li data-camp="${x.id}"><span class="kchip" style="--kc:${k.color}">${k.label}</span>
+      <div class="cbody"><div class="ctitle">${esc(x.title)}<span class="cstat ${st.k}">${st.label}</span></div>
+        <div class="cnote">${campRange(x)}</div>${pops}<div class="cgo">販促の詳細 →</div></div></li>`;
+  }).join("")}</ul>` : "";
+
+  return `
+    <div class="crumbs"><button class="linkbtn" data-smonth="${code}:${m}">← ${jpMonth(m)}</button>
+      <button class="linkbtn" data-store="${code}">${esc(s.name)}</button></div>
+    <section class="block">
+      <div class="shd"><span class="rtag" style="--rc:${color}">${esc(cat)}</span>
+        <h2 class="sname">${esc(s.name)}　${jpMonth(m)}　${esc(cat)}</h2></div>
+    </section>
+    <section class="block">${kpis}</section>
+    <section class="block">
+      <div class="bhead"><h2>商品詳細</h2><span class="bnote">${prods.length}品・売上順／前年同月比つき</span></div>
+      ${prods.length ? `<div class="panel"><div class="cdscroll"><table class="cdmon">
+        <thead><tr><th>商品</th><th class="num">売上</th><th class="num">ランク</th><th class="num">前年比</th></tr></thead>
+        <tbody>${rows}</tbody></table></div></div>` : `<div class="empty">この区分の商品はこの月にありません。</div>`}
+    </section>
+    ${promo ? `<section class="block"><div class="bhead"><h2>関連する販促</h2></div>${promo}</section>` : ""}`;
+}
+
 function renderStore(code) {
   const s = store(code);
   const months = DATA.months;
@@ -2938,6 +3219,7 @@ function renderStore(code) {
         <h2 class="sname">${s.name}</h2>${s.shared_facility ? '<span class="tagx">共営施設</span>' : ""}</div>
       ${homeBtnRow}
     </section>
+    ${storeAnnual(code)}
     ${storeSummary(code)}
     <details class="moredet">
       <summary>詳しい数字をすべて見る</summary>

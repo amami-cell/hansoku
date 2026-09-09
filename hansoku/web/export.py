@@ -35,6 +35,8 @@ from ..model import (
 
 # 店舗詳細に出す売れ筋商品の件数
 PRODUCTS_TOP_N = 12
+# 月次シリーズ（施策・品目区分ドリル用）は、区分内の商品を辿れるよう多めに持つ。
+MONTHLY_PRODUCTS_N = 60
 from ..settings import ROOT
 from ..stores import StoreMaster
 
@@ -43,6 +45,67 @@ VALID_KINDS = {"gm", "lunch", "osusume", "bounenkai", "dev", "closure"}
 DEFAULT_SCHEDULE_PATH = ROOT / "config" / "schedule.yaml"
 DEFAULT_CREATIVES_PATH = ROOT / "config" / "creatives.yaml"
 DEFAULT_LUNCH_PATH = ROOT / "config" / "lunch_analysis.json"
+DEFAULT_STORE_CATEGORIES_PATH = ROOT / "config" / "store_categories.yaml"
+
+
+def load_store_categories(path: Path | None = None) -> dict:
+    """人が書く config/store_categories.yaml を読む。無ければ空。
+
+    形: {"店コード": {"name": ..., "other": "その他",
+          "categories": [{"name": ..., "keywords": [...]}, ...]}}
+    FWの部門が粗い店で、商品名から売上構成のカテゴリに束ね直すためのルール。
+    """
+    p = Path(path) if path else DEFAULT_STORE_CATEGORIES_PATH
+    if not p.exists():
+        return {}
+    try:
+        data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+    stores = data.get("stores", {}) if isinstance(data, dict) else {}
+    return stores if isinstance(stores, dict) else {}
+
+
+def classify_category(name: str, rules: dict) -> str:
+    """商品名を、その店の品目区分ルールで1つの区分に割り当てる。先に一致した区分が勝ち。"""
+    nm = name or ""
+    for cat in rules.get("categories", []):
+        for kw in cat.get("keywords", []):
+            if kw and kw in nm:
+                return cat["name"]
+    return rules.get("other", "その他")
+
+
+def _categories_for_month(items: list[dict], rules: dict, total_sales: float) -> list[dict]:
+    """1店・1ヶ月ぶんの商品リストを品目区分に束ねる。売上・構成比・品目数を持つ。
+
+    出数（数量）は商品単位では取れない（FWは商品別に売上のみ）ので品目数（SKU数）を出す。
+    区分の並びは categories の定義順→その他 を末尾に。
+    """
+    order = [c["name"] for c in rules.get("categories", [])]
+    other = rules.get("other", "その他")
+    order.append(other)
+    agg: dict[str, dict] = {}
+    for it in items:
+        cat = classify_category(it.get("name", ""), rules)
+        a = agg.setdefault(cat, {"sales": 0.0, "count": 0})
+        a["sales"] += it.get("sales", 0)
+        a["count"] += 1
+    total = total_sales or sum(a["sales"] for a in agg.values()) or 1.0
+    out = []
+    for name in order:
+        if name not in agg:
+            continue
+        a = agg[name]
+        out.append(
+            {
+                "name": name,
+                "sales": round(a["sales"]),
+                "count": a["count"],
+                "share": round(a["sales"] / total, 4),
+            }
+        )
+    return out
 
 
 def load_lunch(path: Path | None = None) -> list[dict]:
@@ -337,11 +400,18 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
 
 
 def _build_abc_by_month(
-    warehouse: Warehouse, master: StoreMaster, date_from: date, date_to: date
-) -> tuple[dict, dict]:
+    warehouse: Warehouse,
+    master: StoreMaster,
+    date_from: date,
+    date_to: date,
+    store_categories: dict | None = None,
+) -> tuple[dict, dict, dict]:
     """FW ABC（部門・商品）を月ごとに組み立てる。返り値 (departments_monthly,
-    products_monthly)＝各 {店コード: {"YYYY-MM": ...}}。月次で蓄積したABC（毎月取込）を
-    施策詳細で月ごとに並べる／前年同月と比べるために使う。当月分しか無くても成立する。"""
+    products_monthly, categories_monthly)＝各 {店コード: {"YYYY-MM": ...}}。月次で蓄積した
+    ABC（毎月取込）を施策詳細で月ごとに並べる／前年同月と比べるために使う。
+    categories_monthly は店ごとの品目区分（config/store_categories.yaml）で商品を束ねた
+    売上構成。当月分しか無くても成立する。"""
+    store_categories = store_categories or {}
     codes = list(master.active_codes)
     # 部門売上（店×月×部門×原価率）
     dept_raw: dict[str, dict[str, dict[str, dict]]] = {}
@@ -408,11 +478,19 @@ def _build_abc_by_month(
             }
         )
     products_monthly: dict[str, dict[str, list]] = {}
+    categories_monthly: dict[str, dict[str, list]] = {}
     for code, months in prod_tmp.items():
+        rules = store_categories.get(code)
         for m, items in months.items():
             items.sort(key=lambda p: p["sales"], reverse=True)
-            products_monthly.setdefault(code, {})[m] = items[:PRODUCTS_TOP_N]
-    return departments_monthly, products_monthly
+            # 品目区分（店ごとのルールがある店だけ）。全商品で束ねてから売れ筋を切る。
+            if rules:
+                total = sum(p["sales"] for p in items)
+                cats = _categories_for_month(items, rules, total)
+                if cats:
+                    categories_monthly.setdefault(code, {})[m] = cats
+            products_monthly.setdefault(code, {})[m] = items[:MONTHLY_PRODUCTS_N]
+    return departments_monthly, products_monthly, categories_monthly
 
 
 def build(
@@ -558,8 +636,9 @@ def build(
 
     # FW ABC（部門・商品）の月次シリーズ。毎月ABCを取り込むと月ごとに積み上がり、
     # 施策詳細で ケーキ/ジェラート/パフェ・食べ放題・宴会コース を月ごとに並べられる。
-    departments_monthly, products_monthly = _build_abc_by_month(
-        warehouse, master, date_from, date_to
+    store_categories = load_store_categories()
+    departments_monthly, products_monthly, categories_monthly = _build_abc_by_month(
+        warehouse, master, date_from, date_to, store_categories
     )
 
     # 店舗詳細の「部門構成」「売れ筋商品」は “直近1ヶ月” を名乗る表なので、月次
@@ -651,6 +730,11 @@ def build(
         # 商品/部門を「1ヵ月毎」に並べ、前年同月と比べるのに使う。空でも画面は成立する。
         "departments_monthly": departments_monthly,
         "products_monthly": products_monthly,
+        # 店ごとの品目区分（config/store_categories.yaml 由来）。ルクア等 FW部門が粗い店で
+        # 商品名から ケーキ/パフェ/ジェラート… に束ねた月次の売上構成。空でも画面は成立する。
+        "categories_monthly": categories_monthly,
+        # 品目区分ルール本体（画面が商品→区分を引き直すのに使う）。
+        "store_categories": store_categories,
         # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
         "campaigns": campaigns or [],
         # 制作物ギャラリー（config/creatives.yaml 由来）。空でも画面は成立する。

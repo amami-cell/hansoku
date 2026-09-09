@@ -399,9 +399,6 @@ test("行ごとに対象月を持つ（店で直近確定月が違う）", () =>
   assert.equal(by["1015"].kt, 4000);
 });
 
-console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
-process.exit(failed ? 1 : 0);
-
 // ── 制作物カード（多形式・アップロード統合）──────────────────────────────
 test("制作物カード：画像はサムネ、PDFは種別バッジ、Excelは表バッジ", () => {
   const ctx = loadApp({ ...base, campaigns: [] });
@@ -428,3 +425,132 @@ test("制作物：台帳とアップロードを統合して施策/店に出す"
   const store = call(ctx, `creativesFor("1160").length`);
   assert.ok(store >= 2, "店にも施策経由＋直付けで出る");
 });
+
+// ── 品目区分ドリル（店ページ 年間→月→区分→商品）───────────────────────────
+console.log("品目区分ドリル（categories / storemonth / storecat）");
+
+const luqa = {
+  ...base,
+  months: ["2024-08", "2025-08", "2026-08"],
+  stores: [{ code: "1160", name: "ルクアLargo", region: "大阪", neighbors: [] }],
+  monthly: { 1160: { "2025-08": { sales: 9000000 }, "2026-08": { sales: 10000000 } } },
+  covers: { 1160: { "2025-08": 18000, "2026-08": 20000 } },
+  store_categories: {
+    1160: {
+      name: "ルクアLargo", other: "その他",
+      categories: [
+        { name: "コラボ", keywords: ["コラボ", "くまモン", "白桃Days"] },
+        { name: "ジェラート", keywords: ["ジェラート"] },
+        { name: "パフェ", keywords: ["パフェ", "スノー", "サンデー"] },
+        { name: "ケーキ", keywords: ["ケーキ", "フレジェ", "タルト"] },
+        { name: "ドリンク", keywords: ["ラテ", "カフェ"] },
+      ],
+    },
+  },
+  categories_monthly: {
+    1160: {
+      "2025-08": [
+        { name: "パフェ", sales: 4000000, count: 4, share: 0.5 },
+        { name: "ケーキ", sales: 2000000, count: 3, share: 0.25 },
+      ],
+      "2026-08": [
+        { name: "パフェ", sales: 5000000, count: 4, share: 0.5 },
+        { name: "ケーキ", sales: 2500000, count: 3, share: 0.25 },
+      ],
+    },
+  },
+  products_monthly: {
+    1160: {
+      "2025-08": [
+        { name: "マンゴーのパフェスノー", sales: 1400000, rank: "A" },
+        { name: "苺とピスタチオのフレジェ", sales: 900000, rank: "A" },
+        { name: "TOジェラートダブル", sales: 300000, rank: "A" },
+        { name: "カフェラテ", sales: 150000, rank: "B" },
+      ],
+      "2026-08": [
+        { name: "マンゴーのパフェスノー", sales: 1541280, rank: "A" },
+        { name: "メロンのパフェスノー", sales: 1094800, rank: "A" },
+        { name: "苺とピスタチオのフレジェ", sales: 1032300, rank: "A" },
+        { name: "TOジェラートダブル", sales: 444000, rank: "A" },
+        { name: "カフェラテ", sales: 170280, rank: "B" },
+        { name: "謎の新商品", sales: 5000, rank: "C" },
+      ],
+    },
+  },
+};
+
+test("classifyCat: 商品名を区分に割り当てる（先に一致した区分が勝ち）", () => {
+  const ctx = loadApp(luqa);
+  assert.equal(call(ctx, `classifyCat("マンゴーのパフェスノー","1160")`), "パフェ");
+  assert.equal(call(ctx, `classifyCat("苺とピスタチオのフレジェ","1160")`), "ケーキ");
+  assert.equal(call(ctx, `classifyCat("TOジェラートダブル","1160")`), "ジェラート");
+  assert.equal(call(ctx, `classifyCat("謎の新商品","1160")`), "その他");
+  // ルールの無い店は null（従来どおり部門で見る）
+  assert.equal(call(ctx, `classifyCat("何か","1006")`), null);
+});
+
+test("catsAtM: 焼き込み（categories_monthly）を優先して返す", () => {
+  const ctx = loadApp(luqa);
+  const cats = call(ctx, `catsAtM("1160","2026-08")`);
+  assert.equal(cats[0].name, "パフェ");
+  assert.equal(cats[0].sales, 5000000);
+});
+
+test("catsAtM: 焼き込みが無い月は商品から都度算出する", () => {
+  const noBake = { ...luqa, categories_monthly: { 1160: {} } };
+  const ctx = loadApp(noBake);
+  const cats = call(ctx, `catsAtM("1160","2026-08")`);
+  const pafe = cats.find(c => c.name === "パフェ");
+  // パフェスノー2種の合算
+  assert.equal(pafe.sales, 1541280 + 1094800);
+  assert.equal(pafe.count, 2);
+  const other = cats.find(c => c.name === "その他");
+  assert.equal(other.sales, 5000);
+});
+
+test("prodsInCat: その区分の商品だけを返す", () => {
+  const ctx = loadApp(luqa);
+  const ps = call(ctx, `prodsInCat("1160","2026-08","パフェ").map(p=>p.name).sort().join("|")`);
+  assert.equal(ps, ["マンゴーのパフェスノー", "メロンのパフェスノー"].sort().join("|"));
+});
+
+test("bucketOrCatAtM: 部門で引けなければ区分で引く（qtyは出数でないのでnull）", () => {
+  const ctx = loadApp(luqa);
+  const b = call(ctx, `bucketOrCatAtM("1160","2026-08","パフェ")`);
+  assert.equal(b.sales, 5000000);
+  assert.equal(b.qty, null);
+  assert.equal(b.viaCategory, true);
+});
+
+test("campTargeted: bucket=パフェ が区分で解決し昨対比が出る", () => {
+  const c = { id: "c1160-p", stores: ["1160"], scope_all: false, title: "夏パフェ", kind: "dev", bucket: "パフェ", items: [], start: "2026-08-01", end: "2026-08-31" };
+  const ctx = loadApp({ ...luqa, campaigns: [c] });
+  const t = call(ctx, `campTargeted(${JSON.stringify(c)})`);
+  assert.equal(t.cur, 5000000);
+  assert.equal(t.prev, 4000000);
+  assert.equal(Math.round(t.pct), 25);
+});
+
+test("campsInMonth: その月に走っている施策を拾う（重なりも）", () => {
+  const camps = [
+    { id: "a", stores: ["1160"], scope_all: false, title: "パフェスノー", kind: "dev", bucket: "パフェ", start: "2025-06-01", end: "2025-09-30" },
+    { id: "b", stores: ["1160"], scope_all: false, title: "9月ケーキ", kind: "dev", bucket: "ケーキ", start: "2025-09-22", end: "2025-11-26" },
+    { id: "c", stores: ["1160"], scope_all: false, title: "冬", kind: "dev", bucket: "ケーキ", start: "2025-12-01", end: "2025-12-31" },
+  ];
+  const ctx = loadApp({ ...luqa, campaigns: camps });
+  const ids = call(ctx, `campsInMonth("1160","2025-09").map(c=>c.id).sort().join(",")`);
+  assert.equal(ids, "a,b");
+});
+
+test("campPrevOccurrence: 同じ区分の前回の回を返す", () => {
+  const camps = [
+    { id: "snow", stores: ["1160"], scope_all: false, title: "パフェスノー", kind: "dev", bucket: "パフェ", start: "2025-06-01", end: "2025-09-30" },
+    { id: "lychee", stores: ["1160"], scope_all: false, title: "ライチ", kind: "dev", bucket: "パフェ", start: "2025-05-08", end: "2025-05-31" },
+    { id: "cake", stores: ["1160"], scope_all: false, title: "ケーキ", kind: "dev", bucket: "ケーキ", start: "2025-05-26", end: "2025-09-21" },
+  ];
+  const ctx = loadApp({ ...luqa, campaigns: camps });
+  assert.equal(call(ctx, `campPrevOccurrence(${JSON.stringify(camps[0])}).id`), "lychee");
+});
+
+console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
+process.exit(failed ? 1 : 0);
