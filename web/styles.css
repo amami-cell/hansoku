@@ -854,6 +854,60 @@ tbody tr:last-child td{border-bottom:0;}
 .pchip{font-size:11px;color:#fff;background:var(--kc);border:none;border-radius:6px;padding:3px 8px;cursor:pointer;
   max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
 .pchip:hover{opacity:.85;}
+/* カレンダー＝月の縦一覧（情報一覧化・その場で開閉） */
+.mlist{display:flex;flex-direction:column;gap:8px;}
+.mrow{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);}
+.mrow.off{opacity:.5;}
+.mhd{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;width:100%;text-align:left;
+  background:none;border:none;cursor:pointer;padding:11px 13px;}
+.mhd.on{background:var(--accent-soft);}
+.mhd[disabled],.mrow.off .mhd{cursor:default;}
+.mhm{font-size:14px;font-weight:700;color:var(--ink);white-space:nowrap;display:flex;align-items:center;gap:6px;}
+.mhc{font-size:10px;font-weight:600;color:#fff;background:var(--accent);border-radius:6px;padding:1px 6px;}
+.mstats{display:flex;flex-wrap:wrap;gap:6px 16px;margin-left:auto;font-variant-numeric:tabular-nums;}
+.mstat{display:flex;align-items:baseline;gap:5px;}
+.msl{font-size:10.5px;color:var(--ink-3);}
+.msv{font-size:14px;font-weight:700;color:var(--ink);}
+.msx{font-size:11px;font-weight:600;}
+.msx.up{color:var(--good-ink);} .msx.down{color:var(--critical-ink);}
+.mbody{padding:4px 13px 13px;border-top:1px solid var(--line);}
+.mcats{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;}
+.mcatrow{display:flex;align-items:center;gap:10px;width:100%;background:none;border:none;cursor:pointer;
+  padding:7px 4px;text-align:left;font-variant-numeric:tabular-nums;border-radius:8px;min-height:36px;}
+.mcatrow:hover{background:var(--surface-2);}
+.mcatrow.on{background:var(--accent-soft);}
+.mcn{flex:0 0 96px;font-size:13px;font-weight:700;color:var(--ink);}
+.mcbar{flex:1 1 40px;height:8px;background:var(--line);border-radius:999px;overflow:hidden;min-width:30px;}
+.mcfill{display:block;height:100%;background:var(--accent);border-radius:999px;}
+.mcp{flex:0 0 auto;font-size:12px;color:var(--ink-2);min-width:34px;text-align:right;}
+.mcs{flex:0 0 auto;font-size:12px;font-weight:600;color:var(--ink);min-width:66px;text-align:right;}
+.mprods{list-style:none;margin:2px 0 8px;padding:6px 6px 6px 18px;display:flex;flex-direction:column;gap:3px;
+  border-left:2px solid var(--accent-line);}
+.mprods li{display:flex;justify-content:space-between;gap:10px;font-size:12px;color:var(--ink-2);}
+.mprods .mpn{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.mprods .mps{flex:0 0 auto;font-variant-numeric:tabular-nums;color:var(--ink);}
+.mcatsempty{font-size:12px;padding:8px 4px;}
+.mchips{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px;}
+.mdet{display:inline-block;margin-top:12px;font-size:13px;font-weight:600;}
+/* 月詳細の月ナビ（←・選択月・→・ピッカー） */
+.mnav{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;position:relative;}
+.mnavb{font:inherit;font-size:16px;font-weight:700;color:var(--accent);background:var(--accent-soft);
+  border:1px solid var(--accent-line);border-radius:9px;width:44px;height:40px;cursor:pointer;}
+.mnavb[disabled]{opacity:.35;cursor:default;}
+.mnavc{font:inherit;font-size:15px;font-weight:700;color:var(--ink);background:var(--surface);
+  border:1px solid var(--line-strong);border-radius:9px;padding:0 14px;height:40px;cursor:pointer;}
+.mnavc:hover{border-color:var(--accent);}
+.mpick{position:absolute;top:46px;left:0;right:0;z-index:20;background:var(--surface);border:1px solid var(--line-strong);
+  border-radius:12px;padding:8px;display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px;
+  box-shadow:0 6px 24px rgba(0,0,0,.18);max-height:320px;overflow:auto;}
+.mpk{font:inherit;font-size:12px;color:var(--ink);background:var(--surface-2);border:1px solid var(--line);
+  border-radius:8px;padding:8px 6px;cursor:pointer;}
+.mpk:hover{border-color:var(--accent);}
+.mpk.on{background:var(--accent);color:#fff;border-color:var(--accent);}
+@media (max-width:560px){
+  .mstats{width:100%;margin-left:0;justify-content:space-between;gap:6px 10px;}
+  .mhm{width:100%;}
+}
 /* 指で押す端末では帯・月見出し・チップのタップ域を広げる */
 @media (pointer:coarse){
   .gbar{min-height:28px;line-height:24px;}

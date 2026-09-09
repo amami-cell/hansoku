@@ -557,6 +557,8 @@ console.log("年間スケジュール（storeAnnual）");
 
 const annualData = {
   ...luqa,
+  monthly: { 1160: { "2025-08": { sales: 9000000 }, "2025-09": { sales: 8500000 }, "2026-08": { sales: 10000000 } } },
+  covers: { 1160: { "2025-08": 18000, "2025-09": 17000, "2026-08": 20000 } },
   campaigns: [
     { id: "snow", stores: ["1160"], scope_all: false, title: "パフェスノー", kind: "dev", bucket: "パフェ", start: "2025-06-01", end: "2025-09-30" },
     { id: "cake9", stores: ["1160"], scope_all: false, title: "9月ケーキ", kind: "dev", bucket: "ケーキ", start: "2025-09-22", end: "2025-11-26" },
@@ -580,13 +582,44 @@ test("チャート：販促が帯（data-camp）で出て、月見出しは data
   assert.ok(html.includes('data-smonth="1160:2025-09"'), "月見出しから月ドリル");
 });
 
-test("カレンダー表：その月の販促がチップ（data-camp）で出る", () => {
+test("カレンダー一覧：月は開閉式（既定は畳んで data-mtoggle）", () => {
   const ctx = loadApp(annualData);
+  call(ctx, `ANNUAL_OPEN = {};`);
   const html = call(ctx, `storeAnnualCalendar("1160","2025")`);
-  // 9月は パフェスノー と 9月ケーキ が重なる
-  assert.ok(html.includes('data-camp="snow"'));
-  assert.ok(html.includes('data-camp="cake9"'));
-  assert.ok(html.includes('data-smonth="1160:2025-08"'), "月マスから月ドリル");
+  assert.ok(html.includes('data-mtoggle="1160:2025-09"'), "月の開閉トグル");
+  assert.ok(html.includes("予算") && html.includes("客単価"), "予算・客単価の見出し");
+  assert.ok(!html.includes('data-camp="snow"'), "畳んでいる間は販促チップを出さない");
+});
+
+test("カレンダー一覧：月を開くと販促チップ（data-camp）と詳細リンクが出る", () => {
+  const ctx = loadApp(annualData);
+  call(ctx, `ANNUAL_OPEN = {"1160:2025-09": true};`);
+  const html = call(ctx, `storeAnnualCalendar("1160","2025")`);
+  assert.ok(html.includes('data-camp="snow"'), "パフェスノー");
+  assert.ok(html.includes('data-camp="cake9"'), "9月ケーキ");
+  assert.ok(html.includes('data-smonth="1160:2025-09"'), "この月の詳細→");
+});
+
+test("カレンダー一覧：区分データのある月を開くと区分トグルが出る", () => {
+  const ctx = loadApp(annualData);
+  call(ctx, `ANNUAL_OPEN = {"1160:2026-08": true};`);
+  const html = call(ctx, `storeAnnualCalendar("1160","2026")`);
+  assert.ok(html.includes('data-cattoggle="1160:2026-08:'), "区分の開閉トグル");
+  // さらにパフェ区分を開くと商品が並ぶ
+  call(ctx, `ANNUAL_OPEN = {"1160:2026-08": true, "1160:2026-08:パフェ": true};`);
+  const html2 = call(ctx, `storeAnnualCalendar("1160","2026")`);
+  assert.ok(html2.includes("マンゴーのパフェスノー"), "パフェの商品一覧が展開");
+});
+
+test("月ナビ：前月/次月と月ピッカーが出る", () => {
+  const ctx = loadApp(annualData);
+  call(ctx, `MONTH_PICK_OPEN = false;`);
+  const nav = call(ctx, `storeMonthNav("1160","2026-08")`);
+  assert.ok(nav.includes('data-smonth="1160:2025-09"'), "前月（実績のある直前の月）へ");
+  assert.ok(nav.includes("data-mpick"), "月ピッカーのトグル");
+  call(ctx, `MONTH_PICK_OPEN = true;`);
+  const nav2 = call(ctx, `storeMonthNav("1160","2026-08")`);
+  assert.ok(nav2.includes("mpick"), "ピッカー展開");
 });
 
 test("年タブが選べる（実績年＋販促年）", () => {

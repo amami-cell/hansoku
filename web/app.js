@@ -62,6 +62,8 @@ let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"
 let YEAR = null;                   // 年間販促ビューで表示中の年（数値）
 let STORE_YEAR = null;             // 店ページの年間スケジュールで見ている年（文字列 "YYYY"）
 let STORE_ANNUAL_VIEW = "chart";   // 店ページ年間スケジュールの表示（chart=既定 / calendar）
+let ANNUAL_OPEN = {};              // カレンダー一覧の開閉状態（"code:month" と "code:month:区分" を鍵に）
+let MONTH_PICK_OPEN = false;       // 月詳細の月ピッカーを開いているか
 let CAMP_FILTER = { status: "all", kind: "all" };   // 施策の効果ビューの絞り込み
 // 販促の目標（施策id→円）。本番は Neon（/api/targets）に共有保存、
 // プレビュー等 API が無い所では端末内（localStorage）に保存する。
@@ -806,9 +808,28 @@ function render() {
   app.querySelectorAll("[data-smonth]").forEach(el =>
     el.addEventListener("click", e => {
       e.stopPropagation();
+      MONTH_PICK_OPEN = false;   // 月を移動したらピッカーは閉じる
       const [c, m] = el.dataset.smonth.split(":");
       go({ kind: "storemonth", code: c, month: m });
     }));
+  // カレンダー一覧の月・区分の開閉、月詳細の月ピッカー（いずれもページ遷移せず開閉）
+  app.querySelectorAll("[data-mtoggle]").forEach(el =>
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const k = el.dataset.mtoggle;
+      if (ANNUAL_OPEN[k]) delete ANNUAL_OPEN[k]; else ANNUAL_OPEN[k] = true;
+      render();
+    }));
+  app.querySelectorAll("[data-cattoggle]").forEach(el =>
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const parts = el.dataset.cattoggle.split(":");
+      const k = `${parts[0]}:${parts[1]}:${decodeURIComponent(parts.slice(2).join(":"))}`;
+      if (ANNUAL_OPEN[k]) delete ANNUAL_OPEN[k]; else ANNUAL_OPEN[k] = true;
+      render();
+    }));
+  app.querySelectorAll("[data-mpick]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); MONTH_PICK_OPEN = !MONTH_PICK_OPEN; render(); }));
   app.querySelectorAll("[data-scat]").forEach(el =>
     el.addEventListener("click", e => {
       e.stopPropagation();
@@ -2883,7 +2904,7 @@ function storeAnnual(code) {
   const body = view === "calendar" ? storeAnnualCalendar(code, cur) : storeAnnualChart(code, cur);
   return `<section class="block" id="annual">
     <div class="bhead"><h2>年間スケジュール</h2>
-      <span class="bnote">${view === "chart" ? "帯＝販促期間。押すと販促詳細／月を押すと月の詳細" : "月を押すと月の詳細／販促を押すと詳細"}</span></div>
+      <span class="bnote">${view === "chart" ? "帯＝販促期間。押すと販促詳細／月を押すと月の詳細" : "月を押すと予算・売上・集客・客単価・区分構成比が開く／区分を押すと商品一覧"}</span></div>
     <div class="annualbar">${toggle}<div class="ytabs">${yearTabs}</div></div>
     ${body}
   </section>`;
@@ -2916,30 +2937,88 @@ function storeAnnualChart(code, year) {
   </div>`;
 }
 
-// カレンダー表。12ヶ月をマスで並べ、各月に販促チップ（クリックで詳細）と売上・前年比。
+// カレンダー表＝月を縦に一覧。各月に 予算/売上/集客/客単価 と品目区分の構成比。
+// 月を押すと開閉。区分（例ジェラート）を押すとその場で商品一覧を開閉（ページ遷移なし）。
+// 「この月の詳細→」で構成比・販促・POPのフルページへ。
 function storeAnnualCalendar(code, year) {
   const mset = new Set(Object.keys((DATA.monthly || {})[code] || {}));
-  const cells = [];
+  const stat = (lbl, val, extra) =>
+    `<span class="mstat"><span class="msl">${lbl}</span><span class="msv">${val}</span>${extra || ""}</span>`;
+  const rows = [];
   for (let mo = 1; mo <= 12; mo++) {
     const m = `${year}-${String(mo).padStart(2, "0")}`;
     const has = mset.has(m);
     const prov = m >= CURRENT_MONTH;
     const sales = has ? salesAtC(code, m) : null;
+    const bud = budgetAt(code, m);
+    const cov = coversAt(code, m);
+    const spp = (sales && cov) ? Math.round(sales / cov) : null;
     const yv = salesAtC(code, prevYearM(m));
     const yoy = (has && typeof yv === "number" && yv) ? (sales / yv - 1) * 100 : null;
-    const chips = campsInMonth(code, m).map(c => {
-      const k = kindOf(c.kind);
-      return `<button class="pchip" data-camp="${c.id}" style="--kc:${k.color}">${esc(c.title)}</button>`;
-    }).join("");
-    cells.push(`<div class="ccell${has ? "" : " off"}">
-      <button class="cchd"${has ? ` data-smonth="${code}:${m}"` : ""}>
-        <span class="cmn">${mo}月${prov ? "（暫定）" : ""}</span>
-        ${sales != null ? `<span class="csm">${man(sales)}円</span>` : ""}
-        ${yoy != null ? `<span class="myoy ${yoy >= 0 ? "up" : "down"}">${signed(yoy)}%</span>` : ""}</button>
-      <div class="cchips">${chips || '<span class="muted">—</span>'}</div>
-    </div>`);
+    const budRate = (sales && bud) ? Math.round(sales / bud * 100) : null;
+    const open = !!ANNUAL_OPEN[`${code}:${m}`];
+    const camps = campsInMonth(code, m);
+
+    const head = `<button class="mhd${open ? " on" : ""}"${has ? ` data-mtoggle="${code}:${m}"` : ""}>
+      <span class="mhm">${has ? (open ? "▾" : "▸") + " " : ""}${mo}月${prov ? "（暫定）" : ""}${camps.length ? `<span class="mhc">販促${camps.length}</span>` : ""}</span>
+      <span class="mstats">
+        ${stat("予算", bud != null ? man(bud) + "円" : "―", budRate != null ? `<span class="msx ${budRate >= 100 ? "up" : "down"}">${budRate}%</span>` : "")}
+        ${stat("売上", sales != null ? man(sales) + "円" : "―", yoy != null ? `<span class="msx ${yoy >= 0 ? "up" : "down"}">前年${signed(yoy)}%</span>` : "")}
+        ${stat("集客", cov != null ? nin(cov) : "―")}
+        ${stat("客単価", spp != null ? yen(spp) : "―")}
+      </span></button>`;
+
+    let body = "";
+    if (open) {
+      const cats = has ? catsAtM(code, m) : [];
+      const catList = cats.length ? `<ul class="mcats">${cats.map(c => {
+        const pctv = Math.round(c.share * 100);
+        const co = !!ANNUAL_OPEN[`${code}:${m}:${c.name}`];
+        const py = catAtM(code, prevYearM(m), c.name);
+        const cyoy = (py && py.sales) ? (c.sales / py.sales - 1) * 100 : null;
+        let prodRows = "";
+        if (co) {
+          const prods = prodsInCat(code, m, c.name).slice().sort((a, b) => b.sales - a.sales);
+          prodRows = `<ul class="mprods">${prods.length ? prods.map(p =>
+            `<li><span class="mpn">${esc(p.name)}</span><span class="mps">${yen(p.sales)}${p.rank ? `・${p.rank}` : ""}</span></li>`).join("")
+            : '<li class="muted">この月の商品はありません</li>'}</ul>`;
+        }
+        return `<li>
+          <button class="mcatrow${co ? " on" : ""}" data-cattoggle="${code}:${m}:${encodeURIComponent(c.name)}">
+            <span class="mcn">${co ? "▾" : "▸"} ${esc(c.name)}</span>
+            <span class="mcbar"><span class="mcfill" style="width:${Math.max(2, pctv)}%"></span></span>
+            <span class="mcp">${pctv}%</span><span class="mcs">${yen(c.sales)}</span>
+            ${cyoy != null ? `<span class="msx ${cyoy >= 0 ? "up" : "down"}">${signed(cyoy)}%</span>` : ""}
+          </button>${prodRows}</li>`;
+      }).join("")}</ul>` : (has ? `<div class="muted mcatsempty">この月の商品データ（FW ABC）はまだありません。</div>` : "");
+      const chips = camps.length
+        ? `<div class="mchips">${camps.map(c => `<button class="pchip" data-camp="${c.id}" style="--kc:${kindOf(c.kind).color}" title="${esc(campRange(c))}">${esc(c.title)}</button>`).join("")}</div>` : "";
+      body = `<div class="mbody">
+        ${catList}
+        ${chips}
+        ${has ? `<button class="linkbtn mdet" data-smonth="${code}:${m}">この月の詳細（構成比・販促・POP）→</button>` : ""}
+      </div>`;
+    }
+    rows.push(`<div class="mrow${has ? "" : " off"}">${head}${body}</div>`);
   }
-  return `<div class="panel calgrid">${cells.join("")}</div>`;
+  return `<div class="panel mlist">${rows.join("")}</div>`;
+}
+
+// 月詳細の月ナビ（← 前月／選択中の月▾／次月 →）。中央を押すと月ピッカーを開閉。
+function storeMonthNav(code, m) {
+  const all = Object.keys((DATA.monthly || {})[code] || {}).sort();
+  const i = all.indexOf(m);
+  const prev = i > 0 ? all[i - 1] : null;
+  const next = (i >= 0 && i < all.length - 1) ? all[i + 1] : null;
+  const pick = MONTH_PICK_OPEN
+    ? `<div class="mpick">${all.slice().reverse().map(x =>
+        `<button class="mpk${x === m ? " on" : ""}" data-smonth="${code}:${x}">${jpMonth(x)}</button>`).join("")}</div>`
+    : "";
+  return `<div class="mnav">
+    <button class="mnavb"${prev ? ` data-smonth="${code}:${prev}"` : " disabled"}>←</button>
+    <button class="mnavc" data-mpick="1">${jpMonth(m)} ▾</button>
+    <button class="mnavb"${next ? ` data-smonth="${code}:${next}"` : " disabled"}>→</button>
+    ${pick}</div>`;
 }
 
 // 月の詳細（構成比・客単価・集客＋その月の販促）
@@ -3034,6 +3113,7 @@ function renderStoreMonth(code, m) {
     <section class="block">
       <div class="shd"><span class="rtag" style="--rc:${color}">${s.region}</span>
         <h2 class="sname">${esc(s.name)}　${jpMonth(m)}</h2></div>
+      ${storeMonthNav(code, m)}
     </section>
     <section class="block">${kpis}</section>
     ${catBlock}
