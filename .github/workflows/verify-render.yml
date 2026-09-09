@@ -1,0 +1,42 @@
+name: verify-render
+# 実データで export → app.js のスケジュール一覧を生成し、売上等が出るか確認（読み取りのみ）。
+on:
+  workflow_dispatch:
+    inputs:
+      store:
+        description: "店コード（既定 1160）"
+        required: false
+        default: "1160"
+      year:
+        description: "年（既定 2026）"
+        required: false
+        default: "2026"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 依存をインストール
+        run: pip install -r requirements.txt
+      - name: 実データを書き出す
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python -m hansoku.cli export-web --date-from 2023-01-01 --date-to 2026-12-31 --out web/data
+      - name: 一覧の生成結果を出す
+        env:
+          STORE: ${{ github.event.inputs.store }}
+          YEAR: ${{ github.event.inputs.year }}
+        run: node scripts/render_check.mjs | tee -a "$GITHUB_STEP_SUMMARY"
