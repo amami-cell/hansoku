@@ -200,13 +200,15 @@ async function handleCreatives(request, env, who) {
 
   if (request.method === "GET") {
     const rows = await sql`
-      SELECT id, campaign_id, store_code, title, kind, r2_key, mime, doc_date, set_by, set_at
+      SELECT id, campaign_id, store_code, title, kind, r2_key, mime, doc_date, set_by, set_at, thumb_key
       FROM promo_creatives ORDER BY doc_date DESC NULLS LAST, set_at DESC`;
     const creatives = rows.map((r) => ({
       id: r.id, campaign_id: r.campaign_id || "", store_code: r.store_code || "",
       title: r.title, kind: r.kind || "dev", mime: r.mime || "",
       date: r.doc_date || "", by: r.set_by || "", uploaded: true,
       url: "/" + String(r.r2_key).replace(/^\/+/, ""),
+      // PDFの1ページ目サムネ（あれば）。スマホでも小窓に出せる。
+      thumb: r.thumb_key ? "/" + String(r.thumb_key).replace(/^\/+/, "") : "",
     }));
     // 開放モードは閲覧専用。画面が「追加/削除」ボタンを出さないための目印。
     return json({ creatives, readonly: who === "オープン" });

@@ -849,7 +849,7 @@ function render() {
   app.querySelectorAll("[data-crdel]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); deleteCreative(el.dataset.crdel); }));
   app.querySelectorAll("[data-crurl]").forEach(el =>
-    el.addEventListener("click", e => { e.stopPropagation(); openCreativePreview(el.dataset.crurl, el.dataset.crmime, el.dataset.crtitle); }));
+    el.addEventListener("click", e => { e.stopPropagation(); openCreativePreview(el.dataset.crurl, el.dataset.crmime, el.dataset.crtitle, el.dataset.cropen); }));
   app.querySelectorAll("[data-cfilter]").forEach(el =>
     el.addEventListener("click", () => {
       const [dim, val] = el.dataset.cfilter.split(":");
@@ -1453,7 +1453,7 @@ async function uploadCreative(file, campaign, store) {
   } catch (e) { alert("アップロードに失敗しました（通信エラー）。"); }
 }
 // アップロードした画像・PDFを、別タブに飛ばずアプリ内の小窓で見る。
-function openCreativePreview(url, mime, title) {
+function openCreativePreview(url, mime, title, openUrl) {
   let ov = document.getElementById("crprev");
   if (!ov) {
     ov = document.createElement("div");
@@ -1479,7 +1479,8 @@ function openCreativePreview(url, mime, title) {
       ? `<iframe src="${url}" title="${esc(title || "資料")}"></iframe>`
       : `<div class="crprev-dl">この形式は小窓で表示できません。<br><a href="${url}" target="_blank" rel="noopener">開く ↗</a></div>`;
   ov.querySelector(".crprev-title").textContent = title || "";
-  ov.querySelector(".crprev-open").href = url;
+  // 「別タブ↗」は実体（PDFサムネのときは元PDF）を開く。
+  ov.querySelector(".crprev-open").href = openUrl || url;
   ov.querySelector(".crprev-box").classList.remove("crprev-big");
   // 押したら拡大（もう一度で元に戻す）。画像・PDFとも、携帯/PC共通。
   body.onclick = () => ov.querySelector(".crprev-box").classList.toggle("crprev-big");
@@ -2701,10 +2702,16 @@ function creativeCard(cr) {
     cr.campaign_title ? "施策: " + cr.campaign_title : "",
     cr.uploaded ? ("追加" + (cr.by ? "・" + cr.by : "")) : (cr.scope_all ? "全店" : ((cr.stores || []).length ? cr.stores.length + "店" : "")),
   ].filter(Boolean).join("　·　");
-  // 同一ドメイン（ログイン内）/creatives/… から配信。画像はサムネ表示、他は種別バッジ。
-  const view = `data-crurl="${cr.url}" data-crmime="${esc(mime)}" data-crtitle="${esc(cr.title)}"`;
-  const thumb = isImg
-    ? `<button type="button" class="cthumb cimg" ${view} style="--kc:${k.color}" title="小窓で開く"><img src="${cr.url}" alt="${esc(cr.title)}" loading="lazy"></button>`
+  // PDFは1ページ目のサムネ画像（cr.thumb）があれば、画像として小窓表示する。
+  // iframeのPDFはスマホで真っ白になるため。実体PDFは「別タブ↗」で開けるようにする。
+  const hasThumb = isPdf && cr.thumb;
+  const showImg = isImg || hasThumb;
+  const pvUrl = hasThumb ? cr.thumb : cr.url;
+  const pvMime = hasThumb ? "image/png" : mime;
+  // 同一ドメイン（ログイン内）/creatives/… から配信。画像／PDFサムネはサムネ表示、他は種別バッジ。
+  const view = `data-crurl="${pvUrl}" data-crmime="${esc(pvMime)}" data-crtitle="${esc(cr.title)}" data-cropen="${cr.url}"`;
+  const thumb = showImg
+    ? `<button type="button" class="cthumb cimg" ${view} style="--kc:${k.color}" title="小窓で開く"><img src="${pvUrl}" alt="${esc(cr.title)}" loading="lazy"></button>`
     : canPreview
       ? `<button type="button" class="cthumb" ${view} style="--kc:${k.color}" title="小窓で開く"><span class="cext">${label}</span></button>`
       : `<a class="cthumb" href="${cr.url}" target="_blank" rel="noopener" style="--kc:${k.color}" title="開く"><span class="cext">${label}</span></a>`;
