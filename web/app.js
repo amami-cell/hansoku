@@ -3013,9 +3013,11 @@ function renderStoreMonth(code, m) {
     }
     const crs = creativesForCampaign(c.id);
     const pops = crs.length ? `<div class="cgrid mini">${crs.map(creativeCard).join("")}</div>` : "";
+    // 管理者（ログイン済み）はこの月の販促に、その場でPOPを足せる。公開（閲覧専用）では出さない。
+    const add = (CREATIVES_API_OK && WRITE_OK) ? `<button class="upbtn sm" data-upload="campaign:${c.id}">＋ POP・資料を追加</button>` : "";
     return `<li data-camp="${c.id}"><span class="kchip" style="--kc:${k.color}">${k.label}</span>
       <div class="cbody"><div class="ctitle">${esc(c.title)}<span class="cstat ${st.k}">${st.label}</span></div>
-        <div class="cnote">${campRange(c)}</div>${eff}${pops}
+        <div class="cnote">${campRange(c)}</div>${eff}${pops}${add}
         <div class="cgo">販促の詳細 →</div></div></li>`;
   }).join("")}</ul>` : `<div class="empty">この月に走っていた販促はありません。</div>`;
 
