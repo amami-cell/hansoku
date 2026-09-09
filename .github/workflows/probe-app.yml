@@ -1,0 +1,30 @@
+name: probe-app
+# デプロイ済みURLがランナーから見て何を返すか確認する（入口の正体を突き止める）。
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "確認するURL"
+        required: false
+        default: "https://hansoku.amami-c1e.workers.dev/"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      URL: ${{ github.event.inputs.url }}
+    steps:
+      - name: GET / を確認
+        run: |
+          set -uo pipefail
+          echo "== ヘッダ（リダイレクト追わず）=="
+          curl -sS -D - -o /tmp/body.html "$URL" -w "\nHTTP=%{http_code} redirect=%{redirect_url}\n" | sed -n '1,40p'
+          echo "== 本文の先頭 =="
+          head -c 900 /tmp/body.html; echo
+          echo; echo "== /api/creatives =="
+          curl -sS -D - -o /tmp/api.txt "${URL%/}/api/creatives" -w "\nHTTP=%{http_code} redirect=%{redirect_url}\n" | sed -n '1,25p'
+          head -c 400 /tmp/api.txt; echo
