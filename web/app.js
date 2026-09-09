@@ -605,6 +605,7 @@ async function boot() {
   NOTES = loadNotes();
   await fetchServerTargets();   // 本番は Neon の共有目標を読む。無ければ端末内保存で動く
   await fetchServerNotes();     // 要因メモも同様（本番=共有、無ければ端末内）
+  await fetchServerCreatives(); // アップロード制作物（本番のみ・無ければ台帳ぶんだけ）
   // URL が指定されていればそれに従う。無ければ「うちの店」。それも無ければ全店。
   if (location.hash && location.hash !== "#") {
     VIEW = hashToView(location.hash);
@@ -803,6 +804,14 @@ function render() {
     el.addEventListener("click", e => { e.stopPropagation(); editGoal(el.dataset.goal); }));
   app.querySelectorAll("[data-memo]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); editMemo(el.dataset.memo); }));
+  app.querySelectorAll("[data-upload]").forEach(el =>
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const [kind, val] = el.dataset.upload.split(":");
+      promptUpload(kind === "campaign" ? val : "", kind === "store" ? val : "");
+    }));
+  app.querySelectorAll("[data-crdel]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); deleteCreative(el.dataset.crdel); }));
   app.querySelectorAll("[data-cfilter]").forEach(el =>
     el.addEventListener("click", () => {
       const [dim, val] = el.dataset.cfilter.split(":");
@@ -1359,7 +1368,59 @@ function renderCampaigns() {
 // 施策内容／進捗（状態・期間の進み）／結果（対象店ごとの前年比・前月比・集客・目標達成）
 // ／要因メモ／POP・制作物を1画面に。ランチ施策は各店の効果一覧への導線も出す。
 const campById = id => (DATA.campaigns || []).find(c => c.id === id) || null;
-const creativesForCampaign = id => (DATA.creatives || []).filter(cr => cr.campaign_id === id);
+// アプリ内アップロードの制作物（/api/creatives）。台帳(yaml)由来と統合して表示する。
+let UPLOADED_CREATIVES = [];
+let CREATIVES_API_OK = false;
+async function fetchServerCreatives() {
+  try {
+    const res = await fetch("/api/creatives", { headers: { accept: "application/json" }, cache: "no-store" });
+    const ct = res.headers.get("content-type") || "";
+    if (!res.ok || !ct.includes("application/json")) return;   // プレビューはHTML→アップロード不可
+    const data = await res.json();
+    if (data && Array.isArray(data.creatives)) { UPLOADED_CREATIVES = data.creatives; CREATIVES_API_OK = true; }
+  } catch (e) { /* API 無し → 台帳ぶんだけ表示 */ }
+}
+const allCreatives = () => (DATA.creatives || []).concat(UPLOADED_CREATIVES);
+// 施策に紐づく制作物（台帳＋アップロード両方）
+const creativesForCampaign = id => allCreatives().filter(cr => cr.campaign_id === id);
+
+// 画面から施策/店にファイルを足す。PDF・画像・Excel対応。押すとその場でファイル選択。
+function promptUpload(campaign, store) {
+  if (!CREATIVES_API_OK) { alert("アップロードは本番（ログイン済み）でのみ使えます。"); return; }
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".pdf,.jpg,.jpeg,.png,.webp,.gif,.xlsx,.xls,.csv,image/*,application/pdf";
+  input.addEventListener("change", () => { const f = input.files && input.files[0]; if (f) uploadCreative(f, campaign, store); });
+  input.click();
+}
+async function uploadCreative(file, campaign, store) {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (campaign) fd.append("campaign", campaign);
+  if (store) fd.append("store", store);
+  fd.append("title", (file.name || "資料").replace(/\.[^.]+$/, ""));
+  try {
+    const res = await fetch("/api/creatives", { method: "POST", body: fd });
+    if (res.status === 401) { alert("アップロードにはログインが必要です。"); return; }
+    if (res.status === 413) { alert("ファイルが大きすぎます（25MBまで）。"); return; }
+    if (res.status === 415) { alert("対応していない形式です（PDF・画像・Excel）。"); return; }
+    if (!res.ok) { alert("アップロードに失敗しました。時間をおいて再度お試しください。"); return; }
+    const data = await res.json();
+    if (data && data.creative) UPLOADED_CREATIVES.push(data.creative);
+    render();
+  } catch (e) { alert("アップロードに失敗しました（通信エラー）。"); }
+}
+async function deleteCreative(id) {
+  if (!confirm("この制作物を削除しますか？")) return;
+  try {
+    const res = await fetch("/api/creatives", {
+      method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }),
+    });
+    if (!res.ok) { alert("削除に失敗しました。"); return; }
+    UPLOADED_CREATIVES = UPLOADED_CREATIVES.filter(c => c.id !== id);
+    render();
+  } catch (e) { alert("削除に失敗しました（通信エラー）。"); }
+}
 
 // 期間の進み具合（%）。予定=0／終了=100／実施中はstart〜endの経過割合。
 function campTimeProgress(c) {
@@ -1774,11 +1835,15 @@ function renderCampaign(id) {
     ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${campKey(c)}" title="メモを編集">✎</button></div>`
     : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`;
 
-  // POP・制作物（この施策に紐づくもの）
+  // POP・制作物（この施策に紐づくもの）＋アップロード導線
   const crs = creativesForCampaign(id);
-  const crBlock = crs.length
+  const crAdd = CREATIVES_API_OK
+    ? `<button class="upbtn" data-upload="campaign:${c.id}">＋ POP・写真・資料を追加</button>` : "";
+  const crBlock = (crs.length || CREATIVES_API_OK)
     ? `<section class="block"><div class="bhead"><h2>POP・制作物</h2><span class="bnote">${crs.length}件</span></div>
-        <div class="cgrid">${crs.map(creativeCard).join("")}</div></section>` : "";
+        ${crs.length ? `<div class="cgrid">${crs.map(creativeCard).join("")}</div>`
+          : `<p class="muted" style="margin:2px 0 10px">まだありません。PDF・写真・Excelを追加できます。</p>`}
+        ${crAdd}</section>` : "";
 
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button>
@@ -2488,30 +2553,44 @@ function renderCross() {
 
 // ── 制作物ギャラリー（config/creatives.yaml 由来）──────────────────────────
 // この店に掛かる制作物（全店ものも含む）。掲出日の新しい順は export 側で済み。
-const creativesFor = code => (DATA.creatives || []).filter(cr => cr.scope_all || cr.stores.includes(code));
+const creativesFor = code => allCreatives().filter(cr => {
+  if (cr.scope_all) return true;
+  if ((cr.stores || []).includes(code) || cr.store_code === code) return true;
+  const c = cr.campaign_id ? campById(cr.campaign_id) : null;   // 施策紐づけの店経由
+  return c ? (c.scope_all || (c.stores || []).includes(code)) : false;
+});
 
 function creativeCard(cr) {
   const k = kindOf(cr.kind);
+  const mime = cr.mime || "";
+  const isImg = mime.startsWith("image/");
+  const label = mime.includes("pdf") ? "PDF"
+    : isImg ? "画像"
+    : /spreadsheet|excel|csv/.test(mime) ? "表"
+    : ((cr.url || "").split(".").pop() || "資料").toUpperCase().slice(0, 4);
   const meta = [
     cr.date || "",
     cr.campaign_title ? "施策: " + cr.campaign_title : "",
-    cr.scope_all ? "全店" : cr.stores.length + "店",
+    cr.uploaded ? ("追加" + (cr.by ? "・" + cr.by : "")) : (cr.scope_all ? "全店" : ((cr.stores || []).length ? cr.stores.length + "店" : "")),
   ].filter(Boolean).join("　·　");
-  // PDFは同一ドメイン（Access内）/creatives/… から配信。新規タブで開く。
+  // 同一ドメイン（ログイン内）/creatives/… から配信。画像はサムネ表示、他は種別バッジ。
+  const thumb = isImg
+    ? `<a class="cthumb cimg" href="${cr.url}" target="_blank" rel="noopener" style="--kc:${k.color}" title="開く"><img src="${cr.url}" alt="${esc(cr.title)}" loading="lazy"></a>`
+    : `<a class="cthumb" style="--kc:${k.color}" href="${cr.url}" target="_blank" rel="noopener" title="開く"><span class="cext">${label}</span></a>`;
+  const del = (cr.uploaded && cr.id) ? `<button class="crdel" data-crdel="${cr.id}" title="削除" aria-label="削除">×</button>` : "";
   return `<div class="ccard">
-    <a class="cthumb" style="--kc:${k.color}" href="${cr.url}" target="_blank" rel="noopener" title="PDFを開く">
-      <span class="cext">PDF</span></a>
+    ${thumb}
     <div class="ccbody">
       <span class="kchip" style="--kc:${k.color}">${k.label}</span>
-      <div class="cctitle">${cr.title}</div>
-      <div class="ccmeta">${meta}</div>
-      <a class="pdfbtn" href="${cr.url}" target="_blank" rel="noopener">PDFを開く ↗</a>
-    </div>
+      <div class="cctitle">${esc(cr.title)}</div>
+      <div class="ccmeta">${esc(meta)}</div>
+      <a class="pdfbtn" href="${cr.url}" target="_blank" rel="noopener">${label}を開く ↗</a>
+    </div>${del}
   </div>`;
 }
 
 function renderGallery() {
-  const all = DATA.creatives || [];
+  const all = allCreatives();
   const body = all.length
     ? `<div class="cgrid">${all.map(creativeCard).join("")}</div>`
     : `<div class="empty">まだ制作物が登録されていません。<br>
@@ -2709,12 +2788,16 @@ function renderStore(code) {
       </section>`;
   }
 
-  // この店の制作物（PDF）。1件以上あるときだけ節を出す
+  // この店の制作物（PDF・画像・資料）＋アップロード導線
   const myCreatives = creativesFor(code);
-  const myCreativesBlock = myCreatives.length
+  const myCrAdd = CREATIVES_API_OK
+    ? `<button class="upbtn" data-upload="store:${code}">＋ POP・写真・資料を追加</button>` : "";
+  const myCreativesBlock = (myCreatives.length || CREATIVES_API_OK)
     ? `<section class="block">
         <div class="bhead"><h2>この店の制作物</h2><span class="bnote">${myCreatives.length}件</span></div>
-        <div class="cgrid">${myCreatives.map(creativeCard).join("")}</div>
+        ${myCreatives.length ? `<div class="cgrid">${myCreatives.map(creativeCard).join("")}</div>`
+          : `<p class="muted" style="margin:2px 0 10px">まだありません。PDF・写真・Excelを追加できます。</p>`}
+        ${myCrAdd}
       </section>`
     : "";
 

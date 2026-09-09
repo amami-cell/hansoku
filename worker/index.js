@@ -110,6 +110,13 @@ export default {
         return serverError(e);
       }
     }
+    if (url.pathname === "/api/creatives") {
+      try {
+        return await handleCreatives(request, env, me.who);
+      } catch (e) {
+        return serverError(e);
+      }
+    }
     // 制作物PDF（R2）。Access の内側で同一ドメイン配信する。
     if (url.pathname.startsWith("/creatives/")) {
       try {
@@ -160,6 +167,100 @@ async function handleNotes(request, env, who) {
       ON CONFLICT (campaign_id) DO UPDATE
         SET note = EXCLUDED.note, set_by = EXCLUDED.set_by, set_at = now()`;
     return json({ ok: true, id, note, by: email });
+  }
+
+  return json({ error: "method" }, 405);
+}
+
+// アプリ内アップロードの制作物（POP・画像・資料）。GET=一覧 / POST=追加 / DELETE=削除。
+// 実体は R2（/creatives/uploads/...）、メタは promo_creatives（Neon）。
+const CR_MAX_BYTES = 25 * 1024 * 1024; // 1ファイル25MBまで
+const CR_MIME_EXT = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "image/heic": "heic",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.ms-excel": "xls",
+  "text/csv": "csv",
+};
+const crSafe = (s, n) => String(s || "").replace(/[^0-9A-Za-z._\-]+/g, "_").slice(0, n);
+
+async function handleCreatives(request, env, who) {
+  if (!env.DATABASE_URL) return json({ error: "no-db" }, 503);
+  const sql = neon(env.DATABASE_URL);
+
+  if (request.method === "GET") {
+    const rows = await sql`
+      SELECT id, campaign_id, store_code, title, kind, r2_key, mime, doc_date, set_by, set_at
+      FROM promo_creatives ORDER BY doc_date DESC NULLS LAST, set_at DESC`;
+    const creatives = rows.map((r) => ({
+      id: r.id, campaign_id: r.campaign_id || "", store_code: r.store_code || "",
+      title: r.title, kind: r.kind || "dev", mime: r.mime || "",
+      date: r.doc_date || "", by: r.set_by || "", uploaded: true,
+      url: "/" + String(r.r2_key).replace(/^\/+/, ""),
+    }));
+    return json({ creatives });
+  }
+
+  if (request.method === "POST") {
+    const email = who || "";
+    if (!email) return json({ error: "unauthenticated" }, 401);
+    if (!env.CREATIVES) return json({ error: "no-bucket" }, 503);
+
+    let form;
+    try {
+      form = await request.formData();
+    } catch {
+      return json({ error: "bad-form" }, 400);
+    }
+    const file = form.get("file");
+    if (!file || typeof file.arrayBuffer !== "function") return json({ error: "no-file" }, 400);
+
+    const mime = String(file.type || "application/octet-stream");
+    if (!CR_MIME_EXT[mime]) return json({ error: "bad-type", mime }, 415);
+
+    const buf = await file.arrayBuffer();
+    if (buf.byteLength === 0) return json({ error: "empty" }, 400);
+    if (buf.byteLength > CR_MAX_BYTES) return json({ error: "too-large" }, 413);
+
+    const campaign = crSafe(form.get("campaign"), 128);
+    const store = crSafe(form.get("store"), 16);
+    if (!campaign && !store) return json({ error: "no-target" }, 400);
+    const title = (String(form.get("title") || file.name || "資料")).slice(0, 200);
+    const kind = crSafe(form.get("kind"), 16) || "dev";
+    const docDate = crSafe(form.get("date"), 10);
+
+    const ext = CR_MIME_EXT[mime];
+    const base = crSafe((file.name || "file").replace(/\.[^.]+$/, ""), 40) || "file";
+    const rand = crypto.randomUUID().slice(0, 8);
+    const bucketKey = `creatives/uploads/${campaign || store}/${Date.now()}_${rand}_${base}.${ext}`;
+
+    await env.CREATIVES.put(bucketKey, buf, { httpMetadata: { contentType: mime } });
+    await sql`
+      INSERT INTO promo_creatives (id, campaign_id, store_code, title, kind, r2_key, mime, doc_date, set_by, set_at)
+      VALUES (${rand + "_" + Date.now()}, ${campaign}, ${store}, ${title}, ${kind}, ${bucketKey}, ${mime}, ${docDate}, ${email}, now())`;
+
+    return json({
+      ok: true,
+      creative: {
+        id: rand, campaign_id: campaign, store_code: store, title, kind, mime,
+        date: docDate, by: email, uploaded: true, url: "/" + bucketKey,
+      },
+    });
+  }
+
+  if (request.method === "DELETE") {
+    const email = who || "";
+    if (!email) return json({ error: "unauthenticated" }, 401);
+    let body;
+    try { body = await request.json(); } catch { return json({ error: "bad-json" }, 400); }
+    const id = typeof body.id === "string" ? body.id.slice(0, 128) : "";
+    if (!id) return json({ error: "no-id" }, 400);
+    const rows = await sql`SELECT r2_key FROM promo_creatives WHERE id = ${id}`;
+    if (rows[0] && env.CREATIVES) {
+      try { await env.CREATIVES.delete(rows[0].r2_key); } catch (e) { console.error("[hansoku] r2 delete", e); }
+    }
+    await sql`DELETE FROM promo_creatives WHERE id = ${id}`;
+    return json({ ok: true, id });
   }
 
   return json({ error: "method" }, 405);

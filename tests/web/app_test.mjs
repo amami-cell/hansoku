@@ -401,3 +401,30 @@ test("行ごとに対象月を持つ（店で直近確定月が違う）", () =>
 
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);
+
+// ── 制作物カード（多形式・アップロード統合）──────────────────────────────
+test("制作物カード：画像はサムネ、PDFは種別バッジ、Excelは表バッジ", () => {
+  const ctx = loadApp({ ...base, campaigns: [] });
+  const img = call(ctx, `creativeCard(${JSON.stringify({ title: "夏POP", kind: "osusume", mime: "image/jpeg", url: "/creatives/uploads/x/a.jpg", uploaded: true, id: "z1" })})`);
+  assert.ok(img.includes("<img"), "画像は img タグ");
+  assert.ok(img.includes('data-crdel="z1"'), "アップロード品は削除ボタン付き");
+  const pdf = call(ctx, `creativeCard(${JSON.stringify({ title: "チラシ", kind: "dev", mime: "application/pdf", url: "/creatives/y/b.pdf", stores: ["1160"] })})`);
+  assert.ok(pdf.includes(">PDF<"), "PDFは種別バッジ");
+  assert.ok(!pdf.includes("data-crdel"), "台帳ぶんは削除ボタン無し");
+  const xls = call(ctx, `creativeCard(${JSON.stringify({ title: "原価表", kind: "dev", mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", url: "/creatives/z/c.xlsx", uploaded: true, id: "z2" })})`);
+  assert.ok(xls.includes(">表<"), "Excelは『表』バッジ");
+});
+
+test("制作物：台帳とアップロードを統合して施策/店に出す", () => {
+  const ctx = loadApp({
+    ...base,
+    campaigns: [{ id: "r1160-cake", stores: ["1160"], scope_all: false, title: "ケーキ", kind: "osusume", start: "2025-05-26" }],
+    stores: [{ code: "1160", name: "ルクアLargo", region: "大阪", neighbors: [] }],
+    creatives: [{ campaign_id: "r1160-cake", title: "5月ケーキ(台帳)", kind: "osusume", stores: ["1160"], scope_all: false, url: "/creatives/2025/x.pdf" }],
+  });
+  call(ctx, `UPLOADED_CREATIVES = ${JSON.stringify([{ id: "u1", campaign_id: "r1160-cake", store_code: "1160", title: "追加POP", kind: "osusume", mime: "image/png", url: "/creatives/uploads/r1160-cake/u.png", uploaded: true }])}`);
+  const camp = call(ctx, `creativesForCampaign("r1160-cake").length`);
+  assert.equal(camp, 2, "施策に台帳＋アップロードの2件");
+  const store = call(ctx, `creativesFor("1160").length`);
+  assert.ok(store >= 2, "店にも施策経由＋直付けで出る");
+});
