@@ -25,6 +25,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
+      # Access編集用のトークンがあれば優先。無ければデプロイ用トークン（Access権限が無いと0件になる）。
+      CF_ACCESS_TOKEN: ${{ secrets.CF_ACCESS_TOKEN }}
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       R2_ACCOUNT: ${{ secrets.R2_ACCOUNT_ID }}
@@ -34,7 +36,9 @@ jobs:
       - name: Access を確認/変更
         run: |
           set -uo pipefail
-          TOK="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]"'\''')"
+          RAW="${CF_ACCESS_TOKEN:-$CF_TOKEN}"
+          TOK="$(printf '%s' "$RAW" | tr -d '[:space:]"'\''')"
+          echo "使用トークン: $([ -n "${CF_ACCESS_TOKEN:-}" ] && echo CF_ACCESS_TOKEN || echo CLOUDFLARE_API_TOKEN)"
           api() { curl -sS -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" "$@"; }
 
           echo "== token 権限確認 =="
