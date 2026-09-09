@@ -1,17 +1,9 @@
 name: import-pops
-# config/creatives_inbox.tsv の Drive公開POPを Worker の /api/creatives へ流し込む。
-# ランナーは自由にネットへ出られるので、サンドボックスからは届かない Drive も落とせる。
+# config/creatives_inbox.tsv の Drive公開POPを R2 とNeon(promo_creatives)へ直接取り込む。
+# Worker は Cloudflare Access の内側なのでサーバー越しPOSTは302される。
+# R2(S3 API)とNeonへ直接書けば Access を通らず、アプリ内アップロードと同じ形で残る。
 on:
   workflow_dispatch:
-    inputs:
-      worker_base_url:
-        description: "取り込み先の Worker URL"
-        required: false
-        default: "https://hansoku.amami-c1e.workers.dev"
-      store_code:
-        description: "店コード（既定 1160=ルクアLargo）"
-        required: false
-        default: "1160"
 
 jobs:
   import:
@@ -21,10 +13,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: 依存をインストール
+        run: pip install -r requirements.txt
       - name: POPを取り込む
         env:
-          WORKER_BASE_URL: ${{ github.event.inputs.worker_base_url }}
-          STORE_CODE: ${{ github.event.inputs.store_code }}
-        run: |
-          chmod +x scripts/import_pop_inbox.sh
-          ./scripts/import_pop_inbox.sh
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python scripts/import_pop_inbox.py
