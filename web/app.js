@@ -817,6 +817,8 @@ function render() {
     }));
   app.querySelectorAll("[data-crdel]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); deleteCreative(el.dataset.crdel); }));
+  app.querySelectorAll("[data-crurl]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); openCreativePreview(el.dataset.crurl, el.dataset.crmime, el.dataset.crtitle); }));
   app.querySelectorAll("[data-cfilter]").forEach(el =>
     el.addEventListener("click", () => {
       const [dim, val] = el.dataset.cfilter.split(":");
@@ -1414,6 +1416,40 @@ async function uploadCreative(file, campaign, store) {
     if (data && data.creative) UPLOADED_CREATIVES.push(data.creative);
     render();
   } catch (e) { alert("アップロードに失敗しました（通信エラー）。"); }
+}
+// アップロードした画像・PDFを、別タブに飛ばずアプリ内の小窓で見る。
+function openCreativePreview(url, mime, title) {
+  let ov = document.getElementById("crprev");
+  if (!ov) {
+    ov = document.createElement("div");
+    ov.id = "crprev"; ov.className = "crprev"; ov.hidden = true;
+    ov.innerHTML = `<div class="crprev-bd" data-crclose></div>
+      <div class="crprev-box" role="dialog" aria-modal="true">
+        <div class="crprev-bar"><span class="crprev-title"></span>
+          <a class="crprev-open" target="_blank" rel="noopener">別タブ ↗</a>
+          <button class="crprev-x" type="button" data-crclose aria-label="閉じる">×</button></div>
+        <div class="crprev-body"></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener("click", (e) => { if (e.target.hasAttribute("data-crclose")) closeCreativePreview(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeCreativePreview(); });
+  }
+  const m = mime || "";
+  const isImg = m.startsWith("image/");
+  const isPdf = m.includes("pdf");
+  const body = ov.querySelector(".crprev-body");
+  body.innerHTML = isImg
+    ? `<img src="${url}" alt="${esc(title || "")}">`
+    : isPdf
+      ? `<iframe src="${url}" title="${esc(title || "資料")}"></iframe>`
+      : `<div class="crprev-dl">この形式は小窓で表示できません。<br><a href="${url}" target="_blank" rel="noopener">開く ↗</a></div>`;
+  ov.querySelector(".crprev-title").textContent = title || "";
+  ov.querySelector(".crprev-open").href = url;
+  ov.hidden = false;
+}
+function closeCreativePreview() {
+  const ov = document.getElementById("crprev");
+  if (ov) { ov.hidden = true; ov.querySelector(".crprev-body").innerHTML = ""; }
 }
 async function deleteCreative(id) {
   if (!confirm("この制作物を削除しますか？")) return;
@@ -2580,9 +2616,10 @@ function creativeCard(cr) {
     cr.uploaded ? ("追加" + (cr.by ? "・" + cr.by : "")) : (cr.scope_all ? "全店" : ((cr.stores || []).length ? cr.stores.length + "店" : "")),
   ].filter(Boolean).join("　·　");
   // 同一ドメイン（ログイン内）/creatives/… から配信。画像はサムネ表示、他は種別バッジ。
+  const view = `data-crurl="${cr.url}" data-crmime="${esc(mime)}" data-crtitle="${esc(cr.title)}"`;
   const thumb = isImg
-    ? `<a class="cthumb cimg" href="${cr.url}" target="_blank" rel="noopener" style="--kc:${k.color}" title="開く"><img src="${cr.url}" alt="${esc(cr.title)}" loading="lazy"></a>`
-    : `<a class="cthumb" style="--kc:${k.color}" href="${cr.url}" target="_blank" rel="noopener" title="開く"><span class="cext">${label}</span></a>`;
+    ? `<button type="button" class="cthumb cimg" ${view} style="--kc:${k.color}" title="小窓で開く"><img src="${cr.url}" alt="${esc(cr.title)}" loading="lazy"></button>`
+    : `<button type="button" class="cthumb" ${view} style="--kc:${k.color}" title="小窓で開く"><span class="cext">${label}</span></button>`;
   const del = (cr.uploaded && cr.id) ? `<button class="crdel" data-crdel="${cr.id}" title="削除" aria-label="削除">×</button>` : "";
   return `<div class="ccard">
     ${thumb}
@@ -2590,7 +2627,7 @@ function creativeCard(cr) {
       <span class="kchip" style="--kc:${k.color}">${k.label}</span>
       <div class="cctitle">${esc(cr.title)}</div>
       <div class="ccmeta">${esc(meta)}</div>
-      <a class="pdfbtn" href="${cr.url}" target="_blank" rel="noopener">${label}を開く ↗</a>
+      <button type="button" class="pdfbtn" data-crurl="${cr.url}" data-crmime="${esc(mime)}" data-crtitle="${esc(cr.title)}">${label}を開く</button>
     </div>${del}
   </div>`;
 }
