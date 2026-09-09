@@ -23,6 +23,7 @@ from hansoku.model import (
     METRIC_DEPT_SALES,
     METRIC_PRODUCT_SALES,
     METRIC_SALES,
+    METRIC_SALES_BUDGET,
 )
 from hansoku.settings import load_settings
 
@@ -47,6 +48,7 @@ def main() -> int:
         print(f"== 店 {CODE} / 窓 {FROM}〜{TO} ==")
         for label, metric in [
             ("売上(monthly)", METRIC_SALES),
+            ("売上予算(budget)", METRIC_SALES_BUDGET),
             ("客数(covers)", METRIC_COVERS),
             ("部門売上(dept_sales)", METRIC_DEPT_SALES),
             ("部門数量(dept_qty)", METRIC_DEPT_QTY),
