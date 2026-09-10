@@ -7,6 +7,10 @@ on:
         description: "店コード（既定 1160=ルクアLargo）"
         required: false
         default: "1160"
+      months:
+        description: "商品上位を出す月（カンマ区切り YYYY-MM）"
+        required: false
+        default: "2025-09,2025-10,2025-11"
 
 permissions:
   contents: read
@@ -31,6 +35,7 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           STORE: ${{ github.event.inputs.store }}
+          MONTHS: ${{ github.event.inputs.months }}
         run: |
           set -o pipefail
           python scripts/dump_store.py | tee -a "$GITHUB_STEP_SUMMARY"

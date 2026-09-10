@@ -98,6 +98,16 @@ def main() -> int:
             print(f"\n== 商品売上の最新月 {latest} の上位{len(items)} ==")
             for name, val, cat in items:
                 print(f"  [{cat}] {name}: {val:,}円")
+
+        # MONTHS 環境変数で指定した月の商品上位を出す（例: 前年の秋の商品を洗い出す）。
+        want = [m.strip() for m in os.environ.get("MONTHS", "").split(",") if m.strip()]
+        for m in want:
+            rows = sorted(pby_m.get(m, []), key=lambda x: -x[1])[:40]
+            print(f"\n== {m} の商品上位{len(rows)} ==")
+            if not rows:
+                print("  （この月の商品データなし）")
+            for name, val, cat in rows:
+                print(f"  [{cat}] {name}: {val:,}円")
     return 0
 
 
