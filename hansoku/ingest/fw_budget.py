@@ -582,9 +582,11 @@ def ingest(
             def _read_here() -> None:
                 month = _read_month(session)
                 budget_val = _read_sales_budget(session)
-                if month and budget_val is not None:
+                if month and budget_val:  # 0＝未登録（FWは月別に入力・先付けは空）。0は取らない。
                     collected.append((store.store_code, month, budget_val))
                     print(f"  {store.store_code} {name[:14]} {month} 売上予算 {budget_val:,}")
+                elif month and budget_val == 0:
+                    print(f"  {store.store_code} {name[:14]} {month} 未登録(0)・スキップ")
                 else:
                     print(f"  {store.store_code} {name[:14]} 読み取り失敗 (month={month}, val={budget_val})")
 
