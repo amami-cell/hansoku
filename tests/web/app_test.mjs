@@ -699,5 +699,26 @@ test("storeEngines：区分ルールの無い店では出さない", () => {
   assert.equal(call(ctx, `storeEngines("1006")`), "");
 });
 
+// ── 店舗ページ全体（renderStore）の健全性 ────────────────────────────────
+console.log("店舗ページ全体（renderStore）");
+
+test("renderStore：目標対象外の実施中販促でも literal 'undefined' を出さない", () => {
+  // 実施中・目標対象外（osusume は測り方も未設定）＝ goalHtml 分岐に入らない。
+  // 以前は goalHtml が undefined のまま文字列で描画されていた。
+  const c = camp({ id: "live1", kind: "osusume", title: "秋おすすめ",
+    start: "2026-09-01", end: "2026-09-30" });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  const html = call(ctx, `renderStore("1006")`);
+  assert.ok(!/\bundefined\b/.test(html), "renderStore に undefined が混じらない");
+  assert.ok(html.includes("この店の販促"), "販促セクションはある");
+});
+
+test("renderStore：先頭サマリはヒーローに統合され、基礎データは折りたたみに入る", () => {
+  const ctx = loadApp(base);
+  const html = call(ctx, `renderStore("1006")`);
+  assert.ok(html.includes("店の基礎データを見る"), "基礎データは details に格納");
+  assert.ok(html.includes("class=\"hnote\""), "ヒーローにデータ鮮度の一言");
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);

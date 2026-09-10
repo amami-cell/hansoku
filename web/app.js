@@ -2861,83 +2861,8 @@ function storeTargetChip(code) {
     <button class="linkbtn stlink" data-view="cross">横断で見る →</button></div>`;
 }
 
-// ── 店舗詳細の先頭サマリ（店長が5秒で見るもの）──────────────────────
-// 店長が知りたいのは3つだけ: 今月うちはどうか／いまの販促は効いているか／
-// 次に何をするか。以前はこの3つに答える前に、期間合計から始まるKPI6枚と
-// 収益性3枚が並び、「この店の販促」はスマホで約1,200px下にあった。
-//
-// 数字はすべて既存の関数の使い回し。新しい計算はしていない。
-function storeSummary(code) {
-  const last = latestConfirmed(code);
-  const y = yoy(code);
-  const br = budgetRate(code);
-  const pf = storeProfit(code);
-
-  const line = (label, value, tone) =>
-    `<span class="ssm-i"><span class="ssm-l">${label}</span><span class="ssm-v ${tone || ""}">${value}</span></span>`;
-
-  const head = last
-    ? `<div class="ssm-big">${last.m.slice(5)}月の${METRIC_LABELS[METRIC]}
-         <b>${METRIC === "cost_rate" ? pct(last.v) : yen(last.v)}</b></div>`
-    : `<div class="ssm-big muted">締めが終わった月がまだありません</div>`;
-
-  const facts = [
-    y ? line("前年同月比", `${signed(y.pct)}%${y.renewal ? " ⚠" : ""}`,
-             y.renewal ? "" : (y.pct >= 0 ? "up" : "down")) : "",
-    br ? line("予算対比", `${br.rate.toFixed(0)}%`, br.rate >= 100 ? "up" : "down") : "",
-    pf.kt != null ? line("客単価", yen(pf.kt)) : "",
-  ].filter(Boolean).join("");
-
-  // 「今月」の沈黙を埋める。月次データなので当月はまだ出せない、と先に言う。
-  const waiting = `<div class="ssm-note">${CURRENT_MONTH.slice(5)}月ぶんは締め後（翌月上旬）に入ります。${
-    last ? `いま出ているのは ${last.m} までです。` : ""}</div>`;
-
-  // いま動いている販促
-  const live = (DATA.campaigns || [])
-    .filter(c => c.stores.includes(code) && campStatus(c).k === "live");
-  const liveRows = live.slice(0, 4).map(c => {
-    const t = campTargeted(c, code);
-    const v = campVerdict(c);
-    const num = t
-      ? (t.pct != null
-          ? `<span class="${t.pct >= 0 ? "up" : "down"}">${esc(t.label)} ${signed(t.pct)}%</span>`
-          : `<span class="muted">${esc(t.label)} ${man(t.cur)}円</span>`)
-      : `<span class="muted">${campBasis(c) ? "確定待ち" : "測り方が未設定"}</span>`;
-    return `<li data-camp="${c.id}"><span class="kdot" style="--kc:${kindOf(c.kind).color}"></span>
-      <span class="ssm-cn">${esc(c.title)}</span>${num}
-      <span class="ssm-vb ${v.tone}">${v.label}</span></li>`;
-  }).join("");
-
-  // 振り返りが残っているもの（この店ぶんだけ）
-  const needs = (DATA.campaigns || [])
-    .filter(c => c.stores.includes(code) && campStatus(c).k === "done" && needsReview(c));
-
-  // 次にやると効きそうなこと（title= に隠していた数字を本文に出す）
-  const aims = crossTargets().filter(t => t.code === code).slice(0, 2).map(t =>
-    `<li><b>${t.flag}</b><span class="ssm-why">この店 ${Math.round(t.v * 100)}%・同ブランド平均 ${Math.round(t.avg * 100)}%／${esc(t.why)}</span></li>`).join("");
-
-  return `<section class="block ssm">
-    ${head}
-    ${facts ? `<div class="ssm-facts">${facts}</div>` : ""}
-    ${waiting}
-    <div class="ssm-sec">
-      <div class="ssm-h">いま動いている販促 ${live.length}件</div>
-      ${liveRows ? `<ul class="ssm-list">${liveRows}</ul>` : `<p class="muted ssm-empty">実施中の販促はありません</p>`}
-      ${live.length > 4 ? `<button class="linkbtn" data-view="campaigns">ほか ${live.length - 4}件を見る →</button>` : ""}
-    </div>
-    ${needs.length ? `<div class="ssm-sec ssm-todo">
-      <div class="ssm-h">振り返りが ${needs.length}件 残っています</div>
-      <ul class="ssm-list">${needs.slice(0, 3).map(c =>
-        `<li data-camp="${c.id}"><span class="kdot" style="--kc:${kindOf(c.kind).color}"></span>
-          <span class="ssm-cn">${esc(c.title)}</span>
-          <span class="ssm-go">振り返る →</span></li>`).join("")}</ul>
-    </div>` : ""}
-    ${aims ? `<div class="ssm-sec">
-      <div class="ssm-h">次にやると効きそうなこと</div>
-      <ul class="ssm-aims">${aims}</ul>
-    </div>` : ""}
-  </section>`;
-}
+// 旧 storeSummary（先頭サマリ）は storeHero に統合。重複していた「今月の売上・
+// 前年比・実施中の販促・振り返り残り」はヒーローが、狙いどころは storeTargetChip が持つ。
 
 // ── 年間スケジュール → 月 → 品目区分 → 商品 のドリル ─────────────────────────
 // 店ページの主眼。月を押すと構成比・単価・集客とその月の販促、区分を押すと商品詳細。
@@ -3040,6 +2965,8 @@ function storeHero(code) {
   // ① 予算達成率（直近確定月）。予算未取込なら売上＋前年比にフォールバック。
   const latest = latestConfirmed(code);
   const y = yoy(code);
+  const pf = storeProfit(code);
+  const ktSub = pf && pf.kt != null ? `・客単価 ${yen(pf.kt)}` : "";
   let budCard;
   if (latest) {
     const bud = budgetAt(code, latest.m);
@@ -3049,16 +2976,19 @@ function storeHero(code) {
       budCard = `<div class="hcard hbig ${rate >= 100 ? "good" : "warn"}">
         <div class="hlbl">予算達成率（${latest.m}）</div>
         <div class="hval">${rate}<span class="hu">%</span></div>
-        <div class="hsub">予算 ${man(bud)} → 実績 ${man(sales)}円${y ? `・前年 ${signed(y.pct)}%` : ""}</div></div>`;
+        <div class="hsub">予算 ${man(bud)} → 実績 ${man(sales)}円${y ? `・前年 ${signed(y.pct)}%` : ""}${ktSub}</div></div>`;
     } else {
       budCard = `<div class="hcard hbig">
         <div class="hlbl">直近売上（${latest.m}）</div>
         <div class="hval">${man(sales)}<span class="hu">円</span></div>
-        <div class="hsub">${y ? `前年 ${signed(y.pct)}%` : "前年 ―"}　<span class="muted">予算未登録</span></div></div>`;
+        <div class="hsub">${y ? `前年 ${signed(y.pct)}%` : "前年 ―"}${ktSub}　<span class="muted">予算未登録</span></div></div>`;
     }
   } else {
     budCard = `<div class="hcard hbig"><div class="hlbl">売上</div><div class="hval">―</div></div>`;
   }
+  // データ鮮度の一言（月次なので当月は締め後）。旧サマリから引き継ぐ。
+  const freshNote = `<div class="hnote">${CURRENT_MONTH.slice(5)}月ぶんは締め後（翌月上旬）に入ります。${
+    latest ? `いま確定しているのは ${latest.m} まで。` : ""}数値はFWから自動集計しています。</div>`;
 
   // ② 主役の販促（実施中）。ルクアは パフェ→ケーキ が主役なので優先して並べる。
   const priority = c => (c.bucket === "パフェ" ? 0 : c.bucket === "ケーキ" ? 1 : 2);
@@ -3093,6 +3023,7 @@ function storeHero(code) {
       <div class="hcard"><div class="hlbl">主役の販促（実施中）</div>${heroCards}</div>
       <div class="hcard"><div class="hlbl">要対応</div>${todoHtml}</div>
     </div>
+    ${freshNote}
   </section>`;
 }
 
@@ -3569,7 +3500,7 @@ function renderStore(code) {
         }
         // 目標対比（アプリ内で入力した目標／schedule.yaml の目標）
         const tgt = targetOf(c);
-        let goalHtml;
+        let goalHtml = "";   // 目標対象外の販促では空（旧: undefined が文字列で出ていた）
         if (tgt != null) {
           // 目標は施策ぜんぶに対して立てたもの。店1軒の数字で割らない。
           const gr1 = campGoalRate(c);
@@ -3613,27 +3544,26 @@ function renderStore(code) {
     ${storeHero(code)}
     ${storeAnnual(code)}
     ${storeEngines(code)}
-    ${storeSummary(code)}
-    <details class="moredet">
-      <summary>詳しい数字をすべて見る</summary>
-      <section class="block">${kpis}${storeTargetChip(code)}</section>
-      ${renderProfitability(code)}
-    </details>
     <section class="block">
       <div class="bhead"><h2>この店の販促</h2>
         <span class="bnote">${myCamps.length}件</span></div>
       ${promoBlock}
     </section>
     ${myCreativesBlock}
-    <section class="block">
-      <div class="bhead"><h2>売上推移</h2><span class="bnote">${METRIC_LABELS[METRIC]}</span></div>
-      ${own}
-    </section>
-    ${renderHourly(code)}
-    ${renderLunchCard(code)}
-    ${renderDepartments(code)}
-    ${renderProducts(code)}
-    ${neighBlock}
+    <details class="moredet">
+      <summary>店の基礎データを見る（売上推移・部門・商品・時間帯・近隣）</summary>
+      <section class="block">${kpis}${storeTargetChip(code)}</section>
+      ${renderProfitability(code)}
+      <section class="block">
+        <div class="bhead"><h2>売上推移</h2><span class="bnote">${METRIC_LABELS[METRIC]}</span></div>
+        ${own}
+      </section>
+      ${renderHourly(code)}
+      ${renderLunchCard(code)}
+      ${renderDepartments(code)}
+      ${renderProducts(code)}
+      ${neighBlock}
+    </details>
   `;
 }
 
