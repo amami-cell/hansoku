@@ -40,3 +40,7 @@ jobs:
           STORE: ${{ github.event.inputs.store }}
           YEAR: ${{ github.event.inputs.year }}
         run: node scripts/render_check.mjs | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: 店舗ページ全体の骨格を出す
+        env:
+          STORE: ${{ github.event.inputs.store }}
+        run: node scripts/render_store.mjs | tee -a "$GITHUB_STEP_SUMMARY"
