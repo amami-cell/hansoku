@@ -565,13 +565,15 @@ const annualData = {
   ],
 };
 
-test("既定はチャート表示（vtab chart が on）", () => {
+test("既定はカレンダー表（数値一覧）で、両方の切替がある", () => {
   const ctx = loadApp(annualData);
-  call(ctx, `STORE_ANNUAL_VIEW = "chart"; STORE_YEAR = null;`);
+  // 既定（グローバル初期値）のまま：明示セットしない
   const html = call(ctx, `storeAnnual("1160")`);
-  assert.match(html, /data-savw="chart"[^>]*class=|class="vtab on" data-savw="chart"|vtab on" data-savw="chart"/);
+  assert.ok(html.includes('class="vtab on" data-savw="calendar"'), "既定はカレンダー表がon");
   assert.ok(html.includes('data-savw="chart"') && html.includes('data-savw="calendar"'), "両方の切替がある");
   assert.ok(html.includes("年間スケジュール"));
+  // 予算/売上/集客/客単価の見出しが最初から並ぶ
+  assert.ok(html.includes("予算") && html.includes("売上") && html.includes("集客") && html.includes("客単価"));
 });
 
 test("チャート：販促が帯（data-camp）で出て、月見出しは data-smonth", () => {

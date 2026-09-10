@@ -61,7 +61,7 @@ let METRIC = "sales";
 let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"）
 let YEAR = null;                   // 年間販促ビューで表示中の年（数値）
 let STORE_YEAR = null;             // 店ページの年間スケジュールで見ている年（文字列 "YYYY"）
-let STORE_ANNUAL_VIEW = "chart";   // 店ページ年間スケジュールの表示（chart=既定 / calendar）
+let STORE_ANNUAL_VIEW = "calendar"; // 店ページ年間スケジュールの表示（calendar=既定・数値一覧 / chart=帯）
 let ANNUAL_OPEN = {};              // カレンダー一覧の開閉状態（"code:month" と "code:month:区分" を鍵に）
 let MONTH_PICK_OPEN = false;       // 月詳細の月ピッカーを開いているか
 let CAMP_FILTER = { status: "all", kind: "all" };   // 施策の効果ビューの絞り込み
