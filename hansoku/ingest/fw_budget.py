@@ -524,13 +524,18 @@ def ingest(
     *,
     artifacts: Path,
     months_back: int = 3,
+    months_ahead: int = 0,
     store_limit: int | None = None,
     dry_run: bool = False,
 ) -> int:
-    """月別予算登録から各店×直近数ヶ月の「売上高（税抜き）」を読み、売上予算として取り込む。
+    """月別予算登録から各店×対象月の「売上高（税抜き）」を読み、売上予算として取り込む。
 
-    画面は1ヶ月ずつ表示。店舗を選び→検索→当月を読む→前月へ→…を繰り返す。
+    画面は1ヶ月ずつ表示。店舗を選び→検索→当月を読む→前月/翌月へ→…を繰り返す。
     表示中の月をそのままラベルにするので、月がずれても取り違えない。
+
+    months_back は当月から遡る月数（当月を含む）。months_ahead は当月より先の
+    月数。予算は先付けで登録されるので、先の月も読むと、その月が締まった瞬間に
+    予算達成率が出せる（再取込を待たずに済む）。
     """
     from datetime import date as _date
     from datetime import datetime, timezone
@@ -573,10 +578,8 @@ def ingest(
             if ti == 0:
                 # 最初の1店だけ、選択・グリッド読み取りの状態を診断出力する
                 _diag_budget(session)
-            for k in range(months_back):
-                if k > 0:
-                    session.click_text("前月", wait=1.2)
-                    _click_search(session)
+
+            def _read_here() -> None:
                 month = _read_month(session)
                 budget_val = _read_sales_budget(session)
                 if month and budget_val is not None:
@@ -584,9 +587,24 @@ def ingest(
                     print(f"  {store.store_code} {name[:14]} {month} 売上予算 {budget_val:,}")
                 else:
                     print(f"  {store.store_code} {name[:14]} 読み取り失敗 (month={month}, val={budget_val})")
-            # 次の店のため当月へ戻す
+
+            # 当月＋遡り。当月(k=0)を読み、前月へ動いて読む…を months_back 回。
+            _read_here()
+            for _ in range(months_back - 1):
+                session.click_text("前月", wait=1.2)
+                _click_search(session)
+                _read_here()
+            # 当月へ戻す（読み取らないので検索は不要）
             for _ in range(months_back - 1):
                 session.click_text("翌月", wait=0.6)
+            # 先付け予算（翌月方向）。当月は上で読んだので k=1..months_ahead。
+            for _ in range(months_ahead):
+                session.click_text("翌月", wait=1.2)
+                _click_search(session)
+                _read_here()
+            # 次の店のため当月へ戻す（読み取らないので検索は不要）
+            for _ in range(months_ahead):
+                session.click_text("前月", wait=0.6)
 
     if unresolved:
         print(f"[budget] マスタ未解決の店舗（スキップ）: {unresolved}")

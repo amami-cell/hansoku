@@ -232,14 +232,16 @@ def cmd_fw_budget(args: argparse.Namespace) -> int:
             return ingest(
                 None, master,
                 artifacts=Path(args.artifacts),
-                months_back=args.months, store_limit=args.limit, dry_run=True,
+                months_back=args.months, months_ahead=args.ahead,
+                store_limit=args.limit, dry_run=True,
             )
         settings = load_settings()
         with get_warehouse(settings) as warehouse:
             return ingest(
                 warehouse, master,
                 artifacts=Path(args.artifacts),
-                months_back=args.months, store_limit=args.limit, dry_run=False,
+                months_back=args.months, months_ahead=args.ahead,
+                store_limit=args.limit, dry_run=False,
             )
     raise SystemExit(f"未知のモード: {args.mode}")
 
@@ -708,7 +710,8 @@ def build_parser() -> argparse.ArgumentParser:
         "fw-budget", help="FW月別予算登録から売上予算を取り込む"
     )
     fwbudget.add_argument("--mode", default="probe", choices=["probe", "ingest", "manager-dl"], help="動作")
-    fwbudget.add_argument("--months", type=int, default=3, help="遡る月数")
+    fwbudget.add_argument("--months", type=int, default=3, help="遡る月数（当月含む）")
+    fwbudget.add_argument("--ahead", type=int, default=0, help="先付け予算を読む先の月数")
     fwbudget.add_argument("--month", default="2026-07", help="manager-dl: 対象月 YYYY-MM")
     fwbudget.add_argument("--limit", type=int, default=None, help="先頭N店だけ（試走用）")
     fwbudget.add_argument("--dry-run", action="store_true", help="書き込まず印字のみ")
