@@ -2954,6 +2954,73 @@ function campPrevOccurrence(c) {
 }
 
 // 年間スケジュール（全月をカードで。押すと月の詳細へ）
+// 店長ダッシュボード（店ページ先頭のヒーロー）。開いて3秒で「予算に対してどうか／
+// 主役の販促は効いているか／やり残し（POP・目標・振り返り）」が分かる。
+function storeHero(code) {
+  const my = (DATA.campaigns || []).filter(c => (c.stores || []).includes(code));
+  const live = my.filter(c => campStatus(c).k === "live");
+  const soon = my.filter(c => campStatus(c).k === "soon");
+  const done = my.filter(c => campStatus(c).k === "done");
+
+  // ① 予算達成率（直近確定月）。予算未取込なら売上＋前年比にフォールバック。
+  const latest = latestConfirmed(code);
+  const y = yoy(code);
+  let budCard;
+  if (latest) {
+    const bud = budgetAt(code, latest.m);
+    const sales = salesAtC(code, latest.m);
+    if (typeof bud === "number" && bud) {
+      const rate = Math.round(sales / bud * 100);
+      budCard = `<div class="hcard hbig ${rate >= 100 ? "good" : "warn"}">
+        <div class="hlbl">予算達成率（${latest.m}）</div>
+        <div class="hval">${rate}<span class="hu">%</span></div>
+        <div class="hsub">予算 ${man(bud)} → 実績 ${man(sales)}円${y ? `・前年 ${signed(y.pct)}%` : ""}</div></div>`;
+    } else {
+      budCard = `<div class="hcard hbig">
+        <div class="hlbl">直近売上（${latest.m}）</div>
+        <div class="hval">${man(sales)}<span class="hu">円</span></div>
+        <div class="hsub">${y ? `前年 ${signed(y.pct)}%` : "前年 ―"}　<span class="muted">予算未登録</span></div></div>`;
+    }
+  } else {
+    budCard = `<div class="hcard hbig"><div class="hlbl">売上</div><div class="hval">―</div></div>`;
+  }
+
+  // ② 主役の販促（実施中）。ルクアは パフェ→ケーキ が主役なので優先して並べる。
+  const priority = c => (c.bucket === "パフェ" ? 0 : c.bucket === "ケーキ" ? 1 : 2);
+  const heroCamps = live.slice().sort((a, b) => priority(a) - priority(b)).slice(0, 3);
+  const heroCards = heroCamps.length ? heroCamps.map(c => {
+    const tg = campTargeted(c, code);
+    const v = campVerdict(c);
+    const mk = VERDICT_MARK[v.tone] || "";
+    const num = (tg && tg.cur)
+      ? `<b>${man(tg.cur)}円</b>${tg.pct != null ? ` <span class="${tg.pct >= 0 ? "up" : "down"}">昨対 ${signed(tg.pct)}%</span>` : ""}`
+      : `<span class="muted">数値は確定月が出てから</span>`;
+    return `<button class="hpromo" data-camp="${c.id}"><span class="kdot" style="background:${kindOf(c.kind).color}"></span>
+      <span class="hpn">${esc(c.title)}${mk ? ` <span class="gvm ${v.tone}">${mk}</span>` : ""}</span>
+      <span class="hpv">${num}</span></button>`;
+  }).join("") : `<div class="muted hmt">実施中の販促はありません</div>`;
+
+  // ③ 要対応（POP未登録／目標未設定／振り返り未記入）
+  const noPop = [...live, ...soon].filter(c => creativesForCampaign(c.id).length === 0);
+  const noGoal = live.filter(c => goalEligible(c) && targetOf(c) == null);
+  const noReview = done.filter(needsReview);
+  const todo = [];
+  if (noPop.length) todo.push({ n: noPop.length, label: "POP未登録", c: noPop[0] });
+  if (noGoal.length) todo.push({ n: noGoal.length, label: "目標未設定", c: noGoal[0] });
+  if (noReview.length) todo.push({ n: noReview.length, label: "振り返り未記入", c: noReview[0] });
+  const todoHtml = todo.length
+    ? `<ul class="htodo">${todo.map(t => `<li data-camp="${t.c.id}"><span class="htn">${t.label}</span><span class="htc">${t.n}件</span><span class="htgo">→</span></li>`).join("")}</ul>`
+    : `<div class="muted hmt">やり残しなし 👍</div>`;
+
+  return `<section class="block hero">
+    <div class="hgrid">
+      ${budCard}
+      <div class="hcard"><div class="hlbl">主役の販促（実施中）</div>${heroCards}</div>
+      <div class="hcard"><div class="hlbl">要対応</div>${todoHtml}</div>
+    </div>
+  </section>`;
+}
+
 // 年間スケジュール本体。チャート（帯・既定）とカレンダー表を切替、年を選べる。
 // 販促（帯・チップ）を押すと販促詳細へ、月を押すと月ドリルへ。
 function storeAnnual(code) {
@@ -3463,6 +3530,7 @@ function renderStore(code) {
         <h2 class="sname">${s.name}</h2>${s.shared_facility ? '<span class="tagx">共営施設</span>' : ""}</div>
       ${homeBtnRow}
     </section>
+    ${storeHero(code)}
     ${storeAnnual(code)}
     ${storeSummary(code)}
     <details class="moredet">

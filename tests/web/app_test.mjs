@@ -662,5 +662,26 @@ test("statusControl：手動があれば手動バッジ＋自動を小さく、�
   assert.ok(!ro.includes("data-status"), "閲覧専用では編集不可");
 });
 
+// ── 店長ダッシュボード（storeHero）─────────────────────────────────────────
+console.log("店長ダッシュボード（storeHero）");
+
+test("storeHero：予算があれば達成率、無ければ直近売上を主に出す", () => {
+  const withBud = { ...annualData, budget: { 1160: { "2026-08": 12000000 } } };
+  let ctx = loadApp(withBud);
+  let html = call(ctx, `storeHero("1160")`);
+  assert.ok(html.includes("予算達成率"), "予算があれば達成率");
+  // 予算が無い店はフォールバック（直近売上＋予算未登録）
+  ctx = loadApp(annualData);
+  html = call(ctx, `storeHero("1160")`);
+  assert.ok(html.includes("直近売上") && html.includes("予算未登録"), "予算無しは売上＋未登録");
+});
+
+test("storeHero：要対応（POP未登録など）を出し、主役販促は data-camp", () => {
+  const ctx = loadApp(annualData);
+  const html = call(ctx, `storeHero("1160")`);
+  assert.ok(html.includes("要対応"));
+  assert.ok(html.includes("主役の販促"));
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);
