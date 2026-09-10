@@ -101,6 +101,10 @@ on:
         description: 'budget-ingest/dry: 先付け予算を読む先の月数'
         required: false
         default: '6'
+      budget_store:
+        description: 'budget-ingest/dry: 1店だけ深く遡る（店コード or 店名の一部・空で全店）'
+        required: false
+        default: ''
 
 # トークンは読み取りだけでよい（どのワークフローも push もコメントもしない）。
 permissions:
@@ -171,10 +175,12 @@ jobs:
                 --month "${{ inputs.abc_ingest_month }}" --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "budget-dry" ]; then
               xvfb-run -a python -m hansoku.cli fw-budget --mode ingest --dry-run --limit 2 \
-                --months "${{ inputs.budget_months }}" --ahead "${{ inputs.budget_ahead }}" --artifacts fw-artifacts
+                --months "${{ inputs.budget_months }}" --ahead "${{ inputs.budget_ahead }}" \
+                --store "${{ inputs.budget_store }}" --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "budget-ingest" ]; then
               xvfb-run -a python -m hansoku.cli fw-budget --mode ingest \
-                --months "${{ inputs.budget_months }}" --ahead "${{ inputs.budget_ahead }}" --artifacts fw-artifacts
+                --months "${{ inputs.budget_months }}" --ahead "${{ inputs.budget_ahead }}" \
+                --store "${{ inputs.budget_store }}" --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "daily-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode probe --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "report-probe" ]; then

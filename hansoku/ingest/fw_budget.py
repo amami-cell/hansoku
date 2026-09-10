@@ -526,6 +526,7 @@ def ingest(
     months_back: int = 3,
     months_ahead: int = 0,
     store_limit: int | None = None,
+    only_store: str | None = None,
     dry_run: bool = False,
 ) -> int:
     """月別予算登録から各店×対象月の「売上高（税抜き）」を読み、売上予算として取り込む。
@@ -566,6 +567,13 @@ def ingest(
             if store and store.active:
                 targets.append((opt["value"], store))
         print(f"[budget] マスタと一致した稼働店 {len(targets)}件")
+        # 1店だけを深く遡りたい時（過去の蓄積用）。店コード一致 or 店名部分一致。
+        if only_store:
+            targets = [
+                (v, s) for (v, s) in targets
+                if s.store_code == only_store or only_store in s.store_name
+            ]
+            print(f"[budget] --store={only_store} で {len(targets)}件に絞り込み")
         if store_limit:
             targets = targets[:store_limit]
 
