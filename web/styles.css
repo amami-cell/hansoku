@@ -893,6 +893,10 @@ tbody tr:last-child td{border-bottom:0;}
 .msx{font-size:11px;font-weight:600;}
 .msx.up{color:var(--good-ink);} .msx.down{color:var(--critical-ink);}
 .mbody{padding:4px 13px 13px;border-top:1px solid var(--line);}
+/* 部門別売上比の100%積み上げバー（一目・詳細は下の区分行） */
+.mcompbar{display:flex;height:14px;border-radius:7px;overflow:hidden;margin:10px 0 6px;background:var(--line);}
+.mseg{display:block;height:100%;}
+.mseg:hover{filter:brightness(1.08);}
 .mcats{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;}
 .mcatrow{display:flex;align-items:center;gap:10px;width:100%;background:none;border:none;cursor:pointer;
   padding:7px 4px;text-align:left;font-variant-numeric:tabular-nums;border-radius:8px;min-height:36px;}

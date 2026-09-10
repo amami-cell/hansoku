@@ -1668,6 +1668,14 @@ function catsAtM(code, m) {
 }
 const catAtM = (code, m, cat) => catsAtM(code, m).find(c => c.name === cat) || null;
 const prodsInCat = (code, m, cat) => prodsAtM(code, m).filter(p => classifyCat(p.name, code) === cat);
+// 品目区分の固定色（構成比バーと区分行を同色でつなぐ）
+const CAT_COLORS = {
+  "パフェ": "#c06a9e", "ケーキ": "#b5651d", "ジェラート": "#4a7fb5",
+  "ドリンク": "#2e8b57", "フード": "#8a5d00", "コラボ": "#9b59b6",
+  "コース": "#b5651d", "ランチ": "#2e8b57", "アラカルト": "#4a7fb5",
+  "飲み放題": "#4a7fb5", "食べ放題": "#c06a9e", "その他": "var(--ink-3)",
+};
+const catColor = name => CAT_COLORS[name] || "var(--ink-3)";
 // 部門（コース/ランチ…）で引けなければ品目区分（パフェ/ケーキ…）で引く統一アクセサ。
 // 施策の効果・構成比を、店に合った粒度で出すために両対応にする。qty は区分では
 // 「出数」ではなく品目数なので、区分由来のときは点数を出さない（null）。
@@ -3047,6 +3055,10 @@ function storeAnnualCalendar(code, year) {
     let body = "";
     if (open) {
       const cats = has ? catsAtM(code, m) : [];
+      // 部門別売上比を一目で：100%積み上げバー（色は区分ごと固定）
+      const compBar = cats.length
+        ? `<div class="mcompbar">${cats.map(c =>
+            `<span class="mseg" style="width:${(c.share * 100).toFixed(2)}%;background:${catColor(c.name)}" title="${esc(c.name)} ${Math.round(c.share * 100)}%・${yen(c.sales)}"></span>`).join("")}</div>` : "";
       const catList = cats.length ? `<ul class="mcats">${cats.map(c => {
         const pctv = Math.round(c.share * 100);
         const co = !!ANNUAL_OPEN[`${code}:${m}:${c.name}`];
@@ -3062,7 +3074,7 @@ function storeAnnualCalendar(code, year) {
         return `<li>
           <button class="mcatrow${co ? " on" : ""}" data-cattoggle="${code}:${m}:${encodeURIComponent(c.name)}">
             <span class="mcn">${co ? "▾" : "▸"} ${esc(c.name)}</span>
-            <span class="mcbar"><span class="mcfill" style="width:${Math.max(2, pctv)}%"></span></span>
+            <span class="mcbar"><span class="mcfill" style="width:${Math.max(2, pctv)}%;background:${catColor(c.name)}"></span></span>
             <span class="mcp">${pctv}%</span><span class="mcs">${yen(c.sales)}</span>
             ${cyoy != null ? `<span class="msx ${cyoy >= 0 ? "up" : "down"}">${signed(cyoy)}%</span>` : ""}
           </button>${prodRows}</li>`;
@@ -3070,6 +3082,7 @@ function storeAnnualCalendar(code, year) {
       const chips = camps.length
         ? `<div class="mchips">${camps.map(c => `<button class="pchip" data-camp="${c.id}" style="--kc:${kindOf(c.kind).color}" title="${esc(campRange(c))}">${esc(c.title)}</button>`).join("")}</div>` : "";
       body = `<div class="mbody">
+        ${compBar}
         ${catList}
         ${chips}
         ${has ? `<button class="linkbtn mdet" data-smonth="${code}:${m}">この月の詳細（構成比・販促・POP）→</button>` : ""}
