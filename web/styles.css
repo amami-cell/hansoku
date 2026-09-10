@@ -848,14 +848,6 @@ tbody tr:last-child td{border-bottom:0;}
 .gbar.done{opacity:.6;}
 .gbt{pointer-events:none;}
 .kdot{display:inline-block;width:9px;height:9px;border-radius:999px;flex:0 0 auto;}
-/* 売上ミニ棒（月軸に重ねる） */
-.grow.gsales{min-width:540px;align-items:end;padding:0 0 4px;}
-.glabel.gh.sub{font-weight:600;color:var(--ink-3);align-self:end;}
-.gsrow{display:grid;grid-template-columns:repeat(12,1fr);align-items:end;height:44px;gap:2px;}
-.gscell{display:flex;align-items:flex-end;justify-content:center;height:100%;background:none;border:none;cursor:pointer;padding:0;}
-.gsbar{display:block;width:70%;min-height:3px;background:var(--ink-3);border-radius:3px 3px 0 0;opacity:.55;}
-.gsbar.up{background:var(--good-ink);opacity:.7;} .gsbar.down{background:var(--critical-ink);opacity:.7;}
-.gscell:hover .gsbar{opacity:1;}
 /* 効果判定マーカー・凡例 */
 .gvm{font-size:11px;font-weight:700;margin-right:2px;}
 .gvm.good{color:var(--good-ink);} .gvm.warn{color:var(--warning-ink);}
@@ -874,6 +866,28 @@ tbody tr:last-child td{border-bottom:0;}
 .pchip{font-size:11px;color:#fff;background:var(--kc);border:none;border-radius:6px;padding:3px 8px;cursor:pointer;
   max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
 .pchip:hover{opacity:.85;}
+/* 販促エンジン（主役の通年） */
+.enggrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media (max-width:820px){.enggrid{grid-template-columns:1fr;}}
+.engcard{border:1px solid var(--line);border-radius:14px;padding:12px 13px;background:var(--surface);}
+.enghd{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--ink);margin-bottom:8px;}
+.enghd .muted{font-size:11px;font-weight:400;margin-left:auto;}
+.engbars{display:grid;grid-template-columns:repeat(13,1fr);align-items:end;height:56px;gap:3px;margin-bottom:8px;}
+.ebcell{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;background:none;border:none;cursor:pointer;padding:0;gap:2px;}
+.ebbar{display:block;width:74%;min-height:3px;background:var(--ink-3);border-radius:3px 3px 0 0;opacity:.5;}
+.ebbar.up{background:var(--good-ink);opacity:.75;} .ebbar.down{background:var(--critical-ink);opacity:.75;}
+.ebcell:hover .ebbar{opacity:1;}
+.eblab{font-size:9px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+.engocc{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px;}
+.engocc li{display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"chip name val" "chip range range";
+  align-items:center;column-gap:8px;cursor:pointer;padding:5px 4px;border-radius:8px;}
+.engocc li:hover{background:var(--surface-2);}
+.engocc .kchip{grid-area:chip;}
+.eon{grid-area:name;font-size:13px;font-weight:700;color:var(--ink);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.eov{grid-area:val;font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.eov b{color:var(--ink);}
+.eor{grid-area:range;font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+
 /* 店長ダッシュボード（店ページ先頭ヒーロー） */
 .hero{padding:0;background:none;border:none;box-shadow:none;}
 .hgrid{display:grid;grid-template-columns:1.1fr 1fr 1fr;gap:12px;}

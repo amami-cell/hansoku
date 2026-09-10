@@ -683,5 +683,21 @@ test("storeHero：要対応（POP未登録など）を出し、主役販促は d
   assert.ok(html.includes("主役の販促"));
 });
 
+// ── 販促エンジンビュー（storeEngines）─────────────────────────────────────
+console.log("販促エンジンビュー（storeEngines）");
+
+test("storeEngines：bucket指定のある区分を主役として、バー＋回ごと（data-camp）を出す", () => {
+  const ctx = loadApp(annualData);  // snow=パフェ, cake9=ケーキ
+  const html = call(ctx, `storeEngines("1160")`);
+  assert.ok(html.includes("販促エンジン"), "見出し");
+  assert.ok(html.includes("data-camp=\"snow\"") || html.includes("data-camp=\"cake9\""), "回ごとが施策リンク");
+  assert.ok(html.includes("data-scat=\"1160:2026-08:"), "バーは商品ドリルへ");
+});
+
+test("storeEngines：区分ルールの無い店では出さない", () => {
+  const ctx = loadApp(base);
+  assert.equal(call(ctx, `storeEngines("1006")`), "");
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);

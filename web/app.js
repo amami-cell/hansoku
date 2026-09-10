@@ -2954,6 +2954,70 @@ function campPrevOccurrence(c) {
 }
 
 // 年間スケジュール（全月をカードで。押すと月の詳細へ）
+// 販促エンジンビュー：ルクアの主役（パフェ／ケーキ 等、schedule で bucket 指定のある区分）を
+// 直近13ヶ月の通年の流れ（月次バー・前年比色）＋回ごと（昨対・前回比）で見せる。
+function storeEngines(code) {
+  const r = catRules(code);
+  if (!r) return "";
+  const myCamps = (DATA.campaigns || []).filter(c => (c.stores || []).includes(code) && c.bucket);
+  const catNames = (r.categories || []).map(x => x.name);
+  // 販促枠がある区分＝主役。売上順に並べる。
+  const engineCats = [...new Set(myCamps.map(c => c.bucket))]
+    .filter(name => catNames.includes(name));
+  if (!engineCats.length) return "";
+  const allM = [...new Set([
+    ...Object.keys((DATA.categories_monthly || {})[code] || {}),
+    ...Object.keys((DATA.products_monthly || {})[code] || {}),
+  ])].sort();
+  const months = allM.slice(-13);
+  if (!months.length) return "";
+
+  const cards = engineCats.map(cat => {
+    const series = months.map(m => {
+      const c = catAtM(code, m, cat);
+      return { m, sales: c ? c.sales : null };
+    });
+    const maxS = Math.max(1, ...series.map(s => s.sales || 0));
+    const bars = series.map(s => {
+      if (s.sales == null) return `<div class="ebcell"><span class="eblab">${+s.m.slice(5, 7)}</span></div>`;
+      const py = catAtM(code, prevYearM(s.m), cat);
+      const yoy = (py && py.sales) ? (s.sales / py.sales - 1) * 100 : null;
+      const cls = yoy == null ? "" : (yoy >= 0 ? " up" : " down");
+      const h = Math.max(6, Math.round(s.sales / maxS * 100));
+      return `<button class="ebcell" data-scat="${code}:${s.m}:${encodeURIComponent(cat)}"
+        title="${s.m} ${cat} ${man(s.sales)}円${yoy != null ? `・前年${signed(yoy)}%` : ""}">
+        <span class="ebbar${cls}" style="height:${h}%"></span><span class="eblab">${+s.m.slice(5, 7)}</span></button>`;
+    }).join("");
+    // 回ごと（この店・この区分の販促）を新しい順に、昨対・前回比つき
+    const occ = myCamps.filter(c => c.bucket === cat).sort((a, b) => a.start < b.start ? 1 : -1).slice(0, 8);
+    const occRows = occ.map(c => {
+      const k = kindOf(c.kind), st = campStatus(c);
+      const tg = campTargeted(c, code);
+      const prev = campPrevOccurrence(c);
+      let cmp = "";
+      if (tg && tg.cur) {
+        cmp = `<b>${man(tg.cur)}円</b>${tg.pct != null ? ` <span class="${tg.pct >= 0 ? "up" : "down"}">昨対${signed(tg.pct)}%</span>` : ""}`;
+        if (prev) { const b = campTargeted(prev); if (b && b.cur) { const d = (tg.cur / b.cur - 1) * 100; cmp += ` <span class="${d >= 0 ? "up" : "down"}">前回${signed(d)}%</span>`; } }
+      }
+      return `<li data-camp="${c.id}"><span class="kchip" style="--kc:${k.color}">${k.label}</span>
+        <span class="eon">${esc(c.title)}<span class="cstat ${st.k} sub">${st.label}</span></span>
+        <span class="eov">${cmp || '<span class="muted">確定月待ち</span>'}</span>
+        <span class="eor">${campRange(c)}</span></li>`;
+    }).join("");
+    return `<div class="engcard">
+      <div class="enghd"><span class="kdot" style="background:${catColor(cat)}"></span><b>${esc(cat)}</b><span class="muted">直近13ヶ月・前年比で色</span></div>
+      <div class="engbars">${bars}</div>
+      <ul class="engocc">${occRows}</ul>
+    </div>`;
+  }).join("");
+
+  return `<section class="block">
+    <div class="bhead"><h2>販促エンジン（主役の通年）</h2>
+      <span class="bnote">バー＝月次売上（緑=前年超/赤=前年割れ）・押すと商品／回ごとに昨対・前回比</span></div>
+    <div class="enggrid">${cards}</div>
+  </section>`;
+}
+
 // 店長ダッシュボード（店ページ先頭のヒーロー）。開いて3秒で「予算に対してどうか／
 // 主役の販促は効いているか／やり残し（POP・目標・振り返り）」が分かる。
 function storeHero(code) {
@@ -3532,6 +3596,7 @@ function renderStore(code) {
     </section>
     ${storeHero(code)}
     ${storeAnnual(code)}
+    ${storeEngines(code)}
     ${storeSummary(code)}
     <details class="moredet">
       <summary>詳しい数字をすべて見る</summary>
