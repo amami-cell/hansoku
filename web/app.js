@@ -264,6 +264,17 @@ const CURRENT_MONTH = (() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 })();
 const isProvisional = m => m === CURRENT_MONTH;
+// データの信頼区分。締め済みの実績＝確定、当月＝暫定（集計途中）、
+// 過去月なのに取り込まれていない＝未取込、未来月＝未来（未締め）。
+function provOf(m, has) {
+  if (m > CURRENT_MONTH) return { key: "future", label: "未来" };
+  if (m === CURRENT_MONTH) return has ? { key: "prov", label: "暫定" } : { key: "wait", label: "取込待ち" };
+  return has ? { key: "conf", label: "確定" } : { key: "none", label: "未取込" };
+}
+const provBadge = (m, has) => {
+  const p = provOf(m, has);
+  return `<span class="pv pv-${p.key}" title="${p.key === "conf" ? "締め済みの確定値" : p.key === "prov" ? "当月・集計途中の暫定値" : p.key === "none" ? "この月のFWデータはまだ取り込まれていません" : "未締めの先の月"}">${p.label}</span>`;
+};
 const TODAY = (() => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -3175,7 +3186,7 @@ function storeAnnualCalendar(code, year) {
     const camps = campsInMonth(code, m);
 
     const head = `<button class="mhd${open ? " on" : ""}"${has ? ` data-mtoggle="${code}:${m}"` : ""}>
-      <span class="mhm">${has ? (open ? "▾" : "▸") + " " : ""}${mo}月${prov ? "（暫定）" : ""}${camps.length ? `<span class="mhc">販促${camps.length}</span>` : ""}</span>
+      <span class="mhm">${has ? (open ? "▾" : "▸") + " " : ""}${mo}月${provBadge(m, has)}${camps.length ? `<span class="mhc">販促${camps.length}</span>` : ""}</span>
       <span class="mstats">
         ${stat("予算達成率", budRate != null ? `<b class="${budRate >= 100 ? "up" : "down"}">${budRate}%</b>` : "―", bud != null ? `<span class="mssub">予算${man(bud)}円</span>` : "")}
         ${stat("売上", sales != null ? man(sales) + "円" : "―", yoy != null ? `<span class="msx ${yoy >= 0 ? "up" : "down"}">前年${signed(yoy)}%</span>` : "")}
@@ -3221,7 +3232,12 @@ function storeAnnualCalendar(code, year) {
     }
     rows.push(`<div class="mrow${has ? "" : " off"}">${head}${body}</div>`);
   }
-  return `<div class="panel mlist">${rows.join("")}</div>`;
+  const legend = `<div class="mllegend">
+    <span class="pv pv-conf">確定</span>締め済み
+    <span class="pv pv-prov">暫定</span>当月・集計途中
+    <span class="pv pv-none">未取込</span>FW未反映
+    <span class="mllsp">数値はFWから自動集計</span></div>`;
+  return `<div class="panel mlist">${legend}${rows.join("")}</div>`;
 }
 
 // 月詳細の月ナビ（← 前月／選択中の月▾／次月 →）。中央を押すと月ピッカーを開閉。
