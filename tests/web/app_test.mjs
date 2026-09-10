@@ -573,7 +573,7 @@ test("既定はカレンダー表（数値一覧）で、両方の切替があ�
   assert.ok(html.includes('data-savw="chart"') && html.includes('data-savw="calendar"'), "両方の切替がある");
   assert.ok(html.includes("年間スケジュール"));
   // 予算/売上/集客/客単価の見出しが最初から並ぶ
-  assert.ok(html.includes("予算") && html.includes("売上") && html.includes("集客") && html.includes("客単価"));
+  assert.ok(html.includes("予算達成率") && html.includes("売上") && html.includes("客数") && html.includes("客単価"));
 });
 
 test("チャート：販促が帯（data-camp）で出て、月見出しは data-smonth", () => {

@@ -2985,20 +2985,6 @@ function storeAnnualChart(code, year) {
   const head = Array.from({ length: 12 }, (_, i) =>
     `<button class="gmh" data-smonth="${code}:${year}-${String(i + 1).padStart(2, "0")}">${i + 1}</button>`).join("");
 
-  // 売上ミニ棒（12ヶ月）。高さは年内最大に対する割合、色は前年同月比。
-  const salesArr = Array.from({ length: 12 }, (_, i) => salesAtC(code, `${year}-${String(i + 1).padStart(2, "0")}`));
-  const maxS = Math.max(1, ...salesArr.filter(v => typeof v === "number"));
-  const salesRow = salesArr.map((v, i) => {
-    const m = `${year}-${String(i + 1).padStart(2, "0")}`;
-    if (typeof v !== "number") return `<div class="gscell"></div>`;
-    const yv = salesAtC(code, prevYearM(m));
-    const yoy = (typeof yv === "number" && yv) ? (v / yv - 1) * 100 : null;
-    const cls = yoy == null ? "" : (yoy >= 0 ? " up" : " down");
-    const h = Math.max(6, Math.round(v / maxS * 100));
-    return `<button class="gscell" data-smonth="${code}:${m}" title="${i + 1}月 売上 ${man(v)}円${yoy != null ? `・前年${signed(yoy)}%` : ""}">
-      <span class="gsbar${cls}" style="height:${h}%"></span></button>`;
-  }).join("");
-
   const rows = camps.map(c => {
     const k = kindOf(c.kind), st = campStatus(c);
     const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
@@ -3023,7 +3009,6 @@ function storeAnnualChart(code, year) {
 
   return `<div class="panel gantt">
     <div class="grow ghead"><div class="glabel gh">販促 / 月</div><div class="gmonths">${head}</div></div>
-    <div class="grow gsales"><div class="glabel gh sub">売上</div><div class="gsrow">${salesRow}</div></div>
     ${camps.length ? rows : `<div class="empty">${year}年に走った販促はありません。</div>`}
   </div>${legend}`;
 }
@@ -3053,9 +3038,9 @@ function storeAnnualCalendar(code, year) {
     const head = `<button class="mhd${open ? " on" : ""}"${has ? ` data-mtoggle="${code}:${m}"` : ""}>
       <span class="mhm">${has ? (open ? "▾" : "▸") + " " : ""}${mo}月${prov ? "（暫定）" : ""}${camps.length ? `<span class="mhc">販促${camps.length}</span>` : ""}</span>
       <span class="mstats">
-        ${stat("予算", bud != null ? man(bud) + "円" : "―", budRate != null ? `<span class="msx ${budRate >= 100 ? "up" : "down"}">${budRate}%</span>` : "")}
+        ${stat("予算達成率", budRate != null ? `<b class="${budRate >= 100 ? "up" : "down"}">${budRate}%</b>` : "―", bud != null ? `<span class="mssub">予算${man(bud)}円</span>` : "")}
         ${stat("売上", sales != null ? man(sales) + "円" : "―", yoy != null ? `<span class="msx ${yoy >= 0 ? "up" : "down"}">前年${signed(yoy)}%</span>` : "")}
-        ${stat("集客", cov != null ? nin(cov) : "―")}
+        ${stat("客数", cov != null ? nin(cov) : "―")}
         ${stat("客単価", spp != null ? yen(spp) : "―")}
       </span></button>`;
 
