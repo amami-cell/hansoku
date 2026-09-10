@@ -1,0 +1,36 @@
+name: audit-categories
+# 品目区分ルールの精度監査（その他に落ちている商品を洗い出す・読み取りのみ）。
+on:
+  workflow_dispatch:
+    inputs:
+      store:
+        description: "店コード（既定 1160）"
+        required: false
+        default: "1160"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 依存をインストール
+        run: pip install -r requirements.txt
+      - name: 監査
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          STORE: ${{ github.event.inputs.store }}
+        run: |
+          set -o pipefail
+          python scripts/audit_categories.py | tee -a "$GITHUB_STEP_SUMMARY"
