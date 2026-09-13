@@ -918,14 +918,14 @@ tbody tr:last-child td{border-bottom:0;}
 /* 月次の推移（一覧）：1行＝1ヶ月。デスクトップは1行、スマホは2段に折り返す */
 .mtable{margin-bottom:16px;}
 .mtlist{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:12px;overflow:hidden;}
-.mtr{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:9px 12px;cursor:pointer;
-  border-top:1px solid var(--line);background:none;width:100%;text-align:left;
-  font-variant-numeric:tabular-nums;}
+.mtr{display:block;padding:9px 12px;cursor:pointer;border-top:1px solid var(--line);
+  background:none;width:100%;text-align:left;font-variant-numeric:tabular-nums;}
 .mtr:first-child{border-top:0;}
 .mtr:hover{background:var(--surface-2);}
-.mtr.na{cursor:default;color:var(--ink-3);}
+.mtr.na{cursor:default;color:var(--ink-3);display:flex;align-items:center;gap:10px;}
 .mtr.na:hover{background:none;}
 .mtr.prov{background:repeating-linear-gradient(45deg,transparent,transparent 7px,var(--surface-2) 7px,var(--surface-2) 8px);}
+.mtmain{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;}
 .mtm{flex:none;width:52px;font-size:13px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:4px;}
 .mtpv{font-style:normal;font-size:9px;font-weight:700;color:var(--warning-ink);background:var(--warn-soft);
   border-radius:4px;padding:1px 4px;}
@@ -938,17 +938,26 @@ tbody tr:last-child td{border-bottom:0;}
 .mtn b{font-size:13px;font-weight:700;color:var(--ink);}
 .mtn b.up{color:var(--good-ink);} .mtn b.down{color:var(--critical-ink);}
 .mtn .sub{font-size:10px;color:var(--ink-3);}
-.mtcbar{flex:1 1 130px;min-width:90px;display:flex;height:12px;border-radius:4px;overflow:hidden;
+.mtcbar{flex:1 1 110px;min-width:80px;display:flex;height:12px;border-radius:4px;overflow:hidden;
   background:var(--surface-2);}
 .mtcbar.empty{background:none;}
 .mtseg{height:100%;min-width:1px;}
-.mtmk{flex:none;display:inline-flex;gap:3px;margin-left:auto;}
+.mttop{flex:none;font-size:11px;color:var(--ink-3);white-space:nowrap;}
+/* 月ごとに走った販促（名前＋◎/△＋昨対%）。数値行の下に、その月の“やったこと”を並べる */
+.mtpromos{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 0 56px;}
+.mtpc{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-2);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:2px 8px;
+  max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mtpc .up{color:var(--good-ink);font-weight:700;} .mtpc .down{color:var(--critical-ink);font-weight:700;}
+.mtpg{font-weight:800;}
+.mtpg.good{color:var(--good-ink);} .mtpg.warn{color:var(--critical-ink);} .mtpg.wait,.mtpg.flat{color:var(--ink-3);}
 @media (max-width:640px){
-  .mtr{gap:5px 12px;padding:9px 11px;}
+  .mtmain{gap:5px 12px;}
   .mtm{width:auto;flex:1 0 100%;}    /* 月見出しを1段目に単独で */
   .mtbar{width:100%;flex:1 0 100%;order:5;}
-  .mtcbar{flex:1 0 100%;order:6;}
-  .mtmk{order:4;}
+  .mtcbar{flex:1 0 60%;order:6;}
+  .mttop{order:7;}
+  .mtpromos{margin-left:0;}
 }
 /* 年間の売上構成比（区分名＋%ラベル・凡例つきの100%積み上げ） */
 .yccomp{margin-bottom:14px;}
@@ -1080,7 +1089,8 @@ tbody tr:last-child td{border-bottom:0;}
 .mbody{padding:4px 13px 13px;border-top:1px solid var(--line);}
 /* 部門別売上比の100%積み上げバー（一目・詳細は下の区分行） */
 .mcompbar{display:flex;height:14px;border-radius:7px;overflow:hidden;margin:10px 0 6px;background:var(--line);}
-.mseg{display:block;height:100%;}
+.mcompbar.lg{height:22px;margin:2px 0 12px;}
+.mseg{display:block;height:100%;min-width:1px;}
 .mseg:hover{filter:brightness(1.08);}
 .mcats{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;}
 .mcatrow{display:flex;align-items:center;gap:10px;width:100%;background:none;border:none;cursor:pointer;

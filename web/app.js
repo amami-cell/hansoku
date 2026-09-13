@@ -61,7 +61,7 @@ let METRIC = "sales";
 let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"）
 let YEAR = null;                   // 年間販促ビューで表示中の年（数値）
 let STORE_YEAR = null;             // 店ページの年間スケジュールで見ている年（文字列 "YYYY"）
-let STORE_ANNUAL_VIEW = "calendar"; // 店ページ年間スケジュールの表示（calendar=既定・数値一覧 / chart=帯）
+let STORE_ANNUAL_VIEW = "chart"; // 店ページ年間スケジュールの表示（chart=既定・月次一覧＋帯 / calendar=開いて詳しく）
 let ANNUAL_OPEN = {};              // カレンダー一覧の開閉状態（"code:month" と "code:month:区分" を鍵に）
 let MONTH_PICK_OPEN = false;       // 月詳細の月ピッカーを開いているか
 let PROMO_SORT = "effect";         // この店の販促の並び（effect=効果順 / recent=新しい順）
@@ -3169,12 +3169,12 @@ function storeAnnual(code) {
   const view = STORE_ANNUAL_VIEW === "calendar" ? "calendar" : "chart";
   const yearTabs = years.map(y => `<button class="ytab${y === cur ? " on" : ""}" data-syear="${y}">${y}年</button>`).join("");
   const toggle = `<div class="viewtabs">
-    <button class="vtab${view === "chart" ? " on" : ""}" data-savw="chart">チャート</button>
-    <button class="vtab${view === "calendar" ? " on" : ""}" data-savw="calendar">カレンダー表</button></div>`;
+    <button class="vtab${view === "chart" ? " on" : ""}" data-savw="chart">月次一覧</button>
+    <button class="vtab${view === "calendar" ? " on" : ""}" data-savw="calendar">カレンダー表（開いて詳しく）</button></div>`;
   const body = view === "calendar" ? storeAnnualCalendar(code, cur) : storeAnnualChart(code, cur);
   return `<section class="block" id="annual">
     <div class="bhead"><h2>年間スケジュール</h2>
-      <span class="bnote">${view === "chart" ? "帯＝販促期間。押すと販促詳細／月を押すと月の詳細" : "月を押すと予算・売上・集客・客単価・区分構成比が開く／区分を押すと商品一覧"}</span></div>
+      <span class="bnote">${view === "chart" ? "月ごとの売上・前年比・予算・構成比・販促を上から下へ一覧。下は販促の帯（期間）。行/帯を押すと詳細へ" : "月を押すと予算・売上・集客・客単価・区分構成比が開く／区分を押すと商品一覧"}</span></div>
     <div class="annualbar">${toggle}<div class="ytabs">${yearTabs}</div></div>
     ${body}
   </section>`;
@@ -3273,25 +3273,34 @@ function storeMonthlyTable(code, year) {
     const bud = budgetAt(code, m), budRate = (s && bud) ? Math.round(s / bud * 100) : null;
     const cov = coversAt(code, m);
     const spp = (s && cov) ? Math.round(s / cov) : null;
-    const cats = catsAtM(code, m);
+    const cats = catsAtM(code, m).slice().sort((a, b) => b.share - a.share);
     const compo = cats.map(c =>
       `<span class="mtseg" style="width:${(c.share * 100).toFixed(1)}%;background:${catColor(c.name)}" title="${esc(c.name)} ${Math.round(c.share * 100)}%"></span>`).join("");
+    const topCat = cats[0];
     const cls = yoy == null ? "" : (yoy >= 0 ? "up" : "down");
     const w = Math.max(4, Math.round(s / maxS * 100));
-    // この月に走っていた販促の効き（◎/△）を添える
-    const marks = myCamps
+    // この月に走っていた販促を「名前＋効き（◎/△・昨対%）」のチップで並べる。
+    // 「その月に何をして、結果どうだったか」を一覧のまま読めるように。
+    const chips = myCamps
       .filter(c => c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m)
-      .map(c => { const e = storeCampEffect(c, code); return e.mark ? `<span class="cvm ${e.tone}" title="${esc(c.title)}｜昨対${signed(e.pct)}%">${e.mark}</span>` : ""; })
-      .filter(Boolean).join("");
+      .map(c => {
+        const e = storeCampEffect(c, code);
+        const g = e.mark ? `<span class="mtpg ${e.tone}">${e.mark}</span>` : "";
+        const pctTxt = e.measured ? ` <span class="${e.pct >= 0 ? "up" : "down"}">${signed(e.pct)}%</span>` : "";
+        return `<span class="mtpc" title="${esc(c.title)}｜${campRange(c)}${e.measured ? `｜昨対${signed(e.pct)}%` : `｜${e.state}`}">${g}${esc(c.title)}${pctTxt}</span>`;
+      }).join("");
     return `<div class="mtr${p.key === "prov" ? " prov" : ""}" data-smonth="${code}:${m}">
-      <span class="mtm">${mo}月${p.key === "prov" ? '<i class="mtpv">暫定</i>' : ""}</span>
-      <span class="mtbar"><span class="mtfill ${cls}" style="width:${w}%"></span></span>
-      <span class="mtn"><span class="mtl">売上</span><b>${man(s)}</b></span>
-      <span class="mtn"><span class="mtl">前年比</span><b class="${cls}">${yoy != null ? signed(yoy) + "%" : "―"}</b></span>
-      <span class="mtn"><span class="mtl">予算</span><b class="${budRate != null ? (budRate >= 100 ? "up" : "down") : ""}">${budRate != null ? budRate + "%" : "―"}</b></span>
-      <span class="mtn"><span class="mtl">客数</span><b>${cov != null ? nin(cov) : "―"}</b>${spp != null ? `<span class="sub">@${yen(spp)}</span>` : ""}</span>
-      ${compo ? `<span class="mtcbar" title="品目構成比">${compo}</span>` : `<span class="mtcbar empty"></span>`}
-      ${marks ? `<span class="mtmk">${marks}</span>` : ""}
+      <div class="mtmain">
+        <span class="mtm">${mo}月${p.key === "prov" ? '<i class="mtpv">暫定</i>' : ""}</span>
+        <span class="mtbar"><span class="mtfill ${cls}" style="width:${w}%"></span></span>
+        <span class="mtn"><span class="mtl">売上</span><b>${man(s)}</b></span>
+        <span class="mtn"><span class="mtl">前年比</span><b class="${cls}">${yoy != null ? signed(yoy) + "%" : "―"}</b></span>
+        <span class="mtn"><span class="mtl">予算</span><b class="${budRate != null ? (budRate >= 100 ? "up" : "down") : ""}">${budRate != null ? budRate + "%" : "―"}</b></span>
+        <span class="mtn"><span class="mtl">客数</span><b>${cov != null ? nin(cov) : "―"}</b>${spp != null ? `<span class="sub">@${yen(spp)}</span>` : ""}</span>
+        ${compo ? `<span class="mtcbar" title="品目構成比">${compo}</span>` : `<span class="mtcbar empty"></span>`}
+        ${topCat ? `<span class="mttop">${esc(topCat.name)} ${Math.round(topCat.share * 100)}%</span>` : ""}
+      </div>
+      ${chips ? `<div class="mtpromos">${chips}</div>` : ""}
     </div>`;
   }).join("");
   return `<div class="mtable">
@@ -3437,11 +3446,19 @@ function renderStoreMonth(code, m) {
   const crRow = dm && dm.raw ? dm.raw.filter(r => r.cost_rate != null)
     .map(r => `${esc(r.name)} 原価${r.cost_rate}%`).join("　") : "";
 
+  // 予算達成率（FW月別予算）。売上の主要指標として、売上のとなりに出す。
+  const bud = budgetAt(code, m);
+  const budRate = (sales && typeof bud === "number" && bud) ? Math.round(sales / bud * 100) : null;
+
   const kpi = (lbl, big, sub, tone) => `<div class="kpi"><div class="lbl">${lbl}</div>
     <div class="big ${tone || ""}">${big}</div>${sub ? `<div class="delta">${sub}</div>` : ""}</div>`;
+  const budKpi = (typeof bud === "number" && bud)
+    ? kpi("予算達成率", budRate != null ? budRate + "%" : "―", `予算 ${man(bud)}円`, budRate != null ? (budRate >= 100 ? "up" : "down") : "")
+    : "";
   const kpis = `<div class="kpis">
     ${kpi("売上" + (prov ? "（暫定）" : ""), sales != null ? man(sales) + "円" : "―",
       yoy != null ? `前年 <span class="${yoy >= 0 ? "up" : "down"}">${signed(yoy)}%</span>` : "前年 ―")}
+    ${budKpi}
     ${kpi("集客（客数）", cov != null ? nin(cov) : "―",
       covYoy != null ? `前年 <span class="${covYoy >= 0 ? "up" : "down"}">${signed(covYoy)}%</span>` : "前年 ―")}
     ${kpi("客単価", spp != null ? yen(spp) : "―", cov != null ? `${nin(cov)}で割った値` : "")}
@@ -3451,9 +3468,11 @@ function renderStoreMonth(code, m) {
   // 品目区分の構成比（部門名のみ→押すと商品詳細）
   const cats = catsAtM(code, m);
   const catTotal = cats.reduce((a, c) => a + c.sales, 0) || 1;
+  const catBar = cats.slice().sort((a, b) => b.sales - a.sales).map(c =>
+    `<span class="mseg" style="width:${(c.sales / catTotal * 100).toFixed(2)}%;background:${catColor(c.name)}" title="${esc(c.name)} ${Math.round(c.sales / catTotal * 100)}%・${yen(c.sales)}"></span>`).join("");
   const catBlock = cats.length ? `<section class="block">
     <div class="bhead"><h2>品目区分の構成比</h2><span class="bnote">区分を押すと商品詳細　合計 ${yen(catTotal)}</span></div>
-    <div class="panel"><ul class="dlist">${cats.map(c => {
+    <div class="panel"><div class="mcompbar lg">${catBar}</div><ul class="dlist">${cats.map(c => {
       const pctv = Math.round(c.share * 100);
       const w = Math.max(2, pctv);
       const py = catAtM(code, prevYearM(m), c.name);

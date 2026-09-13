@@ -565,15 +565,14 @@ const annualData = {
   ],
 };
 
-test("既定はカレンダー表（数値一覧）で、両方の切替がある", () => {
+test("既定は月次一覧（スクロールで月ごとに読める）で、両方の切替がある", () => {
   const ctx = loadApp(annualData);
   // 既定（グローバル初期値）のまま：明示セットしない
   const html = call(ctx, `storeAnnual("1160")`);
-  assert.ok(html.includes('class="vtab on" data-savw="calendar"'), "既定はカレンダー表がon");
+  assert.ok(html.includes('class="vtab on" data-savw="chart"'), "既定は月次一覧がon");
   assert.ok(html.includes('data-savw="chart"') && html.includes('data-savw="calendar"'), "両方の切替がある");
   assert.ok(html.includes("年間スケジュール"));
-  // 予算/売上/集客/客単価の見出しが最初から並ぶ
-  assert.ok(html.includes("予算達成率") && html.includes("売上") && html.includes("客数") && html.includes("客単価"));
+  assert.ok(html.includes("月次の推移（一覧）"), "月次一覧が最初から出る");
 });
 
 test("チャート：販促が帯（data-camp）で出て、月見出しは data-smonth", () => {
@@ -788,6 +787,28 @@ test("storeMonthlyTable：確定月は売上・前年比・予算達成の数値
   assert.ok(html.includes('data-smonth="1006:2026-01"'), "行を押すと月の詳細へ");
   assert.ok(html.includes("mtfill"), "売上の量を示すバー");
   assert.ok(/予算<\/span><b[^>]*>\d+%/.test(html), "予算達成率の数値");
+});
+
+test("storeMonthlyTable：月ごとに走った販促の名前＋効き・主役区分ラベルが出る", () => {
+  const ctx = loadApp(annualData);
+  const html = call(ctx, `storeMonthlyTable("1160","2025")`);
+  assert.ok(html.includes("mtpromos") && html.includes("パフェスノー"), "月行にその月の販促名");
+  assert.ok(html.includes("mtpc"), "販促チップ");
+  assert.ok(html.includes("mttop"), "その月の主役区分（構成比トップ）ラベル");
+});
+
+test("renderStoreMonth：予算があれば月詳細に予算達成率KPIが出る", () => {
+  const withBud = { ...annualData, budget: { 1160: { "2025-08": 8000000 } } };
+  const ctx = loadApp(withBud);
+  const html = call(ctx, `renderStoreMonth("1160","2025-08")`);
+  assert.ok(html.includes("予算達成率"), "月詳細に予算達成率KPI");
+  assert.ok(/予算 [\d,]+/.test(html), "予算金額のサブ表示");
+});
+
+test("renderStoreMonth：予算が無ければ予算KPIは出さない（―の羅列を避ける）", () => {
+  const ctx = loadApp(annualData);   // 1160 に budget 無し
+  const html = call(ctx, `renderStoreMonth("1160","2025-08")`);
+  assert.ok(!html.includes("予算達成率"), "予算未登録なら予算KPIは省く");
 });
 
 test("storeYearComposition：年間の売上構成比（区分名＋%・凡例）を出す", () => {
