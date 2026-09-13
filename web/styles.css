@@ -879,6 +879,29 @@ tbody tr:last-child td{border-bottom:0;}
 .ghelp{font-size:11.5px;color:var(--ink-3);line-height:1.55;margin-top:6px;padding:8px 10px;
   background:var(--surface-2);border:1px solid var(--line);border-radius:8px;}
 .glg i{width:10px;height:10px;border-radius:3px;display:inline-block;font-style:normal;font-size:11px;line-height:1;}
+/* チャート頭の年サマリ＋月次ミニチャート（売上棒＋構成比帯） */
+.ysum{display:flex;flex-wrap:wrap;gap:8px 20px;margin:2px 0 12px;font-variant-numeric:tabular-nums;}
+.ysum-i{display:inline-flex;align-items:baseline;gap:7px;font-size:14px;}
+.ysum-i .ysl{font-size:11px;color:var(--ink-3);}
+.ysum-i b{font-size:16px;font-weight:800;}
+.mmchart{margin-bottom:14px;}
+.mmhd{font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:8px;display:flex;gap:10px;
+  flex-wrap:wrap;align-items:baseline;}
+.mmhint{font-size:11px;font-weight:400;color:var(--ink-3);}
+.mmrow{display:grid;grid-template-columns:repeat(12,1fr);gap:4px;align-items:end;}
+.mmcol{display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:0;
+  cursor:pointer;padding:2px 0;}
+.mmbarwrap{height:60px;width:100%;display:flex;align-items:flex-end;justify-content:center;}
+.mmbar{width:70%;max-width:20px;min-height:2px;border-radius:3px 3px 0 0;background:var(--accent);}
+.mmbar.up{background:var(--good-ink);} .mmbar.down{background:var(--critical-ink);}
+.mmbar.prov{opacity:.4;}
+.mmcompo{height:16px;width:70%;max-width:20px;display:flex;flex-direction:column;border-radius:2px;
+  overflow:hidden;background:var(--surface-2);}
+.mmseg{width:100%;}
+.mmlab{font-size:10px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+.mmcol:hover .mmbar{filter:brightness(1.1);}
+.mmcol:hover .mmlab{color:var(--accent);}
+@media (max-width:560px){ .mmbarwrap{height:44px;} .mmhd{font-size:11.5px;} }
 /* カレンダー表 */
 .calgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;}
 .ccell{border:1px solid var(--line);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:6px;min-height:72px;}

@@ -3142,12 +3142,21 @@ function storeAnnualChart(code, year) {
     const sM = s < ys ? 1 : +s.slice(5, 7);
     const eM = e > ye ? 12 : +e.slice(5, 7);
     const left = (sM - 1) / 12 * 100, w = Math.max(1, (eM - sM + 1)) / 12 * 100;
-    const mark = VERDICT_MARK[campVerdict(c).tone] || "";
+    const ef = storeCampEffect(c, code);
+    const mark = ef.mark || (VERDICT_MARK[campVerdict(c).tone] || "");
+    const tone = ef.mark ? ef.tone : campVerdict(c).tone;
+    // ホバー用（マウスを合わせると売上・昨対・前回比が出る）。
+    let tip = `${c.title}｜${campRange(c)}`;
+    if (ef.measured) {
+      tip += `｜${ef.label} ${man(ef.cur)}円・昨対${signed(ef.pct)}%`;
+      const prevOcc = campPrevOccurrence(c);
+      if (prevOcc) { const pb = campTargeted(prevOcc, code); if (pb && pb.cur) tip += `・前回${signed((ef.cur / pb.cur - 1) * 100)}%`; }
+    } else if (ef.state) { tip += `｜${ef.state}`; }
     return `<div class="grow">
-      <button class="glabel" data-camp="${c.id}"><span class="kdot" style="background:${k.color}"></span>${mark ? `<span class="gvm ${campVerdict(c).tone}">${mark}</span>` : ""}${esc(c.title)}</button>
+      <button class="glabel" data-camp="${c.id}"><span class="kdot" style="background:${k.color}"></span>${mark ? `<span class="gvm ${tone}">${mark}</span>` : ""}${esc(c.title)}</button>
       <div class="gtrack">
         <button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${k.color}"
-          title="${esc(c.title)}｜${campRange(c)}"><span class="gbt">${esc(c.title)}</span></button>
+          title="${esc(tip)}"><span class="gbt">${esc(c.title)}</span></button>
       </div></div>`;
   }).join("");
 
@@ -3159,10 +3168,65 @@ function storeAnnualChart(code, year) {
        <div class="ghelp">帯＝販促の期間（左＝開始月・長さ＝実施期間）。<b>帯や販促名</b>を押すと販促の詳細、<b>上の月番号</b>を押すとその月の詳細（構成比・POP）へ。◎/△は対象区分の前年比で自動判定。</div>`
     : "";
 
-  return `<div class="panel gantt">
+  // 年サマリ（確定分の売上合計・前年比・予算達成の平均・販促◎/△）。チャートの頭に置いて、
+  // 下までスクロールしなくても要約が分かるように。
+  const yConf = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`)
+    .filter(m => m < CURRENT_MONTH && (DATA.monthly[code] || {})[m]);
+  let ySales = 0, yPrev = 0; const budRates = [];
+  for (const m of yConf) {
+    const sv = salesAtC(code, m); if (typeof sv !== "number") continue;
+    ySales += sv;
+    const pv = salesAtC(code, prevYearM(m)); if (typeof pv === "number") yPrev += pv;
+    const b = budgetAt(code, m); if (sv && b) budRates.push(sv / b * 100);
+  }
+  const yYoY = yPrev ? (ySales / yPrev - 1) * 100 : null;
+  const budAvg = budRates.length ? Math.round(budRates.reduce((a, b) => a + b, 0) / budRates.length) : null;
+  const cGood = camps.filter(c => { const e = storeCampEffect(c, code); return e.measured && e.pct >= 0; }).length;
+  const cWarn = camps.filter(c => { const e = storeCampEffect(c, code); return e.measured && e.pct < 0; }).length;
+  const yearSummary = `<div class="ysum">
+    <span class="ysum-i"><span class="ysl">${year}年 売上(確定)</span><b>${ySales ? man(ySales) + "円" : "―"}</b>${yYoY != null ? `<span class="${yYoY >= 0 ? "up" : "down"}">前年${signed(yYoY)}%</span>` : ""}</span>
+    ${budAvg != null ? `<span class="ysum-i"><span class="ysl">予算達成(平均)</span><b class="${budAvg >= 100 ? "up" : "down"}">${budAvg}%</b></span>` : ""}
+    <span class="ysum-i"><span class="ysl">販促の効き</span><b class="up">◎ ${cGood}</b> <b class="down">△ ${cWarn}</b></span>
+  </div>`;
+
+  return `${yearSummary}${storeMonthlyMini(code, year)}<div class="panel gantt">
     <div class="grow ghead"><div class="glabel gh">販促 / 月</div><div class="gmonths">${head}</div></div>
     ${camps.length ? rows : `<div class="empty">${year}年に走った販促はありません。</div>`}
   </div>${legend}`;
+}
+
+// 月次の売上（棒・前年比で色・暫定は薄く）＋品目構成比（下の帯）を12ヶ月ぶん、チャートの
+// 頭に一覧化する。棒/帯を押すとその月の詳細へ。カレンダー表の数字を、チャートでも一望できる。
+function storeMonthlyMini(code, year) {
+  const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
+  const salesArr = months.map(m => ((DATA.monthly[code] || {})[m]) ? salesAtC(code, m) : null);
+  const maxS = Math.max(1, ...salesArr.map(s => (typeof s === "number" ? s : 0)));
+  if (!salesArr.some(s => typeof s === "number")) return "";
+  const cols = months.map((m, i) => {
+    const s = salesArr[i];
+    const has = typeof s === "number";
+    const p = provOf(m, has);
+    const yv = salesAtC(code, prevYearM(m));
+    const yoy = (has && typeof yv === "number" && yv) ? (s / yv - 1) * 100 : null;
+    const h = has ? Math.max(3, Math.round(s / maxS * 100)) : 0;
+    const cats = has ? catsAtM(code, m) : [];
+    const compo = cats.map(c =>
+      `<span class="mmseg" style="height:${(c.share * 100).toFixed(1)}%;background:${catColor(c.name)}"></span>`).join("");
+    const bud = budgetAt(code, m), budRate = (s && bud) ? Math.round(s / bud * 100) : null;
+    const cov = coversAt(code, m);
+    const tip = has
+      ? `${+m.slice(5, 7)}月 売上${man(s)}円${yoy != null ? `・前年${signed(yoy)}%` : ""}${budRate != null ? `・予算達成${budRate}%` : ""}${cov != null ? `・客数${nin(cov)}` : ""}` +
+        (cats.length ? `｜${cats.slice(0, 3).map(c => `${c.name}${Math.round(c.share * 100)}%`).join(" ")}` : "")
+      : `${+m.slice(5, 7)}月 ${p.label}`;
+    const cls = yoy == null ? "" : (yoy >= 0 ? "up" : "down");
+    return `<button class="mmcol" data-smonth="${code}:${m}" title="${esc(tip)}">
+      <span class="mmbarwrap"><span class="mmbar ${cls}${p.key === "prov" ? " prov" : ""}" style="height:${h}%"></span></span>
+      <span class="mmcompo">${compo}</span>
+      <span class="mmlab">${+m.slice(5, 7)}</span></button>`;
+  }).join("");
+  return `<div class="mmchart">
+    <div class="mmhd">月次の売上と品目構成比<span class="mmhint">棒＝売上（緑=前年超/赤=前年割れ・薄い＝暫定）／下の帯＝品目区分の構成比。押すと月の詳細へ</span></div>
+    <div class="mmrow">${cols}</div></div>`;
 }
 
 // カレンダー表＝月を縦に一覧。各月に 予算/売上/集客/客単価 と品目区分の構成比。
