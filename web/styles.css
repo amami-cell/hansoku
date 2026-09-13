@@ -1049,6 +1049,10 @@ tbody tr:last-child td{border-bottom:0;}
 .htc{font-size:12px;font-weight:700;color:var(--warning-ink);font-variant-numeric:tabular-nums;}
 .htgo{color:var(--accent);font-weight:700;}
 
+/* 予算未入力の明示＋入力ナビ */
+.budnote{margin-top:10px;font-size:12px;color:var(--warning-ink);background:var(--warn-soft);
+  border:1px solid color-mix(in srgb,var(--warning-ink) 25%,var(--line));border-radius:8px;padding:7px 11px;line-height:1.6;}
+.budnote b{color:var(--warning-ink);}
 /* 今月の共有カード（会議・LINE用。1枚で読める・スクショ向き） */
 .sharecard{border:1px solid var(--line-strong);border-radius:14px;padding:14px 16px;background:var(--surface);
   box-shadow:var(--shadow);font-variant-numeric:tabular-nums;}

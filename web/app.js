@@ -3380,11 +3380,17 @@ function storeYearMatrix(code, year) {
   const compoLg = yTot ? `<div class="ymxcompo-lg"><span class="ymxcl-t">品目構成比（確定分）</span><div class="yclgs">${[...yearAgg.entries()].sort((a, b) => b[1] - a[1]).map(([n, v]) =>
     `<span class="yclg"><i style="background:${catColor(n)}"></i>${esc(n)} <b>${Math.round(v / yTot * 100)}%</b></span>`).join("")}</div></div>` : "";
 
+  // 予算未入力の月（売上はあるが予算が無い確定月）を明示。FW入力を促す。
+  const budMissing = rows.filter(r => r.has && r.m < CURRENT_MONTH && !(typeof r.bud === "number" && r.bud));
+  const budHint = budMissing.length
+    ? `<div class="budnote">予算未入力の月あり（${budMissing.map(r => +r.m.slice(5, 7) + "月").join("・")}）— FWに月別予算を入れると「予算」行が埋まります。</div>`
+    : "";
+
   return `<div class="ymx">
     <div class="mmhd">${year}年 一覧（縦＝指標／横＝月）<span class="mmhint">1画面で年間を管理。月(列見出し)を押すとその月の詳細へ。緑=前年超/赤=前年割れ・薄い列＝暫定/未取込・右端＝年計</span></div>
     <div class="ymxwrap"><table class="ymxt"><thead><tr>${th}</tr></thead>
       <tbody>${rowSales}${rowYoY}${rowBud}${rowCov}${rowKt}</tbody></table></div>
-    ${compoLg}</div>`;
+    ${budHint}${compoLg}</div>`;
 }
 
 // カレンダー表＝月を縦に一覧。各月に 予算/売上/集客/客単価 と品目区分の構成比。
@@ -3504,6 +3510,10 @@ function renderStoreMonth(code, m) {
   // 予算達成率（FW月別予算）。売上の主要指標として、売上のとなりに出す。
   const bud = budgetAt(code, m);
   const budRate = (sales && typeof bud === "number" && bud) ? Math.round(sales / bud * 100) : null;
+  // 予算未入力の明示＋入力ナビ（売上はあるのに予算が無い確定月だけ）。
+  const budNote = (sales != null && !prov && !(typeof bud === "number" && bud))
+    ? `<div class="budnote">予算未入力 — FWに <b>${jpMonth(m)}</b> の月別予算を入れると、ここに予算達成率が自動で出ます。</div>`
+    : "";
 
   const kpi = (lbl, big, sub, tone) => `<div class="kpi"><div class="lbl">${lbl}</div>
     <div class="big ${tone || ""}">${big}</div>${sub ? `<div class="delta">${sub}</div>` : ""}</div>`;
@@ -3632,7 +3642,7 @@ function renderStoreMonth(code, m) {
         <h2 class="sname">${esc(s.name)}　${jpMonth(m)}</h2></div>
       ${storeMonthNav(code, m)}
     </section>
-    <section class="block">${kpis}</section>
+    <section class="block">${kpis}${budNote}</section>
     ${breakdownBlock}
     ${catBlock}
     <section class="block">

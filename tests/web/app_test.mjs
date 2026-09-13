@@ -850,10 +850,11 @@ test("renderStoreMonth：予算があれば月詳細に予算達成率KPIが出�
   assert.ok(/予算 [\d,]+/.test(html), "予算金額のサブ表示");
 });
 
-test("renderStoreMonth：予算が無ければ予算KPIは出さない（―の羅列を避ける）", () => {
+test("renderStoreMonth：予算が無ければ予算KPIカードは出さない（代わりに入力ナビ）", () => {
   const ctx = loadApp(annualData);   // 1160 に budget 無し
   const html = call(ctx, `renderStoreMonth("1160","2025-08")`);
-  assert.ok(!html.includes("予算達成率"), "予算未登録なら予算KPIは省く");
+  assert.ok(!html.includes('<div class="lbl">予算達成率</div>'), "予算未登録なら予算達成率KPIカードは省く");
+  assert.ok(html.includes("予算未入力"), "代わりに予算未入力の入力ナビを出す");
 });
 
 test("renderStoreMonth：前年差の内訳（区分ごとの前年差を大きい順に）が出る", () => {
@@ -869,6 +870,18 @@ test("renderStoreMonth：前年実績が無い月は内訳を出さない", () =
   const ctx = loadApp(noPrev);
   const html = call(ctx, `renderStoreMonth("1160","2025-08")`);
   assert.ok(!html.includes("前年差の内訳"), "前年が無ければ内訳は省く");
+});
+
+test("renderStoreMonth：確定月で予算が無ければ『予算未入力』の入力ナビを出す", () => {
+  const ctx = loadApp(luqa);   // 1160 2025-08 は売上あり・予算なし（確定月）
+  const html = call(ctx, `renderStoreMonth("1160","2025-08")`);
+  assert.ok(html.includes("予算未入力"), "予算未入力ナビ");
+});
+
+test("storeYearMatrix：予算未入力の確定月があれば一覧にヒントを出す", () => {
+  const ctx = loadApp(luqa);   // 予算 budget:{} のまま
+  const html = call(ctx, `storeYearMatrix("1160","2025")`);
+  assert.ok(html.includes("予算未入力の月あり"), "予算未入力ヒント");
 });
 
 test("renderStoreMonth：品目区分は data-cattoggle でその場開閉（モバイルもページ移動なし）", () => {
