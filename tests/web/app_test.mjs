@@ -719,6 +719,17 @@ test("renderStore：先頭サマリはヒーローに統合され、基礎デー
   assert.ok(html.includes("class=\"hnote\""), "ヒーローにデータ鮮度の一言");
 });
 
+test("renderStore：今月の共有カード（会議/LINE用・コピー用テキスト）が出る", () => {
+  const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
+  const withBud = { ...base, budget: { 1006: { "2026-01": 10000000 } },
+    covers: { 1006: { "2026-01": 3000 } }, campaigns: [c] };
+  const ctx = loadApp(withBud);
+  const html = call(ctx, `renderStore("1006")`);
+  assert.ok(html.includes("今月の共有カード"), "共有カードの見出し");
+  assert.ok(html.includes("予算達成") && html.includes("sharecard"), "1枚カード");
+  assert.ok(html.includes('data-sharecopy="sharetext-1006"') && html.includes('id="sharetext-1006"'), "コピー用テキスト＋ボタン");
+});
+
 test("renderStore：販促カードに前回（同じ枠）の学び＝要因メモ/次回提案を引き継ぎ表示", () => {
   const prev = camp({ id: "old", bucket: "コース", title: "去年の夏コース",
     start: "2025-01-01", end: "2025-01-31", memo: "去年は品切れで機会損失。仕込み増やす。" });

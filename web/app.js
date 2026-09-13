@@ -998,6 +998,23 @@ function render() {
       CAMP_FILTER = { ...CAMP_FILTER, [dim]: val };
       render(); syncHash();
     }));
+  app.querySelectorAll("[data-sharecopy]").forEach(el =>
+    el.addEventListener("click", async e => {
+      e.stopPropagation();
+      const src = document.getElementById(el.dataset.sharecopy);
+      const text = src ? src.textContent : "";
+      const done = () => { const o = el.textContent; el.textContent = "✓ コピーしました"; setTimeout(() => { el.textContent = o; }, 1800); };
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(text); done(); return; }
+        throw new Error("no clipboard");
+      } catch (_) {
+        // フォールバック：選択してユーザーにコピーしてもらう
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); done(); } catch (e2) { alert("コピーできませんでした。カードを長押しで選択してください。"); }
+        ta.remove();
+      }
+    }));
   app.querySelectorAll("[data-jump]").forEach(el =>
     el.addEventListener("click", e => {
       e.stopPropagation();
@@ -3152,6 +3169,65 @@ function storeHero(code) {
   </section>`;
 }
 
+// 今月の共有カード（会議・LINE用）。確定した最新月の要点を1枚に。スクショで会議、
+// 「コピー」でLINEに貼れるプレーンテキストも用意。数値は自動集計から。
+function storeShareCard(code) {
+  const s = store(code);
+  const latest = latestConfirmed(code);
+  if (!latest) return "";
+  const m = latest.m;
+  const y = yoy(code);
+  const sales = salesAtC(code, m);
+  const bud = budgetAt(code, m);
+  const rate = (typeof bud === "number" && bud && sales) ? Math.round(sales / bud * 100) : null;
+  const cov = coversAt(code, m);
+  const spp = (sales && cov) ? Math.round(sales / cov) : null;
+  const my = (DATA.campaigns || []).filter(c => (c.stores || []).includes(code));
+  const live = my.filter(c => campStatus(c).k === "live");
+  const soon = my.filter(c => campStatus(c).k === "soon");
+  const done = my.filter(c => campStatus(c).k === "done");
+  // 主役の結果＝計測できた最新（実施中→終了問わず）
+  const win = my.map(c => ({ c, e: storeCampEffect(c, code) })).filter(x => x.e.measured)
+    .sort((a, b) => ((a.c.end || a.c.start) < (b.c.end || b.c.start) ? 1 : -1))[0];
+  // 要対応
+  const noPop = [...live, ...soon].filter(c => creativesForCampaign(c.id).length === 0).length;
+  const noGoal = live.filter(c => goalEligible(c) && targetOf(c) == null).length;
+  const noReview = done.filter(needsReview).length;
+  const todoParts = [];
+  if (noPop) todoParts.push(`POP未登録${noPop}`);
+  if (noGoal) todoParts.push(`目標未設定${noGoal}`);
+  if (noReview) todoParts.push(`振り返り未記入${noReview}`);
+  const todoTxt = todoParts.length ? todoParts.join("・") : "なし";
+
+  // LINE貼り付け用プレーンテキスト（改行つき）
+  const winTxt = win ? `${win.c.title} ${win.e.mark} 昨対${signed(win.e.pct)}%` : "―";
+  const text = [
+    `【${s.name}】${m} 実績`,
+    rate != null ? `予算達成 ${rate}%（予算${man(bud)}→実績${man(sales)}円）` : `売上 ${man(sales)}円`,
+    `売上 ${man(sales)}円${y ? `・前年 ${signed(y.pct)}%` : ""}`,
+    cov != null ? `客数 ${nin(cov)}${spp != null ? `・客単価 ${yen(spp)}` : ""}` : "",
+    `主役の結果: ${winTxt}`,
+    `要対応: ${todoTxt}`,
+    `※数値はFWから自動集計`,
+  ].filter(Boolean).join("\n");
+
+  return `<section class="block" id="share">
+    <div class="bhead"><h2>今月の共有カード</h2><span class="bnote">会議はスクショ、LINEは「コピー」で貼り付け</span></div>
+    <div class="sharecard">
+      <div class="sc-hd"><b>${esc(s.name)}</b><span class="sc-m">${m} 実績</span></div>
+      <div class="sc-main">
+        <div class="sc-kpi"><span class="sc-l">予算達成</span><b class="${rate != null ? (rate >= 100 ? "up" : "down") : ""}">${rate != null ? rate + "%" : "―"}</b></div>
+        <div class="sc-kpi"><span class="sc-l">売上</span><b>${man(sales)}</b>${y ? `<span class="${y.pct >= 0 ? "up" : "down"}">${signed(y.pct)}%</span>` : ""}</div>
+        <div class="sc-kpi"><span class="sc-l">客単価</span><b>${spp != null ? yen(spp) : "―"}</b></div>
+      </div>
+      <div class="sc-row"><span class="sc-l">主役の結果</span>${win ? `${esc(win.c.title)} <span class="gvm ${win.e.tone}">${win.e.mark}</span> <span class="${win.e.pct >= 0 ? "up" : "down"}">昨対${signed(win.e.pct)}%</span>` : "―"}</div>
+      <div class="sc-row"><span class="sc-l">要対応</span>${todoParts.length ? esc(todoTxt) : "なし 👍"}</div>
+    </div>
+    <pre class="sc-copytext" id="sharetext-${esc(code)}" hidden>${esc(text)}</pre>
+    <button class="shbtn" data-sharecopy="sharetext-${esc(code)}">📋 テキストをコピー（LINE用）</button>
+  </section>`;
+}
+
 // 年間スケジュール本体。チャート（帯・既定）とカレンダー表を切替、年を選べる。
 // 販促（帯・チップ）を押すと販促詳細へ、月を押すと月ドリルへ。
 function storeAnnual(code) {
@@ -3884,8 +3960,10 @@ function renderStore(code) {
   const annualHtml = storeAnnual(code);
   const enginesHtml = storeEngines(code);
   // ページが縦に長いので、上部に「どこへでも飛べる」固定ナビを置く（誰が触っても迷わない）。
+  const shareHtml = storeShareCard(code);
   const navItems = [
     ["hero", "今の状況"],
+    shareHtml ? ["share", "共有"] : null,
     annualHtml ? ["annual", "年間"] : null,
     enginesHtml ? ["engines", "販促エンジン"] : null,
     myCamps.length ? ["promos", "販促リスト"] : null,
@@ -3905,6 +3983,7 @@ function renderStore(code) {
     </section>
     ${storeNav}
     ${heroHtml}
+    ${shareHtml}
     ${annualHtml}
     ${enginesHtml}
     <section class="block" id="promos">

@@ -1049,6 +1049,25 @@ tbody tr:last-child td{border-bottom:0;}
 .htc{font-size:12px;font-weight:700;color:var(--warning-ink);font-variant-numeric:tabular-nums;}
 .htgo{color:var(--accent);font-weight:700;}
 
+/* 今月の共有カード（会議・LINE用。1枚で読める・スクショ向き） */
+.sharecard{border:1px solid var(--line-strong);border-radius:14px;padding:14px 16px;background:var(--surface);
+  box-shadow:var(--shadow);font-variant-numeric:tabular-nums;}
+.sc-hd{display:flex;align-items:baseline;gap:10px;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:10px;}
+.sc-hd b{font-size:16px;font-weight:800;color:var(--ink);}
+.sc-m{font-size:12px;color:var(--ink-3);}
+.sc-main{display:flex;flex-wrap:wrap;gap:10px 24px;margin-bottom:8px;}
+.sc-kpi{display:flex;align-items:baseline;gap:6px;}
+.sc-kpi .sc-l{font-size:11px;color:var(--ink-3);}
+.sc-kpi b{font-size:22px;font-weight:800;color:var(--ink);}
+.sc-kpi b.up{color:var(--good-ink);} .sc-kpi b.down{color:var(--critical-ink);}
+.sc-kpi .up{color:var(--good-ink);font-weight:700;font-size:13px;} .sc-kpi .down{color:var(--critical-ink);font-weight:700;font-size:13px;}
+.sc-row{font-size:13px;color:var(--ink-2);margin-top:4px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+.sc-row .sc-l{font-size:11px;color:var(--ink-3);min-width:74px;}
+.sc-row .up{color:var(--good-ink);font-weight:700;} .sc-row .down{color:var(--critical-ink);font-weight:700;}
+.shbtn{margin-top:10px;font:inherit;font-size:13px;font-weight:600;color:var(--accent);cursor:pointer;
+  background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 30%,var(--line));
+  border-radius:9px;padding:8px 14px;}
+.shbtn:hover{filter:brightness(1.03);}
 /* スマホ密度の最適化（店長のスマホ閲覧が主）。余白・文字を実機幅で詰める。 */
 @media (max-width:560px){
   .block{margin-bottom:24px;}
