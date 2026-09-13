@@ -719,6 +719,23 @@ test("renderStore：先頭サマリはヒーローに統合され、基礎デー
   assert.ok(html.includes("class=\"hnote\""), "ヒーローにデータ鮮度の一言");
 });
 
+test("renderStore：販促カードに前回（同じ枠）の学び＝要因メモ/次回提案を引き継ぎ表示", () => {
+  const prev = camp({ id: "old", bucket: "コース", title: "去年の夏コース",
+    start: "2025-01-01", end: "2025-01-31", memo: "去年は品切れで機会損失。仕込み増やす。" });
+  const cur = camp({ id: "new", bucket: "コース", title: "今年の夏コース", start: "2026-01-01", end: "2026-01-31" });
+  const ctx = loadApp({ ...base, campaigns: [prev, cur], proposals: { old: { next: "開始1週間前にPOP掲出。" } } });
+  const html = call(ctx, `renderStore("1006")`);
+  assert.ok(html.includes("前回「去年の夏コース」の学び"), "前回の学びの見出し");
+  assert.ok(html.includes("仕込み増やす") && html.includes("開始1週間前にPOP"), "前回メモ＋次回提案を引き継ぐ");
+});
+
+test("renderStore：終了して未記入の販促は『振り返り未記入』を強調する", () => {
+  const c = camp({ id: "d1", bucket: "コース", title: "終わった企画", start: "2026-01-01", end: "2026-01-31" });
+  const ctx = loadApp({ ...base, campaigns: [c] });   // today=2026-09-06 → done、memo/proposal 無し
+  const html = call(ctx, `renderStore("1006")`);
+  assert.ok(html.includes("振り返り未記入"), "やりっぱなしを強調");
+});
+
 test("renderStore：販促カードに その販促のPOP（制作物）が結果と並んで出る", () => {
   const c = camp({ id: "p1", bucket: "コース", title: "夏コース", start: "2026-01-01", end: "2026-01-31" });
   const withCr = { ...base, campaigns: [c],

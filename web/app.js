@@ -3835,11 +3835,27 @@ function renderStore(code) {
         } else if (goalEligible(c)) {
           goalHtml = `<div class="cgoal muted"><button class="goalbtn add" data-goal="${campKey(c)}">＋ 目標を入力</button></div>`;
         }
-        // 要因メモ（アプリ内で入力・共有）
+        // 要因メモ（アプリ内で入力・共有）。終了して未記入なら「振り返り未記入」を強調（PDCAのCheck）。
         const memo = memoOf(c);
         const memoHtml = memo
           ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${campKey(c)}" title="メモを編集">✎</button></div>`
-          : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`;
+          : (needsReview(c)
+            ? `<div class="cmemo warn"><button class="goalbtn add" data-memo="${campKey(c)}">⚠ 振り返り未記入 — ＋要因メモを書く</button></div>`
+            : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`);
+        // 前回（同じ枠の前回の回）の学び＝要因メモ＋次回提案を、今回のカードに引き継ぎ表示。
+        // 「去年こうだったから今年こうする」を、企画時に必ず目に入れる（PDCAのAct→次のPlan）。
+        const prevOcc2 = campPrevOccurrence(c);
+        let prevLearnHtml = "";
+        if (prevOcc2) {
+          const pMemo = memoOf(prevOcc2);
+          const pProp = proposalFor(prevOcc2.id);
+          const pNext = pProp && pProp.next ? pProp.next : "";
+          if (pMemo || pNext) {
+            prevLearnHtml = `<div class="cprev"><span class="cprev-l">前回「${esc(prevOcc2.title)}」の学び</span>${
+              pMemo ? `<div class="cprev-m">${escBr(pMemo)}</div>` : ""}${
+              pNext ? `<div class="cprev-n"><b>次回提案</b> ${escBr(pNext)}</div>` : ""}</div>`;
+          }
+        }
         // 出したPOP・資料を結果のとなりに。押すと小窓でプレビュー。未登録は実施中/予定だけ促す。
         const crs = creativesForCampaign(c.id);
         const addPop = (CREATIVES_API_OK && WRITE_OK) ? ` <button class="upbtn sm" data-upload="campaign:${c.id}">＋追加</button>` : "";
@@ -3856,6 +3872,7 @@ function renderStore(code) {
             ${campHeadline(c)}
             ${goalHtml}
             ${memoHtml}
+            ${prevLearnHtml}
             <div class="cgo">詳細を確認 →</div>
           </div>
           <span class="crange">${range}</span>

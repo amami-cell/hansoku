@@ -534,7 +534,16 @@ tbody tr:last-child td{border-bottom:0;}
   background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:6px 10px;
   display:flex;align-items:flex-start;gap:8px;justify-content:space-between;}
 .cmemo.muted{background:none;border:none;padding:0;}
+.cmemo.warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warning-ink) 35%,var(--line));}
+.cmemo.warn .goalbtn{color:var(--warning-ink);font-weight:700;}
 .cmemo .goalbtn{flex:none;}
+/* 前回の学び（要因メモ＋次回提案）を今回のカードに引き継ぎ表示 */
+.cprev{margin-top:6px;padding:7px 10px;border-left:3px solid var(--accent);
+  background:var(--accent-soft);border-radius:0 7px 7px 0;font-size:12px;color:var(--ink-2);line-height:1.6;}
+.cprev-l{font-size:11px;font-weight:700;color:var(--ink-3);}
+.cprev-m{margin-top:2px;}
+.cprev-n{margin-top:3px;}
+.cprev-n b{color:var(--accent);}
 
 /* ── 直近のアクション（TOP） ───────────────────────────── */
 .actions{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
