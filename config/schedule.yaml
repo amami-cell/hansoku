@@ -126,7 +126,8 @@ campaigns:
   # NOTE: 画像3「日別スケジュール(largo)」の2026年間ライン（ケーキ/パフェ/コラボ）は
   #       このルクアLargo が対象。ただし2026は変更が出る可能性あり → 確定版が来たら
   #       ここに追記する（2025は確定実績。前年比較の土台に使う）。
-  - { id: r1160-osusume, stores: ["1160"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-09-30" }
+  - { id: r1160-osusume, stores: ["1160"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-09-30",
+      note: "秋の対象商品リストが決まり次第 items に入れて効果を計測します（現在は店長リスト待ちで保留）。" }
   # ケーキ/パフェ/ジェラートはFWの"部門"として独立（1160の直近ABCで確認）。bucket=部門名で
   # 部門実績＋構成比を月次表示、items=商品キーワードで「表示」に商品内訳を出す。
   # 前年2025-12は『クリスマスケーキプレート』¥76,800 が立っている（12月はこれで見る）。
@@ -241,8 +242,11 @@ campaigns:
   - { id: s1131-natsu, stores: ["1131"], title: 夏のおすすめ&ランチのメイン（新規）, kind: osusume, start: "2026-06-22", end: "2026-08-31" }
   - { id: s1137-natsu, stores: ["1137"], title: 夏のおすすめ（新規）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
   - { id: s1154-natsu, stores: ["1154"], title: 夏のおすすめ（新規）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
-  - { id: s1160-parfait, stores: ["1160"], title: パフェ（スノー）, kind: dev, start: "2026-07-01", end: "2026-09-23" }
-  - { id: s1160-cake, stores: ["1160"], title: ケーキ, kind: dev, start: "2026-07-01", end: "2026-08-31" }
+  # 兄弟枠に合わせて測り方を補完（bucket/items 未設定だと効果が出ない）。
+  #   パフェ（スノー）=夏のスノーパフェ → c1160-parfait-snow と同じ items で昨対・前回比。
+  #   ケーキ=夏のケーキ枠 → c1160-cake-* と同じく bucket=ケーキ。
+  - { id: s1160-parfait, stores: ["1160"], title: パフェ（スノー）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー], start: "2026-07-01", end: "2026-09-23" }
+  - { id: s1160-cake, stores: ["1160"], title: ケーキ, kind: dev, bucket: ケーキ, start: "2026-07-01", end: "2026-08-31" }
   - { id: s1713-kakigori, stores: ["1713"], title: かき氷フェア, kind: dev, start: "2026-07-13", end: "2026-09-04" }
   - { id: s1162-natsu, stores: ["1162"], title: 夏おすすめ（1品新規）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
   - { id: s1739-natsu, stores: ["1739"], title: ランチ&夏おすすめ（ランチ2品・夏新規）, kind: osusume, start: "2026-06-15", end: "2026-08-31" }

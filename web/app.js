@@ -3519,7 +3519,7 @@ function renderStore(code) {
     ? `<button class="upbtn" data-upload="store:${code}">＋ POP・写真・資料を追加</button>` : "";
   const myCreativesBlock = (myCreatives.length || CREATIVES_API_OK)
     ? `<section class="block">
-        <div class="bhead"><h2>この店の制作物</h2><span class="bnote">${myCreatives.length}件</span></div>
+        <div class="bhead"><h2>この店の制作物</h2><span class="bnote">${myCreatives.length}件・POP/写真/資料。押すと小窓で開く（×か背景で閉じる）</span></div>
         ${myCreatives.length ? `<div class="cgrid">${myCreatives.map(creativeCard).join("")}</div>`
           : `<p class="muted" style="margin:2px 0 10px">まだありません。PDF・写真・Excelを追加できます。</p>`}
         ${myCrAdd}
