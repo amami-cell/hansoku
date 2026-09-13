@@ -819,6 +819,21 @@ test("renderStoreMonth：予算が無ければ予算KPIは出さない（―の�
   assert.ok(!html.includes("予算達成率"), "予算未登録なら予算KPIは省く");
 });
 
+test("renderStoreMonth：前年差の内訳（区分ごとの前年差を大きい順に）が出る", () => {
+  const ctx = loadApp(luqa);   // 2026-08 vs 2025-08 は両方に区分あり
+  const html = call(ctx, `renderStoreMonth("1160","2026-08")`);
+  assert.ok(html.includes("前年差の内訳"), "内訳の見出し");
+  assert.ok(html.includes("ybd-list") && html.includes("パフェ"), "区分別の差の行");
+  assert.ok(/[+＋]\d/.test(html) || html.includes("＋"), "増減の符号つき差額");
+});
+
+test("renderStoreMonth：前年実績が無い月は内訳を出さない", () => {
+  const noPrev = { ...luqa, monthly: { 1160: { "2025-08": { sales: 9000000 } } } };  // 2024-08 の売上なし
+  const ctx = loadApp(noPrev);
+  const html = call(ctx, `renderStoreMonth("1160","2025-08")`);
+  assert.ok(!html.includes("前年差の内訳"), "前年が無ければ内訳は省く");
+});
+
 test("renderStoreMonth：品目区分は data-cattoggle でその場開閉（モバイルもページ移動なし）", () => {
   const ctx = loadApp(luqa);
   const closed = call(ctx, `ANNUAL_OPEN = {}; renderStoreMonth("1160","2025-08")`);

@@ -3514,6 +3514,40 @@ function renderStoreMonth(code, m) {
         <div class="cgo">販促の詳細 →</div></div></li>`;
   }).join("")}</ul>` : `<div class="empty">この月に走っていた販促はありません。</div>`;
 
+  // 前年差の内訳（なぜ増えた/減ったか）。区分ごとに この月 vs 前年同月 の売上差を出し、
+  // 差の大きい順に「伸びた（緑）／落ちた（赤）」で並べる。前年同月と区分データが揃う時だけ。
+  const breakdownBlock = (() => {
+    const ym = prevYearM(m);
+    const curCats = cats;                 // この月（catsAtM）
+    const prevCats = catsAtM(code, ym);
+    if (!curCats.length && !prevCats.length) return "";
+    if (yoy == null) return "";           // 前年の実績が無ければ内訳も出さない
+    const names = [...new Set([...curCats.map(c => c.name), ...prevCats.map(c => c.name)])];
+    const items = names.map(name => {
+      const cur = (catAtM(code, m, name) || {}).sales || 0;
+      const prev = (catAtM(code, ym, name) || {}).sales || 0;
+      return { name, cur, prev, delta: cur - prev, pct: prev ? (cur / prev - 1) * 100 : null };
+    }).filter(d => d.cur || d.prev).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+    if (!items.length) return "";
+    const maxAbs = Math.max(1, ...items.map(d => Math.abs(d.delta)));
+    const totalDelta = items.reduce((a, d) => a + d.delta, 0);
+    const sgnMan = v => `${v >= 0 ? "+" : "−"}${man(Math.abs(v))}円`;
+    const rows = items.slice(0, 8).map(d => {
+      const up = d.delta >= 0;
+      const w = Math.max(2, Math.round(Math.abs(d.delta) / maxAbs * 100));
+      return `<li class="ybrow">
+        <span class="ybn">${esc(d.name)}</span>
+        <span class="ybtrack"><span class="ybfill ${up ? "up" : "down"}" style="width:${w}%"></span></span>
+        <span class="ybd ${up ? "up" : "down"}">${sgnMan(d.delta)}</span>
+        <span class="ybp">${d.pct != null ? signed(Math.round(d.pct)) + "%" : (d.prev ? "" : "新")}</span>
+      </li>`;
+    }).join("");
+    return `<section class="block">
+      <div class="bhead"><h2>前年差の内訳</h2><span class="bnote">前年同月と比べて伸びた（緑）／落ちた（赤）区分。差の大きい順。合計 <b class="${totalDelta >= 0 ? "up" : "down"}">${sgnMan(totalDelta)}</b></span></div>
+      <div class="panel"><ul class="ybd-list">${rows}</ul></div>
+    </section>`;
+  })();
+
   return `
     <div class="crumbs"><button class="linkbtn" data-store="${code}">← ${esc(s.name)}</button>
       <button class="linkbtn" data-view="schedule">全店</button></div>
@@ -3523,6 +3557,7 @@ function renderStoreMonth(code, m) {
       ${storeMonthNav(code, m)}
     </section>
     <section class="block">${kpis}</section>
+    ${breakdownBlock}
     ${catBlock}
     <section class="block">
       <div class="bhead"><h2>この月の販促</h2><span class="bnote">${camps.length}件${camps.length > 1 ? "（重なり）" : ""}</span></div>
