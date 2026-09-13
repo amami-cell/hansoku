@@ -1015,6 +1015,19 @@ function render() {
         ta.remove();
       }
     }));
+  app.querySelectorAll("[data-prodsearch]").forEach(el =>
+    el.addEventListener("input", () => {
+      const q = el.value.trim().toLowerCase();
+      const list = el.parentElement.querySelector(".pslist");
+      if (!list) return;
+      let shown = 0;
+      list.querySelectorAll(".psrow").forEach(li => {
+        const hit = !q || (li.dataset.pn || "").includes(q);
+        li.hidden = !hit; if (hit) shown++;
+      });
+      const empty = list.querySelector(".psempty");
+      if (empty) empty.hidden = shown !== 0;
+    }));
   app.querySelectorAll("[data-jump]").forEach(el =>
     el.addEventListener("click", e => {
       e.stopPropagation();
@@ -3711,6 +3724,31 @@ function renderStoreCat(code, m, cat) {
     ${promo ? `<section class="block"><div class="bhead"><h2>関連する販促</h2></div>${promo}</section>` : ""}`;
 }
 
+// 商品を横断で探す（この店）。商品名で絞り込み、どの月・どの区分で動いたかを一覧。
+// 入力での絞り込みは再描画せずDOM側で行い、入力欄のフォーカスを保つ。
+function storeProductSearch(code) {
+  const pm = (DATA.products_monthly || {})[code] || {};
+  const months = Object.keys(pm).sort();
+  if (!months.length) return "";
+  const rows = [];
+  for (const m of months) for (const p of prodsAtM(code, m)) {
+    rows.push({ name: p.name, m, sales: p.sales || 0, rank: p.rank || "", cat: classifyCat(p.name, code) || "" });
+  }
+  rows.sort((a, b) => (a.name === b.name ? (a.m < b.m ? 1 : -1) : b.sales - a.sales));
+  const rowHtml = rows.map(r =>
+    `<li class="psrow" data-pn="${esc(String(r.name).toLowerCase())}">
+      <button class="psnm" data-scat="${code}:${r.m}:${encodeURIComponent(r.cat)}" title="${esc(r.m)} ${esc(r.cat)} の商品一覧へ">${esc(r.name)}</button>
+      <span class="psm">${+r.m.slice(5, 7)}月</span>
+      ${r.cat ? `<span class="pscat" style="--kc:${catColor(r.cat)}">${esc(r.cat)}</span>` : "<span></span>"}
+      <span class="pss"><b>${yen(r.sales)}</b>${r.rank ? `・${esc(r.rank)}` : ""}</span>
+    </li>`).join("");
+  return `<section class="block" id="prodsearch">
+    <div class="bhead"><h2>商品を探す</h2><span class="bnote">商品名で絞り込み。どの月・区分で動いたかが分かる（${rows.length}件）</span></div>
+    <input class="psinput" type="search" placeholder="商品名で絞り込み（例：パフェ / フレジェ）" data-prodsearch="${esc(code)}" aria-label="商品名で絞り込み">
+    <ul class="pslist">${rowHtml}<li class="psempty" hidden>該当する商品がありません</li></ul>
+  </section>`;
+}
+
 function renderStore(code) {
   const s = store(code);
   const months = DATA.months;
@@ -3971,6 +4009,7 @@ function renderStore(code) {
   const enginesHtml = storeEngines(code);
   // ページが縦に長いので、上部に「どこへでも飛べる」固定ナビを置く（誰が触っても迷わない）。
   const shareHtml = storeShareCard(code);
+  const prodSearchHtml = storeProductSearch(code);
   const navItems = [
     ["hero", "今の状況"],
     shareHtml ? ["share", "共有"] : null,
@@ -3978,6 +4017,7 @@ function renderStore(code) {
     enginesHtml ? ["engines", "販促エンジン"] : null,
     myCamps.length ? ["promos", "販促リスト"] : null,
     myCreativesBlock ? ["creatives", "制作物"] : null,
+    prodSearchHtml ? ["prodsearch", "商品検索"] : null,
     ["basics", "基礎データ"],
   ].filter(Boolean);
   const storeNav = `<nav class="snav" aria-label="店内ジャンプ">
@@ -4003,6 +4043,7 @@ function renderStore(code) {
       ${promoBlock}
     </section>
     ${myCreativesBlock}
+    ${prodSearchHtml}
     <details class="moredet" id="basics">
       <summary>店の基礎データを見る（売上推移・部門・商品・時間帯・近隣）</summary>
       <section class="block">${kpis}${storeTargetChip(code)}</section>

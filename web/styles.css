@@ -1049,6 +1049,28 @@ tbody tr:last-child td{border-bottom:0;}
 .htc{font-size:12px;font-weight:700;color:var(--warning-ink);font-variant-numeric:tabular-nums;}
 .htgo{color:var(--accent);font-weight:700;}
 
+/* 商品を探す（この店・横断） */
+.psinput{width:100%;box-sizing:border-box;font:inherit;font-size:14px;padding:9px 12px;margin-bottom:10px;
+  border:1px solid var(--line-strong);border-radius:9px;background:var(--surface);color:var(--ink);}
+.psinput:focus{outline:2px solid var(--accent);outline-offset:1px;}
+.pslist{list-style:none;margin:0;padding:0;max-height:320px;overflow:auto;
+  border:1px solid var(--line);border-radius:10px;}
+.psrow{display:grid;grid-template-columns:1fr 46px 78px 116px;align-items:center;gap:8px;
+  padding:7px 11px;border-top:1px solid var(--line);font-variant-numeric:tabular-nums;}
+.psrow:first-child{border-top:0;}
+.psnm{font:inherit;font-size:13px;font-weight:600;color:var(--ink);text-align:left;background:none;border:0;
+  cursor:pointer;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:0;}
+.psnm:hover{color:var(--accent);text-decoration:underline;}
+.psm{font-size:12px;color:var(--ink-3);}
+.pscat{font-size:11px;color:#fff;background:var(--kc,var(--ink-3));border-radius:5px;padding:1px 7px;
+  justify-self:start;white-space:nowrap;}
+.pss{font-size:12px;color:var(--ink-2);text-align:right;}
+.pss b{color:var(--ink);}
+.psempty{padding:10px 11px;color:var(--ink-3);font-size:13px;}
+@media (max-width:560px){
+  .psrow{grid-template-columns:1fr 64px 90px;gap:6px;}
+  .psrow .psm{display:none;}
+}
 /* 予算未入力の明示＋入力ナビ */
 .budnote{margin-top:10px;font-size:12px;color:var(--warning-ink);background:var(--warn-soft);
   border:1px solid color-mix(in srgb,var(--warning-ink) 25%,var(--line));border-radius:8px;padding:7px 11px;line-height:1.6;}

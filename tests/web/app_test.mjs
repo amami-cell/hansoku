@@ -719,6 +719,19 @@ test("renderStore：先頭サマリはヒーローに統合され、基礎デー
   assert.ok(html.includes("class=\"hnote\""), "ヒーローにデータ鮮度の一言");
 });
 
+test("storeProductSearch：商品横断検索（商品名→月・区分・売上）が出る", () => {
+  const ctx = loadApp(luqa);
+  const html = call(ctx, `storeProductSearch("1160")`);
+  assert.ok(html.includes("商品を探す") && html.includes('data-prodsearch="1160"'), "検索ボックス");
+  assert.ok(html.includes("マンゴーのパフェスノー") && html.includes('data-pn='), "商品行＋絞り込み用データ");
+  assert.ok(html.includes('data-scat="1160:'), "商品行から月×区分の詳細へ");
+});
+
+test("storeProductSearch：商品データが無ければ出さない", () => {
+  const ctx = loadApp({ ...base, products_monthly: {} });
+  assert.equal(call(ctx, `storeProductSearch("1006")`), "");
+});
+
 test("renderStore：今月の共有カード（会議/LINE用・コピー用テキスト）が出る", () => {
   const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
   const withBud = { ...base, budget: { 1006: { "2026-01": 10000000 } },
