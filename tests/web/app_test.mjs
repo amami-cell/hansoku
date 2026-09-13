@@ -572,7 +572,7 @@ test("既定は月次一覧（スクロールで月ごとに読める）で、�
   assert.ok(html.includes('class="vtab on" data-savw="chart"'), "既定は月次一覧がon");
   assert.ok(html.includes('data-savw="chart"') && html.includes('data-savw="calendar"'), "両方の切替がある");
   assert.ok(html.includes("年間スケジュール"));
-  assert.ok(html.includes("月次の推移（一覧）"), "月次一覧が最初から出る");
+  assert.ok(/一覧（縦＝指標／横＝月）/.test(html), "年間×月の一覧が最初から出る");
 });
 
 test("チャート：販促が帯（data-camp）で出て、月見出しは data-smonth", () => {
@@ -774,27 +774,27 @@ test("storeAnnualChart：年サマリ＋月次の推移（一覧・1行=1ヶ月�
   const ctx = loadApp({ ...base, campaigns: [c] });
   const html = call(ctx, `storeAnnualChart("1006","2026")`);
   assert.ok(html.includes("販促の効き"), "年サマリ");
-  assert.ok(html.includes("月次の推移（一覧）"), "月次一覧の見出し");
-  assert.ok(html.includes('class="mtr"') || html.includes('class="mtr '), "1行=1ヶ月の行");
-  assert.ok(html.includes("前年比") && html.includes("予算"), "月ごとの結果（前年比・予算達成）");
+  assert.ok(/一覧（縦＝指標／横＝月）/.test(html), "年間×月マトリクスの見出し");
+  assert.ok(html.includes('class="ymxt"'), "マトリクス表");
+  assert.ok(html.includes("前年比") && html.includes("予算") && html.includes("年計"), "指標行＋年計列");
 });
 
-test("storeMonthlyTable：確定月は売上・前年比・予算達成の数値が行に出る", () => {
+test("storeYearMatrix：縦＝指標・横＝月・右端に年計。月見出しから月詳細へ", () => {
   const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
   const withBud = { ...base, budget: { 1006: { "2026-01": 10000000 } }, campaigns: [c] };
   const ctx = loadApp(withBud);
-  const html = call(ctx, `storeMonthlyTable("1006","2026")`);
-  assert.ok(html.includes('data-smonth="1006:2026-01"'), "行を押すと月の詳細へ");
-  assert.ok(html.includes("mtfill"), "売上の量を示すバー");
-  assert.ok(/予算<\/span><b[^>]*>\d+%/.test(html), "予算達成率の数値");
+  const html = call(ctx, `storeYearMatrix("1006","2026")`);
+  assert.ok(html.includes('data-smonth="1006:2026-01"'), "列見出しを押すと月の詳細へ");
+  assert.ok(html.includes("ymxsum") && html.includes("年計"), "年計列");
+  assert.ok(/予算/.test(html) && /客単価/.test(html), "予算・客単価の指標行");
 });
 
-test("storeMonthlyTable：月ごとに走った販促の名前＋効き・主役区分ラベルが出る", () => {
+test("storeYearMatrix：月ごとの販促を名前＋効きで下に一覧、構成比の縦バーが出る", () => {
   const ctx = loadApp(annualData);
-  const html = call(ctx, `storeMonthlyTable("1160","2025")`);
-  assert.ok(html.includes("mtpromos") && html.includes("パフェスノー"), "月行にその月の販促名");
-  assert.ok(html.includes("mtpc"), "販促チップ");
-  assert.ok(html.includes("mttop"), "その月の主役区分（構成比トップ）ラベル");
+  const html = call(ctx, `storeYearMatrix("1160","2025")`);
+  assert.ok(html.includes("ymxpl") && html.includes("パフェスノー"), "月ごとの販促名一覧");
+  assert.ok(html.includes("ymxvbar"), "構成比の縦積み上げバー");
+  assert.ok(html.includes('data-smonth="1160:2025-09"'), "販促一覧の月ボタン");
 });
 
 test("renderStoreMonth：予算があれば月詳細に予算達成率KPIが出る", () => {
@@ -809,19 +809,6 @@ test("renderStoreMonth：予算が無ければ予算KPIは出さない（―の�
   const ctx = loadApp(annualData);   // 1160 に budget 無し
   const html = call(ctx, `renderStoreMonth("1160","2025-08")`);
   assert.ok(!html.includes("予算達成率"), "予算未登録なら予算KPIは省く");
-});
-
-test("storeYearComposition：年間の売上構成比（区分名＋%・凡例）を出す", () => {
-  const ctx = loadApp(annualData);
-  const html = call(ctx, `storeYearComposition("1160","2026")`);
-  assert.ok(html.includes("年間 売上構成比"), "見出し");
-  assert.ok(html.includes("パフェ"), "区分名");
-  assert.ok(html.includes("ycseg"), "積み上げバー");
-});
-
-test("storeYearComposition：区分ルールの無い店では出さない", () => {
-  const ctx = loadApp(base);
-  assert.equal(call(ctx, `storeYearComposition("1006","2026")`), "");
 });
 
 // ── 一覧画面の管理しやすさ（店舗一覧の要注意・並べ替え／全店予算タイル）──────
