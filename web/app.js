@@ -3244,7 +3244,9 @@ function storeAnnualChart(code, year) {
     <span class="ysum-i"><span class="ysl">販促の効き</span><b class="up">◎ ${cGood}</b> <b class="down">△ ${cWarn}</b></span>
   </div>`;
 
-  return `${yearSummary}${storeYearMatrix(code, year)}<div class="panel gantt">
+  return `${yearSummary}${storeYearMatrix(code, year)}
+    <div class="mmhd" style="margin-top:16px">販促 年間チャート<span class="mmhint">帯＝実施期間（横軸＝月）。◎効いた/△要改善。帯や販促名を押すと詳細、月番号を押すと月の詳細へ</span></div>
+    <div class="panel gantt">
     <div class="grow ghead"><div class="glabel gh">販促 / 月</div><div class="gmonths">${head}</div></div>
     ${camps.length ? rows : `<div class="empty">${year}年に走った販促はありません。</div>`}
   </div>${legend}`;
@@ -3295,55 +3297,18 @@ function storeYearMatrix(code, year) {
   const rowCov = `<tr><th>客数</th>${rows.map(r => numCell(r.i, r.cov != null ? nin(r.cov) : "―")).join("")}<td class="ymxsum">${sumCov ? nin(sumCov) : "―"}</td></tr>`;
   const rowKt = `<tr><th>客単価</th>${rows.map(r => numCell(r.i, r.spp != null ? yen(r.spp) : "―")).join("")}<td class="ymxsum">${yKt != null ? yen(yKt) : "―"}</td></tr>`;
 
-  // 構成比：各月を縦の積み上げミニバー（区分色）で。年計は年間合算。
-  const compoCell = (i, cats) => {
-    if (!cats.length) return `<td class="${cellCls(i)}"></td>`;
-    const seg = cats.map(c => `<span class="ymxseg" style="height:${(c.share * 100).toFixed(1)}%;background:${catColor(c.name)}" title="${esc(c.name)} ${Math.round(c.share * 100)}%"></span>`).join("");
-    return `<td class="${cellCls(i)}"><span class="ymxvbar">${seg}</span></td>`;
-  };
+  // 年間の品目構成比は「凡例（区分名＋%）」の読める形だけ残す（マトリクス内の小さな縦バーは廃止）。
   const yearAgg = new Map();
   for (const r of conf) for (const c of r.cats) yearAgg.set(c.name, (yearAgg.get(c.name) || 0) + c.sales);
   const yTot = [...yearAgg.values()].reduce((a, b) => a + b, 0);
-  const yearSeg = yTot ? [...yearAgg.entries()].sort((a, b) => b[1] - a[1]).map(([n, v]) =>
-    `<span class="ymxseg" style="height:${(v / yTot * 100).toFixed(1)}%;background:${catColor(n)}" title="${esc(n)} ${Math.round(v / yTot * 100)}%"></span>`).join("") : "";
-  const hasCompo = rows.some(r => r.cats.length);
-  const rowCompo = hasCompo ? `<tr class="ymxcompo"><th>構成比</th>${rows.map(r => compoCell(r.i, r.cats)).join("")}<td class="ymxsum">${yearSeg ? `<span class="ymxvbar">${yearSeg}</span>` : ""}</td></tr>` : "";
-
-  // 販促：各月に走った販促の効き（◎/△）をセルに。名前はホバー＋下の凡例で。
-  let nGood = 0, nWarn = 0;
-  const promoCell = (i, camps) => {
-    if (!camps.length) return `<td class="${cellCls(i)}"></td>`;
-    const gl = camps.map(c => {
-      const e = storeCampEffect(c, code);
-      if (e.mark === "◎") nGood++; else if (e.mark === "△") nWarn++;
-      return `<span class="ymxg ${e.tone}" title="${esc(c.title)}${e.measured ? `｜昨対${signed(e.pct)}%` : `｜${e.state}`}">${e.mark || "・"}</span>`;
-    }).join("");
-    return `<td class="${cellCls(i)}">${gl}</td>`;
-  };
-  const promoCells = rows.map(r => promoCell(r.i, r.camps)).join("");
-  const rowPromo = `<tr class="ymxpromo"><th>販促</th>${promoCells}<td class="ymxsum"><span class="ymxg good">◎</span>${nGood} <span class="ymxg warn">△</span>${nWarn}</td></tr>`;
-
-  // 下に、月ごとの販促を「N月：名前＋◎/△＋昨対%」で一覧（列では名前が入らないため）
-  const plItems = rows.filter(r => r.camps.length).map(r => {
-    const chips = r.camps.map(c => {
-      const e = storeCampEffect(c, code);
-      const g = e.mark ? `<span class="mtpg ${e.tone}">${e.mark}</span>` : "";
-      const pctTxt = e.measured ? ` <span class="${e.pct >= 0 ? "up" : "down"}">${signed(e.pct)}%</span>` : "";
-      return `<span class="mtpc" title="${esc(c.title)}｜${campRange(c)}">${g}${esc(c.title)}${pctTxt}</span>`;
-    }).join("");
-    return `<div class="ymxpli"><button class="ymxplm" data-smonth="${code}:${r.m}">${+r.m.slice(5, 7)}月</button>${chips}</div>`;
-  }).join("");
-  const promoList = plItems ? `<div class="ymxpl">${plItems}</div>` : "";
-
-  // 構成比の凡例（年間トップ区分）
-  const compoLg = yTot ? `<div class="yclgs">${[...yearAgg.entries()].sort((a, b) => b[1] - a[1]).map(([n, v]) =>
-    `<span class="yclg"><i style="background:${catColor(n)}"></i>${esc(n)} <b>${Math.round(v / yTot * 100)}%</b></span>`).join("")}</div>` : "";
+  const compoLg = yTot ? `<div class="ymxcompo-lg"><span class="ymxcl-t">品目構成比（確定分）</span><div class="yclgs">${[...yearAgg.entries()].sort((a, b) => b[1] - a[1]).map(([n, v]) =>
+    `<span class="yclg"><i style="background:${catColor(n)}"></i>${esc(n)} <b>${Math.round(v / yTot * 100)}%</b></span>`).join("")}</div></div>` : "";
 
   return `<div class="ymx">
     <div class="mmhd">${year}年 一覧（縦＝指標／横＝月）<span class="mmhint">1画面で年間を管理。月(列見出し)を押すとその月の詳細へ。緑=前年超/赤=前年割れ・薄い列＝暫定/未取込・右端＝年計</span></div>
     <div class="ymxwrap"><table class="ymxt"><thead><tr>${th}</tr></thead>
-      <tbody>${rowSales}${rowYoY}${rowBud}${rowCov}${rowKt}${rowCompo}${rowPromo}</tbody></table></div>
-    ${promoList}${compoLg}</div>`;
+      <tbody>${rowSales}${rowYoY}${rowBud}${rowCov}${rowKt}</tbody></table></div>
+    ${compoLg}</div>`;
 }
 
 // カレンダー表＝月を縦に一覧。各月に 予算/売上/集客/客単価 と品目区分の構成比。
@@ -3479,26 +3444,39 @@ function renderStoreMonth(code, m) {
     ${kpi("前月比", mom != null ? signed(mom) + "%" : "―", pv != null ? `前月 ${man(pv)}円` : "前月 ―", mom != null ? (mom >= 0 ? "up" : "down") : "")}
   </div>${crRow ? `<div class="mcr">${crRow}</div>` : ""}`;
 
-  // 品目区分の構成比（部門名のみ→押すと商品詳細）
+  // 品目区分の構成比（区分を押すと、その場で下に商品が開く。モバイルでもページ移動なし）
   const cats = catsAtM(code, m);
   const catTotal = cats.reduce((a, c) => a + c.sales, 0) || 1;
   const catBar = cats.slice().sort((a, b) => b.sales - a.sales).map(c =>
     `<span class="mseg" style="width:${(c.sales / catTotal * 100).toFixed(2)}%;background:${catColor(c.name)}" title="${esc(c.name)} ${Math.round(c.sales / catTotal * 100)}%・${yen(c.sales)}"></span>`).join("");
   const catBlock = cats.length ? `<section class="block">
-    <div class="bhead"><h2>品目区分の構成比</h2><span class="bnote">区分を押すと商品詳細　合計 ${yen(catTotal)}</span></div>
+    <div class="bhead"><h2>品目区分の構成比</h2><span class="bnote">区分を押すと下に商品が開く　合計 ${yen(catTotal)}</span></div>
     <div class="panel"><div class="mcompbar lg">${catBar}</div><ul class="dlist">${cats.map(c => {
       const pctv = Math.round(c.share * 100);
       const w = Math.max(2, pctv);
       const py = catAtM(code, prevYearM(m), c.name);
       const cyoy = (py && py.sales) ? (c.sales / py.sales - 1) * 100 : null;
-      return `<li><button class="catrow" data-scat="${code}:${m}:${encodeURIComponent(c.name)}">
-        <span class="dname">${esc(c.name)}</span>
-        <span class="dbar"><span class="dfill" style="width:${w}%"></span></span>
+      const co = !!ANNUAL_OPEN[`${code}:${m}:${c.name}`];
+      let prodRows = "";
+      if (co) {
+        const prevByName = {};
+        prodsInCat(code, prevYearM(m), c.name).forEach(p => { prevByName[p.name] = p.sales; });
+        const prods = prodsInCat(code, m, c.name).slice().sort((a, b) => b.sales - a.sales);
+        prodRows = `<ul class="mprods">${prods.length ? prods.map(p => {
+          const yv = prevByName[p.name];
+          const pyoy = yv ? (p.sales / yv - 1) * 100 : null;
+          return `<li><span class="mpn">${esc(p.name)}</span><span class="mps"><b>${yen(p.sales)}</b>${p.rank ? `・${p.rank}` : ""}${pyoy != null ? ` <span class="${pyoy >= 0 ? "up" : "down"}">${signed(pyoy)}%</span>` : ""}</span></li>`;
+        }).join("") : '<li class="muted">この月の商品データはありません</li>'}</ul>`;
+      }
+      return `<li>
+        <button class="catrow${co ? " on" : ""}" data-cattoggle="${code}:${m}:${encodeURIComponent(c.name)}">
+        <span class="dname">${co ? "▾" : "▸"} ${esc(c.name)}</span>
+        <span class="dbar"><span class="dfill" style="width:${w}%;background:${catColor(c.name)}"></span></span>
         <span class="dpct">${pctv}%</span>
         <span class="dsales">${yen(c.sales)}</span>
         <span class="dqty">${c.count}品</span>
         ${cyoy != null ? `<span class="myoy ${cyoy >= 0 ? "up" : "down"}">${signed(cyoy)}%</span>` : ""}
-        <span class="catgo">商品 →</span></button></li>`;
+        </button>${prodRows}</li>`;
     }).join("")}</ul></div></section>`
     : `<section class="block"><div class="bhead"><h2>品目区分の構成比</h2></div>
        <div class="empty">この月の商品データ（FW ABC）はまだありません。</div></section>`;

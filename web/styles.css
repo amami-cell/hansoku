@@ -934,30 +934,11 @@ tbody tr:last-child td{border-bottom:0;}
 .ymxt td.prov,.ymxt th.prov button{opacity:.55;}
 .ymxsum{background:var(--surface-2);font-weight:700;border-left:1px solid var(--line-strong);}
 .ymxt thead .ymxsum{color:var(--ink);}
-/* 構成比：セル内の縦積み上げミニバー */
-.ymxcompo td{text-align:center;}
-.ymxvbar{display:inline-flex;flex-direction:column;width:14px;height:34px;border-radius:3px;overflow:hidden;
-  background:var(--surface-2);vertical-align:middle;}
-.ymxseg{display:block;width:100%;min-height:1px;}
-/* 販促の効き（◎/△）セル */
-.ymxpromo td{text-align:center;}
-.ymxg{font-weight:800;margin:0 1px;}
-.ymxg.good{color:var(--good-ink);} .ymxg.warn{color:var(--critical-ink);} .ymxg.wait,.ymxg.flat{color:var(--ink-3);}
-/* 表の下：月ごとの販促を名前つきで一覧（列には名前が入らないため） */
-.ymxpl{display:flex;flex-direction:column;gap:6px;margin-top:12px;}
-.ymxpli{display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
-.ymxplm{flex:none;font:inherit;font-size:12px;font-weight:700;color:var(--ink);background:var(--surface-2);
-  border:1px solid var(--line);border-radius:7px;padding:2px 9px;cursor:pointer;min-width:40px;}
-.ymxplm:hover{border-color:var(--line-strong);color:var(--accent);}
-.mtpc{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-2);
-  background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:2px 8px;
-  max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.mtpc .up{color:var(--good-ink);font-weight:700;} .mtpc .down{color:var(--critical-ink);font-weight:700;}
-.mtpg{font-weight:800;}
-.mtpg.good{color:var(--good-ink);} .mtpg.warn{color:var(--critical-ink);} .mtpg.wait,.mtpg.flat{color:var(--ink-3);}
+/* 年間の品目構成比（読める凡例。マトリクス内の小さな縦バーは廃止） */
+.ymxcompo-lg{margin-top:10px;}
+.ymxcl-t{font-size:12px;font-weight:600;color:var(--ink-2);}
 @media (max-width:640px){
   .ymxt th,.ymxt td{padding:5px 6px;font-size:12px;}
-  .ymxvbar{height:28px;width:12px;}
 }
 /* 年間の売上構成比（区分名＋%ラベル・凡例つきの100%積み上げ） */
 .yccomp{margin-bottom:14px;}

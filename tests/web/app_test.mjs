@@ -789,12 +789,20 @@ test("storeYearMatrix：縦＝指標・横＝月・右端に年計。月見出�
   assert.ok(/予算/.test(html) && /客単価/.test(html), "予算・客単価の指標行");
 });
 
-test("storeYearMatrix：月ごとの販促を名前＋効きで下に一覧、構成比の縦バーが出る", () => {
+test("storeYearMatrix：構成比・販促の行は持たず、構成比は凡例（%）で示す", () => {
   const ctx = loadApp(annualData);
   const html = call(ctx, `storeYearMatrix("1160","2025")`);
-  assert.ok(html.includes("ymxpl") && html.includes("パフェスノー"), "月ごとの販促名一覧");
-  assert.ok(html.includes("ymxvbar"), "構成比の縦積み上げバー");
-  assert.ok(html.includes('data-smonth="1160:2025-09"'), "販促一覧の月ボタン");
+  assert.ok(!html.includes("ymxvbar"), "小さくて見にくい構成比の縦バー行は撤去");
+  assert.ok(!/<th>販促<\/th>/.test(html), "販促の行はマトリクスに持たない（年間チャートへ）");
+  assert.ok(html.includes("品目構成比（確定分）") && html.includes("パフェ"), "構成比は読める凡例で残す");
+});
+
+test("storeAnnualChart：販促は年間チャート（帯）として見出し付きで出す", () => {
+  const ctx = loadApp(annualData);
+  const html = call(ctx, `storeAnnualChart("1160","2025")`);
+  assert.ok(html.includes("販促 年間チャート"), "販促の年間チャート見出し");
+  assert.ok(html.includes('class="panel gantt"'), "帯（ガント）で表示");
+  assert.ok(html.includes('data-camp="snow"'), "販促の帯");
 });
 
 test("renderStoreMonth：予算があれば月詳細に予算達成率KPIが出る", () => {
@@ -809,6 +817,14 @@ test("renderStoreMonth：予算が無ければ予算KPIは出さない（―の�
   const ctx = loadApp(annualData);   // 1160 に budget 無し
   const html = call(ctx, `renderStoreMonth("1160","2025-08")`);
   assert.ok(!html.includes("予算達成率"), "予算未登録なら予算KPIは省く");
+});
+
+test("renderStoreMonth：品目区分は data-cattoggle でその場開閉（モバイルもページ移動なし）", () => {
+  const ctx = loadApp(luqa);
+  const closed = call(ctx, `ANNUAL_OPEN = {}; renderStoreMonth("1160","2025-08")`);
+  assert.ok(closed.includes("data-cattoggle=") && !closed.includes('class="catgo"'), "区分はその場トグル（別ページ遷移の商品→は無し）");
+  const opened = call(ctx, `ANNUAL_OPEN = {"1160:2025-08:パフェ": true}; renderStoreMonth("1160","2025-08")`);
+  assert.ok(opened.includes("mprods"), "開くと下に商品リストが出る");
 });
 
 // ── 一覧画面の管理しやすさ（店舗一覧の要注意・並べ替え／全店予算タイル）──────
