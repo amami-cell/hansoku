@@ -550,6 +550,9 @@ tbody tr:last-child td{border-bottom:0;}
 /* 制作物の小窓プレビュー（画像・PDFをアプリ内で見る） */
 .cthumb{border:none;background:none;cursor:pointer;width:100%;}
 .crprev{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:20px;}
+/* display:flex は [hidden] のUA規定(display:none)に勝ってしまう。hidden時は必ず消す。
+   これが無いと ×/Escで hidden=true にしても小窓が閉じず、本文だけ空になって残る。 */
+.crprev[hidden]{display:none!important;}
 .crprev-bd{position:absolute;inset:0;background:rgba(8,11,18,.62);}
 .crprev-box{position:relative;z-index:1;background:var(--surface);border-radius:14px;overflow:hidden;
   box-shadow:0 20px 60px rgba(0,0,0,.4);display:flex;flex-direction:column;
