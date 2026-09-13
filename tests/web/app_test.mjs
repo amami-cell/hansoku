@@ -767,5 +767,18 @@ test("storeAnnualChart：年サマリ＋月次の売上/構成比ミニチャー
   assert.ok(html.includes("mmbar"), "月次の売上棒");
 });
 
+test("storeYearComposition：年間の売上構成比（区分名＋%・凡例）を出す", () => {
+  const ctx = loadApp(annualData);
+  const html = call(ctx, `storeYearComposition("1160","2026")`);
+  assert.ok(html.includes("年間 売上構成比"), "見出し");
+  assert.ok(html.includes("パフェ"), "区分名");
+  assert.ok(html.includes("ycseg"), "積み上げバー");
+});
+
+test("storeYearComposition：区分ルールの無い店では出さない", () => {
+  const ctx = loadApp(base);
+  assert.equal(call(ctx, `storeYearComposition("1006","2026")`), "");
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);

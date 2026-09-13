@@ -3189,7 +3189,7 @@ function storeAnnualChart(code, year) {
     <span class="ysum-i"><span class="ysl">販促の効き</span><b class="up">◎ ${cGood}</b> <b class="down">△ ${cWarn}</b></span>
   </div>`;
 
-  return `${yearSummary}${storeMonthlyMini(code, year)}<div class="panel gantt">
+  return `${yearSummary}${storeYearComposition(code, year)}${storeMonthlyMini(code, year)}<div class="panel gantt">
     <div class="grow ghead"><div class="glabel gh">販促 / 月</div><div class="gmonths">${head}</div></div>
     ${camps.length ? rows : `<div class="empty">${year}年に走った販促はありません。</div>`}
   </div>${legend}`;
@@ -3227,6 +3227,30 @@ function storeMonthlyMini(code, year) {
   return `<div class="mmchart">
     <div class="mmhd">月次の売上と品目構成比<span class="mmhint">棒＝売上（緑=前年超/赤=前年割れ・薄い＝暫定）／下の帯＝品目区分の構成比。押すと月の詳細へ</span></div>
     <div class="mmrow">${cols}</div></div>`;
+}
+
+// 年間の売上構成比（確定分を合算）。区分名と%・凡例を付けて、はっきり読めるように。
+// 品目区分ルールのある店（ルクア等）だけ出す。
+function storeYearComposition(code, year) {
+  if (!catRules(code)) return "";
+  const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`)
+    .filter(m => m < CURRENT_MONTH && (DATA.monthly[code] || {})[m]);
+  const agg = new Map();
+  for (const m of months) for (const c of catsAtM(code, m)) agg.set(c.name, (agg.get(c.name) || 0) + c.sales);
+  const total = [...agg.values()].reduce((a, b) => a + b, 0);
+  if (!total) return "";
+  const rows = [...agg.entries()].map(([name, sales]) => ({ name, sales, share: sales / total }))
+    .sort((a, b) => b.sales - a.sales);
+  const bar = rows.map(c => {
+    const pct = Math.round(c.share * 100);
+    return `<span class="ycseg" style="width:${(c.share * 100).toFixed(2)}%;background:${catColor(c.name)}" title="${esc(c.name)} ${pct}%・${yen(c.sales)}">${c.share >= 0.08 ? `<span class="ycst">${esc(c.name)} ${pct}%</span>` : ""}</span>`;
+  }).join("");
+  const legend = rows.map(c =>
+    `<span class="yclg"><i style="background:${catColor(c.name)}"></i>${esc(c.name)} <b>${Math.round(c.share * 100)}%</b> <span class="sub">${yen(c.sales)}</span></span>`).join("");
+  return `<div class="yccomp">
+    <div class="yctitle">年間 売上構成比<span class="ycsub">確定 ${months.length}ヶ月・合計 ${yen(total)}</span></div>
+    <div class="ycbar">${bar}</div>
+    <div class="yclgs">${legend}</div></div>`;
 }
 
 // カレンダー表＝月を縦に一覧。各月に 予算/売上/集客/客単価 と品目区分の構成比。
