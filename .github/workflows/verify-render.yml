@@ -44,3 +44,5 @@ jobs:
         env:
           STORE: ${{ github.event.inputs.store }}
         run: node scripts/render_store.mjs | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: トップ/店舗一覧の要約を出す
+        run: node scripts/render_views.mjs | tee -a "$GITHUB_STEP_SUMMARY"
