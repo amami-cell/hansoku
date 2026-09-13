@@ -64,6 +64,8 @@ let STORE_YEAR = null;             // 店ページの年間スケジュールで
 let STORE_ANNUAL_VIEW = "calendar"; // 店ページ年間スケジュールの表示（calendar=既定・数値一覧 / chart=帯）
 let ANNUAL_OPEN = {};              // カレンダー一覧の開閉状態（"code:month" と "code:month:区分" を鍵に）
 let MONTH_PICK_OPEN = false;       // 月詳細の月ピッカーを開いているか
+let PROMO_SORT = "effect";         // この店の販促の並び（effect=効果順 / recent=新しい順）
+let PROMO_FILTER = "all";          // この店の販促の状態フィルタ（all / live / done）
 let CAMP_FILTER = { status: "all", kind: "all" };   // 施策の効果ビューの絞り込み
 // 販促の目標（施策id→円）。本番は Neon（/api/targets）に共有保存、
 // プレビュー等 API が無い所では端末内（localStorage）に保存する。
@@ -948,6 +950,10 @@ function render() {
     el.addEventListener("click", e => { e.stopPropagation(); STORE_ANNUAL_VIEW = el.dataset.savw; render(); }));
   app.querySelectorAll("[data-syear]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); STORE_YEAR = el.dataset.syear; render(); }));
+  app.querySelectorAll("[data-psort]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); PROMO_SORT = el.dataset.psort; render(); }));
+  app.querySelectorAll("[data-pfilter]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); PROMO_FILTER = el.dataset.pfilter; render(); }));
   app.querySelectorAll("[data-lunch]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "lunch", code: el.dataset.lunch }); }));
   app.querySelectorAll("[data-home]").forEach(el =>
@@ -2366,6 +2372,23 @@ function campVerdict(c) {
   return { tone: "wait", label: campStatus(c).k === "soon" ? "開始前" : "計測中", signals: [] };
 }
 
+// 店ページ用の「この販促の効き」。その店ぶんの対象区分（bucket/items）の前年比で
+// ◎/△ を出す。数字が無ければ理由（未設定／確定待ち／開始前）を返す。効果順の並べ替え・
+// 効果サマリ・行の判定バッジで共通に使う。全店judgeの campVerdict とは別に、店1軒で見る。
+function storeCampEffect(c, code) {
+  const t = campTargeted(c, code);
+  if (t && t.pct != null) {
+    return {
+      measured: true, pct: t.pct, cur: t.cur, label: t.label, months: t.months,
+      tone: t.pct >= 0 ? "good" : "warn", mark: t.pct >= 0 ? "◎" : "△",
+      text: t.pct >= 0 ? "効いた" : "要改善",
+    };
+  }
+  const k = campStatus(c).k;
+  if (!campBasis(c)) return { measured: false, tone: "flat", mark: "", state: "測り方 未設定" };
+  return { measured: false, tone: "wait", mark: "", state: k === "soon" ? "開始前" : "確定待ち" };
+}
+
 // 近隣（同エリア）の同種類施策の実績を拾って比較材料にする
 function campNeighbor(c) {
   const out = [], seen = new Set();
@@ -3039,6 +3062,18 @@ function storeHero(code) {
       <span class="hpn">${esc(c.title)}${mk ? ` <span class="gvm ${v.tone}">${mk}</span>` : ""}</span>
       <span class="hpv">${num}</span></button>`;
   }).join("") : `<div class="muted hmt">実施中の販促はありません</div>`;
+  // 直近の販促結果（確定済み・測定できたものの最新）。当月の主役がまだ数字を
+  // 持たない時でも「効いたか」を空にしないため。◎/△ は正直に出す。
+  const measuredDone = done
+    .map(c => ({ c, e: storeCampEffect(c, code) }))
+    .filter(x => x.e.measured)
+    .sort((a, b) => ((a.c.end || a.c.start) < (b.c.end || b.c.start) ? 1 : -1));
+  const win = measuredDone[0];
+  const winLine = win
+    ? `<button class="hpromo hwin" data-camp="${win.c.id}">
+        <span class="hpn"><span class="muted">直近の結果:</span> ${esc(win.c.title)} <span class="gvm ${win.e.tone}">${win.e.mark}</span></span>
+        <span class="hpv"><span class="${win.e.pct >= 0 ? "up" : "down"}">昨対 ${signed(win.e.pct)}%</span></span></button>`
+    : "";
 
   // ③ 要対応（POP未登録／目標未設定／振り返り未記入）
   const noPop = [...live, ...soon].filter(c => creativesForCampaign(c.id).length === 0);
@@ -3055,7 +3090,7 @@ function storeHero(code) {
   return `<section class="block hero">
     <div class="hgrid">
       ${budCard}
-      <div class="hcard"><div class="hlbl">主役の販促（実施中）</div>${heroCards}</div>
+      <div class="hcard"><div class="hlbl">主役の販促（実施中）</div>${heroCards}${winLine}</div>
       <div class="hcard"><div class="hlbl">要対応</div>${todoHtml}</div>
     </div>
     ${freshNote}
@@ -3491,17 +3526,55 @@ function renderStore(code) {
       </section>`
     : "";
 
-  // この店の販促（施策の一覧）。実施中→予定→終了 の順、同状態内は日付順
+  // この店の販促。効果サマリ＋並べ替え（効果順/新しい順）＋状態タブ（すべて/実施中/終了）。
   const STATUS_ORDER = { live: 0, soon: 1, done: 2 };
-  const sortedCamps = myCamps.slice().sort((a, b) => {
-    const d = STATUS_ORDER[campStatus(a).k] - STATUS_ORDER[campStatus(b).k];
-    return d !== 0 ? d : (a.start < b.start ? -1 : 1);
+  const effAll = myCamps.map(c => ({ c, e: storeCampEffect(c, code), k: campStatus(c).k }));
+  const nGood = effAll.filter(x => x.e.measured && x.e.pct >= 0).length;
+  const nWarn = effAll.filter(x => x.e.measured && x.e.pct < 0).length;
+  const nWait = effAll.filter(x => !x.e.measured && x.e.state === "確定待ち").length;
+  const nNoBasis = effAll.filter(x => !x.e.measured && x.e.state === "測り方 未設定").length;
+  const nSoon = effAll.filter(x => x.k === "soon").length;
+  const filtered = effAll.filter(x =>
+    PROMO_FILTER === "live" ? x.k === "live" : PROMO_FILTER === "done" ? x.k === "done" : true);
+  const sorted = filtered.slice().sort((a, b) => {
+    if (PROMO_SORT === "effect") {
+      // 測定できたものを上に、前年比の高い順。未測定は下（新しい順）。
+      const ap = a.e.measured ? a.e.pct : null, bp = b.e.measured ? b.e.pct : null;
+      if (ap != null && bp != null) return bp - ap;
+      if (ap != null) return -1;
+      if (bp != null) return 1;
+      return a.c.start < b.c.start ? 1 : -1;
+    }
+    const d = STATUS_ORDER[a.k] - STATUS_ORDER[b.k];   // 新しい順（実施中→予定→終了、各内は日付降順）
+    return d !== 0 ? d : (a.c.start < b.c.start ? 1 : -1);
   });
-  const promoBlock = sortedCamps.length
-    ? `<ul class="clist">${sortedCamps.map(c => {
+  const pTab = (val, label) =>
+    `<button class="ptab${val === PROMO_FILTER ? " on" : ""}" data-pfilter="${val}">${label}</button>`;
+  const pSort = (val, label) =>
+    `<button class="ptab${val === PROMO_SORT ? " on" : ""}" data-psort="${val}">${label}</button>`;
+  const promoSummary = `<div class="psum">
+    <span class="psum-i"><b class="up">◎ ${nGood}</b> 効いた</span>
+    <span class="psum-i"><b class="down">△ ${nWarn}</b> 要改善</span>
+    ${nWait ? `<span class="psum-i muted">確定待ち ${nWait}</span>` : ""}
+    ${nSoon ? `<span class="psum-i muted">予定 ${nSoon}</span>` : ""}
+    ${nNoBasis ? `<span class="psum-i muted">測り方未設定 ${nNoBasis}</span>` : ""}
+  </div>`;
+  const promoControls = `<div class="pctrl">
+    <div class="ptabs">${pTab("all", "すべて")}${pTab("live", "実施中")}${pTab("done", "終了")}</div>
+    <div class="ptabs"><span class="pctrl-l">並べ替え</span>${pSort("effect", "効果順")}${pSort("recent", "新しい順")}</div>
+  </div>
+  <div class="pterm">◎効いた=対象区分が前年同月より増／△要改善=減。<b>昨対比</b>=前年の同じ月と比較。<b>前回比</b>=前回の同じ枠と比較。</div>`;
+  const promoBlock = !myCamps.length
+    ? `<div class="empty">この店の施策はまだ登録されていません。config/schedule.yaml に追記すると、ここと上の売上グラフに並びます。</div>`
+    : !sorted.length
+      ? `<div class="empty">この条件に当てはまる販促はありません。上のタブを「すべて」に戻してください。</div>`
+    : `<ul class="clist">${sorted.map(({ c, e }) => {
         const k = kindOf(c.kind);
         const range = campRange(c);
         const st = campStatus(c);
+        const vmark = e.mark
+          ? `<span class="cvm ${e.tone}" title="対象区分の前年比 ${signed(e.pct)}%">${e.mark} ${e.text}${e.pct != null ? " " + signed(e.pct) + "%" : ""}</span>`
+          : `<span class="cvm wait">${e.state}</span>`;
         // この店ぶんの主指標（その施策が効く部門・商品）。店全体の売上を出すと、
         // 同じ店に重なっている施策が全部そろって同じ数字になる（1728 は6件重なる）。
         const tgt1 = campTargeted(c, code);
@@ -3556,7 +3629,7 @@ function renderStore(code) {
         return `<li data-camp="${c.id}">
           <span class="kchip" style="--kc:${k.color}">${k.label}</span>
           <div class="cbody">
-            <div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}${statusControl(c, st.label, st.k)}</div>
+            <div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}<span class="cvm-wrap">${vmark}</span>${statusControl(c, st.label, st.k)}</div>
             ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
             ${effHtml}
             ${campHeadline(c)}
@@ -3566,8 +3639,7 @@ function renderStore(code) {
           </div>
           <span class="crange">${range}</span>
         </li>`;
-      }).join("")}</ul>`
-    : `<div class="empty">この店の施策はまだ登録されていません。config/schedule.yaml に追記すると、ここと上の売上グラフに並びます。</div>`;
+      }).join("")}</ul>`;
 
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
@@ -3581,7 +3653,8 @@ function renderStore(code) {
     ${storeEngines(code)}
     <section class="block">
       <div class="bhead"><h2>この店の販促</h2>
-        <span class="bnote">${myCamps.length}件</span></div>
+        <span class="bnote">${myCamps.length}件・効いた/要改善で並べ替え</span></div>
+      ${myCamps.length ? promoSummary + promoControls : ""}
       ${promoBlock}
     </section>
     ${myCreativesBlock}

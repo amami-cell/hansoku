@@ -720,5 +720,35 @@ test("renderStore：先頭サマリはヒーローに統合され、基礎デー
   assert.ok(html.includes("class=\"hnote\""), "ヒーローにデータ鮮度の一言");
 });
 
+// ── 販促の効果まとめ・並べ替え ────────────────────────────────────────────
+console.log("販促の効果まとめ（storeCampEffect / renderStore）");
+
+test("storeCampEffect：bucket指定の販促は対象区分の前年比で ◎/△ を返す", () => {
+  const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  const e = call(ctx, `storeCampEffect(${JSON.stringify(c)}, "1006")`);
+  assert.equal(e.measured, true);
+  assert.equal(e.mark, "◎");
+  assert.equal(Math.round(e.pct), 25);
+});
+
+test("storeCampEffect：測り方未設定の販促は measured=false で理由を返す", () => {
+  const c = camp({ kind: "osusume", start: "2026-01-01", end: "2026-01-31" });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  const e = call(ctx, `storeCampEffect(${JSON.stringify(c)}, "1006")`);
+  assert.equal(e.measured, false);
+  assert.equal(e.state, "測り方 未設定");
+});
+
+test("renderStore：この店の販促に効果サマリ（◎効いた）と並べ替え・判定バッジが出る", () => {
+  const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  const html = call(ctx, `renderStore("1006")`);
+  assert.ok(html.includes("効いた"), "効果サマリ");
+  assert.ok(html.includes('data-psort="effect"'), "効果順の並べ替え");
+  assert.ok(html.includes('data-pfilter="live"'), "状態タブ");
+  assert.ok(html.includes("cvm good"), "◎判定バッジ");
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);
