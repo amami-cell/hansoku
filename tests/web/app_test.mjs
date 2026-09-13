@@ -780,5 +780,25 @@ test("storeYearComposition：区分ルールの無い店では出さない", () 
   assert.equal(call(ctx, `storeYearComposition("1006","2026")`), "");
 });
 
+// ── 一覧画面の管理しやすさ（店舗一覧の要注意・並べ替え／全店予算タイル）──────
+console.log("一覧画面（renderList / reviewProgressStrip）");
+
+test("renderList：要注意サマリ（前年割れ）と並べ替えコントロールが出る", () => {
+  const ctx = loadApp(base);   // 1006 は 2026-01 が前年割れ
+  const html = call(ctx, `renderList()`);
+  assert.ok(html.includes("前年割れ"), "前年割れサマリ");
+  assert.ok(html.includes('data-listsort="budget"'), "並べ替え（予算達成順）");
+  assert.ok(html.includes('data-listsort="yoy"'), "並べ替え（前年比順）");
+});
+
+test("reviewProgressStrip：全店 予算達成タイルを出す（予算があるとき）", () => {
+  const withBud = { ...base, budget: { 1006: { "2026-01": 10000000 } },
+    campaigns: [camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" })] };
+  const ctx = loadApp(withBud);
+  const html = call(ctx, `reviewProgressStrip()`);
+  assert.ok(html.includes("全店 予算達成"), "予算達成タイル");
+  assert.ok(html.includes('data-listsort="budget"'), "予算達成順で店舗一覧へ");
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);

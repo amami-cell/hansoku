@@ -66,6 +66,7 @@ let ANNUAL_OPEN = {};              // カレンダー一覧の開閉状態（"co
 let MONTH_PICK_OPEN = false;       // 月詳細の月ピッカーを開いているか
 let PROMO_SORT = "effect";         // この店の販促の並び（effect=効果順 / recent=新しい順）
 let PROMO_FILTER = "all";          // この店の販促の状態フィルタ（all / live / done）
+let STORE_LIST_SORT = "region";    // 店舗一覧の並び（region / budget / yoy / sales）
 let CAMP_FILTER = { status: "all", kind: "all" };   // 施策の効果ビューの絞り込み
 // 販促の目標（施策id→円）。本番は Neon（/api/targets）に共有保存、
 // プレビュー等 API が無い所では端末内（localStorage）に保存する。
@@ -965,6 +966,10 @@ function render() {
     }));
   app.querySelectorAll("[data-tilefilter]").forEach(el =>
     el.addEventListener("click", () => { CAMP_FILTER = { ...CAMP_FILTER, status: el.dataset.tilefilter }; }, true));
+  app.querySelectorAll("[data-listsort]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); STORE_LIST_SORT = el.dataset.listsort;
+      if (el.hasAttribute("data-view")) return;   // data-view 付きは遷移側に任せる
+      render(); }));
   app.querySelectorAll("[data-view]").forEach(el =>
     el.addEventListener("click", () => go({ kind: el.dataset.view }, el.dataset.scroll)));
   app.querySelectorAll("[data-cal]").forEach(el =>
@@ -1039,6 +1044,11 @@ function reviewProgressStrip() {
   const reviewed = done.length - needs;
   const rvPct = done.length ? Math.round(reviewed / done.length * 100) : null;
 
+  // 全店の予算達成（直近確定月の 実績÷予算）。予算を取り込んだ店ぶんで平均＋未達店数。
+  const budRates = DATA.stores.map(s => budgetRate(s.code)).filter(Boolean);
+  const underBud = budRates.filter(b => b.rate < 100).length;
+  const avgBud = budRates.length ? Math.round(budRates.reduce((a, b) => a + b.rate, 0) / budRates.length) : null;
+
   // 原価アラート（前月比で原価率が悪化した店）
   const alerts = costAlerts();
 
@@ -1046,9 +1056,16 @@ function reviewProgressStrip() {
     <button class="rptile${tone ? " " + tone : ""}" data-view="${view}"${scroll ? ` data-scroll="${scroll}"` : ""}${filter ? ` data-tilefilter="${filter}"` : ""}>
       <div class="rpv">${big}</div><div class="rpl">${lbl}</div>
       ${sub ? `<div class="rps">${sub}</div>` : ""}</button>`;
+  // 予算達成タイルは店舗一覧（予算達成率順）へ飛ばす。data-listsort で並びを指定。
+  const budTile = `<button class="rptile${underBud ? " warn" : ""}" data-view="list" data-listsort="budget">
+      <div class="rpv">${avgBud != null ? `${avgBud}<small>%</small>` : "―"}</div>
+      <div class="rpl">全店 予算達成(平均)</div>
+      <div class="rps">${budRates.length ? (underBud ? `未達 ${underBud}店 → 確認` : "全店 達成") : "予算 未取込"}</div></button>`;
+
   return `
     <section class="rpstrip">
       ${tile("campaigns", `${live.length}<small>件</small>`, "実施中の施策", soon.length ? `予定 ${soon.length}・終了 ${done.length}` : `終了 ${done.length}`, "", "", "live")}
+      ${budTile}
       ${tile("campaigns", `<span class="up">${good}</span> / <span class="down">${warn}</span>`, "判定 効果あり/要改善",
         `測れているのは ${good + warn} / ${live.length + done.length}件`)}
       ${tile("campaigns",
@@ -1339,49 +1356,78 @@ function storeProfit(code) {
 
 function renderList() {
   const months = DATA.months;
-  // エリア順に並べる（大阪→東京→…）。エリアは見出しの小さなラベルに留める
-  const cards = DATA.regions.flatMap(r =>
-    r.stores.filter(hasData).map(code => {
-      const color = regionColor(r.name);
-      const total = periodTotal(code);
-      const y = yoy(code);
-      const spark = sparkline(series(code, months), color);
-      const yline = y
-        ? (y.renewal
-            ? `<span class="yoy flat" title="${esc(y.renewal)}｜別業態どうしの比較になります">前年比 ${signed(y.pct)}% ⚠</span>`
-            : `<span class="yoy ${y.pct >= 0 ? "up" : "down"}">前年比 ${signed(y.pct)}%</span>`)
-        : `<span class="yoy flat">前年比 ―</span>`;
-      const promo = storePromoSummary(code);
-      const promoLine = promo
-        ? `<div class="scamp">実施中 ${promo.count}件${promo.rate != null ? ` ・ 達成 <span class="${promo.rate >= 100 ? "up" : "down"}">${promo.rate.toFixed(0)}%</span>` : ""}</div>`
-        : `<div class="scamp muted">実施中の販促なし</div>`;
-      const br = budgetRate(code);
-      const budLine = br
-        ? `<span class="budg ${br.rate >= 100 ? "up" : "down"}" title="${br.m} の 実績÷予算">予算 ${br.rate.toFixed(0)}%</span>`
-        : "";
-      const pf = storeProfit(code);
-      const profLine = (pf.kt != null || pf.gp != null)
-        ? `<div class="sprof">
-            ${pf.kt != null ? `<span class="pf pf-kt" title="直近確定月の 売上÷客数">客単 ${yen(pf.kt)}</span>` : ""}
-            ${pf.gp != null ? `<span class="pf pf-gp ${pf.gp >= 0.65 ? "up" : pf.gp < 0.60 ? "warn" : ""}" title="100−FW理論原価率（ロス・棚卸差異は含まない）">理論粗利 ${pct(pf.gp)}</span>` : ""}
-          </div>`
-        : "";
-      return `
-        <button class="scard" data-store="${code}" style="--rc:${color}">
-          <div class="stop"><span class="rtag">${r.name}</span>${storeName(code)}</div>
-          <div class="sbig">${METRIC === "cost_rate" ? "―" : man(total) + '<span class="unit">円</span>'}</div>
-          ${spark}
-          ${profLine}
-          ${promoLine}
-          <div class="sfoot">${yline}${budLine}<span class="more">詳しく →</span></div>
-        </button>`;
-    })).join("");
+  // 各店の指標を先に集約（並べ替え・要注意サマリで使う）。エリア順のフラット列。
+  const entries = DATA.regions.flatMap(r =>
+    r.stores.filter(hasData).map(code => ({
+      code, region: r.name, color: regionColor(r.name),
+      total: periodTotal(code), y: yoy(code), br: budgetRate(code),
+    })));
+  // 要注意：予算未達・前年割れ（別業態リニューアルは除く）。管理の入口として先頭に出す。
+  const under = entries.filter(e => e.br && e.br.rate < 100)
+    .sort((a, b) => a.br.rate - b.br.rate);
+  const yoyDown = entries.filter(e => e.y && !e.y.renewal && e.y.pct < 0)
+    .sort((a, b) => a.y.pct - b.y.pct);
+  const chip = (e, txt, tone) => `<button class="lwchip ${tone}" data-store="${e.code}">${storeName(e.code)} ${txt}</button>`;
+  const warnBox = (under.length || yoyDown.length)
+    ? `<div class="lwarn">
+        <div class="lwrow"><span class="lwl">予算未達 ${under.length}店</span>${under.slice(0, 4).map(e => chip(e, `${e.br.rate.toFixed(0)}%`, "down")).join("")}${under.length > 4 ? `<span class="lwmore">ほか${under.length - 4}</span>` : ""}</div>
+        <div class="lwrow"><span class="lwl">前年割れ ${yoyDown.length}店</span>${yoyDown.slice(0, 4).map(e => chip(e, `${signed(e.y.pct)}%`, "down")).join("")}${yoyDown.length > 4 ? `<span class="lwmore">ほか${yoyDown.length - 4}</span>` : ""}</div>
+      </div>`
+    : `<div class="lwarn ok">予算未達・前年割れの店はありません 👍</div>`;
+  // 並べ替え。既定はエリア順（entries はエリア順）。悪い順を上に出すと確認しやすい。
+  const big = 1e15;
+  const sk = STORE_LIST_SORT;
+  const ordered = sk === "budget"
+    ? entries.slice().sort((a, b) => (a.br ? a.br.rate : big) - (b.br ? b.br.rate : big))
+    : sk === "yoy"
+      ? entries.slice().sort((a, b) => ((a.y && !a.y.renewal) ? a.y.pct : big) - ((b.y && !b.y.renewal) ? b.y.pct : big))
+      : sk === "sales"
+        ? entries.slice().sort((a, b) => b.total - a.total)
+        : entries;
+  const card = (e) => {
+    const { code, region, color, total, y, br } = e;
+    const spark = sparkline(series(code, months), color);
+    const yline = y
+      ? (y.renewal
+          ? `<span class="yoy flat" title="${esc(y.renewal)}｜別業態どうしの比較になります">前年比 ${signed(y.pct)}% ⚠</span>`
+          : `<span class="yoy ${y.pct >= 0 ? "up" : "down"}">前年比 ${signed(y.pct)}%</span>`)
+      : `<span class="yoy flat">前年比 ―</span>`;
+    const promo = storePromoSummary(code);
+    const promoLine = promo
+      ? `<div class="scamp">実施中 ${promo.count}件${promo.rate != null ? ` ・ 達成 <span class="${promo.rate >= 100 ? "up" : "down"}">${promo.rate.toFixed(0)}%</span>` : ""}</div>`
+      : `<div class="scamp muted">実施中の販促なし</div>`;
+    const budLine = br
+      ? `<span class="budg ${br.rate >= 100 ? "up" : "down"}" title="${br.m} の 実績÷予算">予算 ${br.rate.toFixed(0)}%</span>`
+      : "";
+    const pf = storeProfit(code);
+    const profLine = (pf.kt != null || pf.gp != null)
+      ? `<div class="sprof">
+          ${pf.kt != null ? `<span class="pf pf-kt" title="直近確定月の 売上÷客数">客単 ${yen(pf.kt)}</span>` : ""}
+          ${pf.gp != null ? `<span class="pf pf-gp ${pf.gp >= 0.65 ? "up" : pf.gp < 0.60 ? "warn" : ""}" title="100−FW理論原価率（ロス・棚卸差異は含まない）">理論粗利 ${pct(pf.gp)}</span>` : ""}
+        </div>`
+      : "";
+    return `
+      <button class="scard" data-store="${code}" style="--rc:${color}">
+        <div class="stop"><span class="rtag">${region}</span>${storeName(code)}</div>
+        <div class="sbig">${METRIC === "cost_rate" ? "―" : man(total) + '<span class="unit">円</span>'}</div>
+        ${spark}
+        ${profLine}
+        ${promoLine}
+        <div class="sfoot">${yline}${budLine}<span class="more">詳しく →</span></div>
+      </button>`;
+  };
+  const cards = ordered.map(card).join("");
+  const sBtn = (v, l) => `<button class="ptab${v === sk ? " on" : ""}" data-listsort="${v}">${l}</button>`;
+  const controls = `<div class="pctrl"><span class="pctrl-l">並べ替え</span>
+    <div class="ptabs">${sBtn("region", "エリア順")}${sBtn("budget", "予算達成順")}${sBtn("yoy", "前年比順")}${sBtn("sales", "売上順")}</div></div>`;
 
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
     <section class="block">
       <div class="bhead"><h2>店舗</h2>
         <span class="bnote">${METRIC === "cost_rate" ? "理論原価率は期間合計にできないため ― と出ます" : METRIC_LABELS[METRIC] + "・期間合計"}／前年同月比（当月の暫定は除く）</span></div>
+      ${warnBox}
+      ${controls}
       <div class="sgrid">${cards}</div>
     </section>
     <div class="ovrlink"><button class="linkbtn" data-view="overview">エリア・全店の一覧を見る →</button></div>

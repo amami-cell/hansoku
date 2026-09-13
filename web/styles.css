@@ -274,6 +274,17 @@ tbody tr:last-child td{border-bottom:0;}
 .mlsvg .ml{transition:stroke-opacity .12s,stroke-width .12s;cursor:pointer;}
 
 /* ── 店カード（TOP・主役）───────────────────────────────── */
+/* 店舗一覧の「要注意」サマリ（予算未達・前年割れの店を先頭に集約） */
+.lwarn{margin:0 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;
+  background:var(--surface-2);display:flex;flex-direction:column;gap:7px;}
+.lwarn.ok{color:var(--good-ink);font-size:13px;}
+.lwrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
+.lwl{font-size:12px;font-weight:700;color:var(--ink-2);margin-right:2px;min-width:88px;}
+.lwchip{font:inherit;font-size:12px;cursor:pointer;border-radius:999px;padding:3px 10px;
+  border:1px solid var(--line);background:var(--surface);color:var(--ink);font-variant-numeric:tabular-nums;}
+.lwchip.down{border-color:color-mix(in srgb,var(--critical-ink) 40%,var(--line));color:var(--critical-ink);}
+.lwchip:hover{border-color:var(--accent);}
+.lwmore{font-size:11px;color:var(--ink-3);}
 .sgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:13px;}
 .scard{text-align:left;font:inherit;cursor:pointer;background:var(--surface);
   border:1px solid var(--line);border-left:3px solid var(--rc);border-radius:var(--radius);
@@ -1229,7 +1240,7 @@ b.warn{color:var(--warning-ink);}
 .ctaim{grid-column:1/-1;font-size:11px;color:var(--ink-2);}
 
 /* 進捗＆振り返りサマリ（TOP・reviewProgressStrip） */
-.rpstrip{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:0 0 14px;}
+.rpstrip{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:0 0 14px;}
 @media(max-width:1000px){.rpstrip{grid-template-columns:repeat(3,1fr);}}
 .rptile{text-align:left;border:1px solid var(--line);border-radius:12px;padding:12px 14px;
   background:var(--surface-1);cursor:pointer;transition:border-color .15s,transform .05s;}
