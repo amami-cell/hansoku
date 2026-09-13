@@ -750,5 +750,13 @@ test("renderStore：この店の販促に効果サマリ（◎効いた）と並
   assert.ok(html.includes("cvm good"), "◎判定バッジ");
 });
 
+test("renderStore：前回比が一覧に併記される（同じ枠の前回の回と比較）", () => {
+  const prev = camp({ id: "p", bucket: "コース", start: "2025-01-01", end: "2025-01-31" });
+  const curr = camp({ id: "c2", bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
+  const ctx = loadApp({ ...base, campaigns: [prev, curr] });
+  const html = call(ctx, `renderStore("1006")`);
+  assert.ok(html.includes("前回比"), "前回比が一覧に出る");
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);

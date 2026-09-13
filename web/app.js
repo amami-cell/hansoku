@@ -3151,11 +3151,12 @@ function storeAnnualChart(code, year) {
       </div></div>`;
   }).join("");
 
-  // 凡例（その年に出ている種類）
+  // 凡例（その年に出ている種類）＋見方（誰が見ても操作が分かるように）
   const kinds = [...new Set(camps.map(c => c.kind))];
   const legend = kinds.length
     ? `<div class="glegend">${kinds.map(kk => `<span class="glg"><i style="background:${kindOf(kk).color}"></i>${kindOf(kk).label}</span>`).join("")}
-        <span class="glg"><i class="gvm good">◎</i>効果あり</span><span class="glg"><i class="gvm warn">△</i>要改善</span></div>`
+        <span class="glg"><i class="gvm good">◎</i>効果あり</span><span class="glg"><i class="gvm warn">△</i>要改善</span></div>
+       <div class="ghelp">帯＝販促の期間（左＝開始月・長さ＝実施期間）。<b>帯や販促名</b>を押すと販促の詳細、<b>上の月番号</b>を押すとその月の詳細（構成比・POP）へ。◎/△は対象区分の前年比で自動判定。</div>`
     : "";
 
   return `<div class="panel gantt">
@@ -3585,6 +3586,15 @@ function renderStore(code) {
             ? `<span class="${tgt1.pct >= 0 ? "up" : "down"}">前年比 ${signed(tgt1.pct)}%</span>${tgt1.prev != null ? `（前年 ${man(tgt1.prev)}円）` : ""}`
             : "前年データなし";
           effHtml = `<div class="ceff">${esc(tgt1.label)}（確定${tgt1.months}ヶ月）<b>${man(tgt1.cur)}円</b>・${cmp}</div>`;
+          // 前回比（同じ枠の前回の回と、この店ぶんで比べる）。一覧でも一目で分かるように。
+          const prevOcc = campPrevOccurrence(c);
+          if (tgt1.cur && prevOcc) {
+            const pb = campTargeted(prevOcc, code);
+            if (pb && pb.cur) {
+              const d = (tgt1.cur / pb.cur - 1) * 100;
+              effHtml += `<div class="ceff sub2">前回比 <span class="${d >= 0 ? "up" : "down"}">${signed(d)}%</span><span class="sub">（前回 ${esc(prevOcc.title)}｜${man(pb.cur)}→${man(tgt1.cur)}円）</span></div>`;
+            }
+          }
         } else if (!campBasis(c)) {
           effHtml = `<div class="ceff muted">この販促を何で測るか未設定 — 対象の部門（例: コース）か商品名を決めると数字が出ます</div>`;
         }
