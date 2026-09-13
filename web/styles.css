@@ -877,6 +877,11 @@ tbody tr:last-child td{border-bottom:0;}
 .catrow:hover .dname{text-decoration:underline;}
 @media (max-width:560px){ .catrow .dqty{display:none;} .catrow .dname{flex-basis:64px;font-size:12px;} }
 .cgrid.mini{grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-top:8px;}
+/* 販促カード内のPOP・資料（結果のとなりに束ねる） */
+.cpop{margin-top:7px;}
+.cpop-l{font-size:11px;font-weight:600;color:var(--ink-3);}
+.cpop.muted{font-size:11.5px;color:var(--ink-3);}
+.cpop .cgrid.mini{margin-top:5px;}
 
 /* 年間スケジュール：チャート/カレンダー切替バー */
 .annualbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px;}

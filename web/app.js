@@ -3840,12 +3840,19 @@ function renderStore(code) {
         const memoHtml = memo
           ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${campKey(c)}" title="メモを編集">✎</button></div>`
           : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`;
+        // 出したPOP・資料を結果のとなりに。押すと小窓でプレビュー。未登録は実施中/予定だけ促す。
+        const crs = creativesForCampaign(c.id);
+        const addPop = (CREATIVES_API_OK && WRITE_OK) ? ` <button class="upbtn sm" data-upload="campaign:${c.id}">＋追加</button>` : "";
+        const popHtml = crs.length
+          ? `<div class="cpop"><span class="cpop-l">POP・資料 ${crs.length}</span><div class="cgrid mini">${crs.map(creativeCard).join("")}</div></div>`
+          : (st.k !== "done" ? `<div class="cpop muted">POP未登録${addPop}</div>` : "");
         return `<li data-camp="${c.id}">
           <span class="kchip" style="--kc:${k.color}">${k.label}</span>
           <div class="cbody">
             <div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}<span class="cvm-wrap">${vmark}</span>${statusControl(c, st.label, st.k)}</div>
             ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
             ${effHtml}
+            ${popHtml}
             ${campHeadline(c)}
             ${goalHtml}
             ${memoHtml}

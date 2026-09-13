@@ -719,6 +719,15 @@ test("renderStore：先頭サマリはヒーローに統合され、基礎デー
   assert.ok(html.includes("class=\"hnote\""), "ヒーローにデータ鮮度の一言");
 });
 
+test("renderStore：販促カードに その販促のPOP（制作物）が結果と並んで出る", () => {
+  const c = camp({ id: "p1", bucket: "コース", title: "夏コース", start: "2026-01-01", end: "2026-01-31" });
+  const withCr = { ...base, campaigns: [c],
+    creatives: [{ id: "cr1", campaign_id: "p1", store_code: "1006", title: "夏POP", mime: "image/png", url: "x.png" }] };
+  const ctx = loadApp(withCr);
+  const html = call(ctx, `CREATIVES_API_OK=true; renderStore("1006")`);
+  assert.ok(html.includes("POP・資料") && html.includes("夏POP"), "販促カードにPOPが束ねて出る");
+});
+
 test("renderStore：縦長対策のジャンプナビ（各セクションへ飛べる）が出る", () => {
   const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
   const ctx = loadApp({ ...base, campaigns: [c] });
