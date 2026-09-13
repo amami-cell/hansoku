@@ -998,6 +998,15 @@ function render() {
       CAMP_FILTER = { ...CAMP_FILTER, [dim]: val };
       render(); syncHash();
     }));
+  app.querySelectorAll("[data-jump]").forEach(el =>
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const t = document.getElementById(el.dataset.jump);
+      if (!t) return;
+      const det = t.closest("details");   // 基礎データは折りたたみ。飛ぶ時は開く。
+      if (det && !det.open) det.open = true;
+      t.scrollIntoView({ behavior: "smooth", block: "start" });
+    }));
   wireEmphasis(app);
   markNav();
 }
@@ -3051,7 +3060,7 @@ function storeEngines(code) {
     </div>`;
   }).join("");
 
-  return `<section class="block">
+  return `<section class="block" id="engines">
     <div class="bhead"><h2>販促エンジン（主役の通年）</h2>
       <span class="bnote">バー＝月次売上（緑=前年超/赤=前年割れ）・押すと商品／回ごとに昨対・前回比</span></div>
     <div class="enggrid">${cards}</div>
@@ -3133,7 +3142,7 @@ function storeHero(code) {
     ? `<ul class="htodo">${todo.map(t => `<li data-camp="${t.c.id}"><span class="htn">${t.label}</span><span class="htc">${t.n}件</span><span class="htgo">→</span></li>`).join("")}</ul>`
     : `<div class="muted hmt">やり残しなし 👍</div>`;
 
-  return `<section class="block hero">
+  return `<section class="block hero" id="hero">
     <div class="hgrid">
       ${budCard}
       <div class="hcard"><div class="hlbl">主役の販促（実施中）</div>${heroCards}${winLine}</div>
@@ -3653,7 +3662,7 @@ function renderStore(code) {
   const myCrAdd = CREATIVES_API_OK
     ? `<button class="upbtn" data-upload="store:${code}">＋ POP・写真・資料を追加</button>` : "";
   const myCreativesBlock = (myCreatives.length || CREATIVES_API_OK)
-    ? `<section class="block">
+    ? `<section class="block" id="creatives">
         <div class="bhead"><h2>この店の制作物</h2><span class="bnote">${myCreatives.length}件・POP/写真/資料。押すと小窓で開く（×か背景で閉じる）</span></div>
         ${myCreatives.length ? `<div class="cgrid">${myCreatives.map(creativeCard).join("")}</div>`
           : `<p class="muted" style="margin:2px 0 10px">まだありません。PDF・写真・Excelを追加できます。</p>`}
@@ -3785,6 +3794,23 @@ function renderStore(code) {
         </li>`;
       }).join("")}</ul>`;
 
+  // 各セクションを先に組んでおき、実在するものだけをジャンプナビに載せる。
+  const heroHtml = storeHero(code);
+  const annualHtml = storeAnnual(code);
+  const enginesHtml = storeEngines(code);
+  // ページが縦に長いので、上部に「どこへでも飛べる」固定ナビを置く（誰が触っても迷わない）。
+  const navItems = [
+    ["hero", "今の状況"],
+    annualHtml ? ["annual", "年間"] : null,
+    enginesHtml ? ["engines", "販促エンジン"] : null,
+    myCamps.length ? ["promos", "販促リスト"] : null,
+    myCreativesBlock ? ["creatives", "制作物"] : null,
+    ["basics", "基礎データ"],
+  ].filter(Boolean);
+  const storeNav = `<nav class="snav" aria-label="店内ジャンプ">
+    ${navItems.map(([id, label]) => `<button class="snavb" data-jump="${id}">${label}</button>`).join("")}
+  </nav>`;
+
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
     <section class="block">
@@ -3792,17 +3818,18 @@ function renderStore(code) {
         <h2 class="sname">${s.name}</h2>${s.shared_facility ? '<span class="tagx">共営施設</span>' : ""}</div>
       ${homeBtnRow}
     </section>
-    ${storeHero(code)}
-    ${storeAnnual(code)}
-    ${storeEngines(code)}
-    <section class="block">
+    ${storeNav}
+    ${heroHtml}
+    ${annualHtml}
+    ${enginesHtml}
+    <section class="block" id="promos">
       <div class="bhead"><h2>この店の販促</h2>
         <span class="bnote">${myCamps.length}件・効いた/要改善で並べ替え</span></div>
       ${myCamps.length ? promoSummary + promoControls : ""}
       ${promoBlock}
     </section>
     ${myCreativesBlock}
-    <details class="moredet">
+    <details class="moredet" id="basics">
       <summary>店の基礎データを見る（売上推移・部門・商品・時間帯・近隣）</summary>
       <section class="block">${kpis}${storeTargetChip(code)}</section>
       ${renderProfitability(code)}

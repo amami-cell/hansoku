@@ -720,6 +720,18 @@ test("renderStore：先頭サマリはヒーローに統合され、基礎デー
   assert.ok(html.includes("class=\"hnote\""), "ヒーローにデータ鮮度の一言");
 });
 
+test("renderStore：縦長対策のジャンプナビ（各セクションへ飛べる）が出る", () => {
+  const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  const html = call(ctx, `renderStore("1006")`);
+  assert.ok(html.includes('class="snav"'), "ジャンプナビ本体");
+  assert.ok(html.includes('data-jump="hero"'), "今の状況へ飛べる");
+  assert.ok(html.includes('data-jump="promos"'), "販促リストへ飛べる");
+  assert.ok(html.includes('data-jump="basics"'), "基礎データへ飛べる");
+  assert.ok(html.includes('id="hero"') && html.includes('id="promos"') && html.includes('id="basics"'),
+    "飛び先のアンカーIDがある");
+});
+
 // ── 販促の効果まとめ・並べ替え ────────────────────────────────────────────
 console.log("販促の効果まとめ（storeCampEffect / renderStore）");
 
