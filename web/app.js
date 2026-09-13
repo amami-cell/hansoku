@@ -731,6 +731,7 @@ async function boot() {
   await fetchServerNotes();     // 要因メモも同様（本番=共有、無ければ端末内）
   await fetchServerStatus();    // 手動ステータス（本番=共有、無ければ端末内）
   await fetchServerCreatives(); // アップロード制作物（本番のみ・無ければ台帳ぶんだけ）
+  await fetchServerPlans();     // アプリ内で起票した販促プラン（本番のみ・台帳と統合）
   // URL が指定されていればそれに従う。無ければ「うちの店」。それも無ければ全店。
   if (location.hash && location.hash !== "#") {
     VIEW = hashToView(location.hash);
@@ -990,6 +991,16 @@ function render() {
     }));
   app.querySelectorAll("[data-crdel]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); deleteCreative(el.dataset.crdel); }));
+  app.querySelectorAll("[data-plannew]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); openPlanEditor({ store_code: el.dataset.plannew }); }));
+  app.querySelectorAll("[data-plandup]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); duplicatePlan(el.dataset.plandup, VIEW && VIEW.code); }));
+  app.querySelectorAll("[data-planedit]").forEach(el =>
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const p = planById(el.dataset.planedit);
+      if (p) openPlanEditor(p); else alert("プランが見つかりません。再読み込みしてください。");
+    }));
   app.querySelectorAll("[data-crurl]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); openCreativePreview(el.dataset.crurl, el.dataset.crmime, el.dataset.crtitle, el.dataset.cropen); }));
   app.querySelectorAll("[data-cfilter]").forEach(el =>
@@ -1648,6 +1659,36 @@ const allCreatives = () => (DATA.creatives || []).concat(UPLOADED_CREATIVES);
 // 施策に紐づく制作物（台帳＋アップロード両方）
 const creativesForCampaign = id => allCreatives().filter(cr => cr.campaign_id === id);
 
+// ── 販促プラン（アプリ内で起票・複製する計画。/api/plans）───────────────────
+// 台帳(schedule.yaml)由来の「確定した販促」に、アプリで起票した「計画」を足して
+// 年間ビュー/PDCA に一緒に並べる。planned=true で「計画」と分かるように印を付ける。
+let PLANS = [];
+let PLANS_API_OK = false;
+let BASE_CAMPAIGNS = null;   // 台帳由来のオリジナル（プラン反映のたびに再結合する土台）
+const isPlan = c => !!(c && c.planned);
+function planToCamp(p) {
+  return {
+    id: p.id, stores: [p.store_code], scope_all: false, title: p.title,
+    kind: p.kind || "dev", bucket: p.bucket || undefined,
+    start: p.start, end: p.end, planned: true, plan_goal: p.goal, plan_note: p.note || "",
+  };
+}
+function applyPlans() {
+  if (!DATA) return;
+  if (BASE_CAMPAIGNS === null) BASE_CAMPAIGNS = (DATA.campaigns || []).slice();
+  DATA.campaigns = BASE_CAMPAIGNS.concat(PLANS.map(planToCamp));
+}
+async function fetchServerPlans() {
+  try {
+    const res = await fetch("/api/plans", { headers: { accept: "application/json" }, cache: "no-store" });
+    const ct = res.headers.get("content-type") || "";
+    if (!res.ok || !ct.includes("application/json")) return;
+    const data = await res.json();
+    if (data && Array.isArray(data.plans)) { PLANS = data.plans; PLANS_API_OK = true; applyPlans(); }
+  } catch (e) { /* API 無し → 台帳ぶんだけ */ }
+}
+const planById = id => PLANS.find(p => p.id === id) || null;
+
 // 画面から施策/店にファイルを足す。PDF・画像・Excel対応。押すとその場でファイル選択。
 function promptUpload(campaign, store) {
   if (!CREATIVES_API_OK) { alert("アップロードは本番（ログイン済み）でのみ使えます。"); return; }
@@ -1674,6 +1715,118 @@ async function uploadCreative(file, campaign, store) {
     render();
   } catch (e) { alert("アップロードに失敗しました（通信エラー）。"); }
 }
+// 販促プランの起票・編集モーダル。seed で初期値（複製元 or 既存プラン）を渡す。
+// 保存は /api/plans（ログイン必須）。開放モードや未ログインでは呼ばれない。
+const PLAN_KIND_OPTS = ["osusume", "lunch", "bounenkai", "gm", "dev", "closure"];
+function openPlanEditor(seed) {
+  if (!PLANS_API_OK) { alert("販促の起票は本番（ログイン済み）でのみ使えます。"); return; }
+  const s = seed || {};
+  const code = s.store_code;
+  const cats = (catRules(code) && catRules(code).categories || []).map(c => c.name);
+  const ym = d => (d ? String(d).slice(0, 7) : "");
+  let ov = document.getElementById("planedit");
+  if (ov) ov.remove();
+  ov = document.createElement("div");
+  ov.id = "planedit"; ov.className = "crprev";
+  const kindOpts = PLAN_KIND_OPTS.map(k => `<option value="${k}"${(s.kind || "osusume") === k ? " selected" : ""}>${esc(kindOf(k).label)}</option>`).join("");
+  const bucketOpts = ['<option value="">（指定なし）</option>']
+    .concat(cats.map(n => `<option value="${esc(n)}"${s.bucket === n ? " selected" : ""}>${esc(n)}</option>`)).join("");
+  ov.innerHTML = `<div class="crprev-bd" data-planclose></div>
+    <div class="crprev-box planbox" role="dialog" aria-modal="true">
+      <div class="crprev-bar"><span class="crprev-title">${s.id ? "販促プランを編集" : "販促プランを起票"}</span>
+        <button class="crprev-x" type="button" data-planclose aria-label="閉じる">×</button></div>
+      <div class="planform">
+        <label class="pf-l">販促名<input class="pf-in" id="pf-title" type="text" value="${esc(s.title || "")}" placeholder="例：秋のパフェフェア"></label>
+        <div class="pf-row">
+          <label class="pf-l">種類<select class="pf-in" id="pf-kind">${kindOpts}</select></label>
+          <label class="pf-l">対象区分<select class="pf-in" id="pf-bucket">${bucketOpts}</select></label>
+        </div>
+        <div class="pf-row">
+          <label class="pf-l">開始月<input class="pf-in" id="pf-start" type="month" value="${esc(ym(s.start))}"></label>
+          <label class="pf-l">終了月<input class="pf-in" id="pf-end" type="month" value="${esc(ym(s.end))}"></label>
+        </div>
+        <label class="pf-l">目標（円・任意）<input class="pf-in" id="pf-goal" type="number" inputmode="numeric" value="${s.goal != null ? s.goal : ""}" placeholder="例：1500000"></label>
+        <label class="pf-l">メモ（任意）<textarea class="pf-in" id="pf-note" rows="2" placeholder="狙い・段取りなど">${esc(s.note || "")}</textarea></label>
+        <div class="pf-msg" id="pf-msg" hidden></div>
+        <div class="pf-actions">
+          ${s.id ? `<button class="pf-del" type="button" data-plandelete="${esc(s.id)}">削除</button>` : "<span></span>"}
+          <div>
+            <button class="pf-cancel" type="button" data-planclose>キャンセル</button>
+            <button class="pf-save" type="button" id="pf-save">${s.id ? "保存" : "起票する"}</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target.hasAttribute("data-planclose")) ov.remove(); });
+  ov.querySelector("#pf-save").addEventListener("click", () => savePlanFromForm(s, code));
+  const del = ov.querySelector("[data-plandelete]");
+  if (del) del.addEventListener("click", () => deletePlan(del.dataset.plandelete));
+  const t = ov.querySelector("#pf-title"); if (t) t.focus();
+}
+function lastDayOfMonth(ym) { const [y, m] = ym.split("-").map(Number); return new Date(y, m, 0).getDate(); }
+async function savePlanFromForm(seed, code) {
+  const g = id => document.getElementById(id);
+  const msg = g("pf-msg");
+  const show = m => { if (msg) { msg.textContent = m; msg.hidden = false; } };
+  const title = (g("pf-title").value || "").trim();
+  const sm = g("pf-start").value, em = g("pf-end").value;
+  if (!title) return show("販促名を入れてください。");
+  if (!sm || !em) return show("開始月と終了月を入れてください。");
+  if (em < sm) return show("終了月は開始月より後にしてください。");
+  const payload = {
+    id: seed.id || "",
+    store_code: code,
+    title,
+    kind: g("pf-kind").value,
+    bucket: g("pf-bucket").value,
+    start: `${sm}-01`,
+    end: `${em}-${String(lastDayOfMonth(em)).padStart(2, "0")}`,
+    goal: g("pf-goal").value === "" ? null : Number(g("pf-goal").value),
+    note: (g("pf-note").value || "").trim(),
+    source_id: seed.source_id || "",
+  };
+  const saveBtn = g("pf-save"); if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "保存中…"; }
+  try {
+    const res = await fetch("/api/plans", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+    if (res.status === 401) return show("保存にはログインが必要です。");
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return show(d.detail || "保存に失敗しました。"); }
+    const data = await res.json();
+    if (data && data.plan) {
+      const i = PLANS.findIndex(p => p.id === data.plan.id);
+      if (i >= 0) PLANS[i] = data.plan; else PLANS.push(data.plan);
+      applyPlans();
+    }
+    const ov = document.getElementById("planedit"); if (ov) ov.remove();
+    render();
+  } catch (e) {
+    show("保存に失敗しました（通信エラー）。");
+  } finally { if (saveBtn) { saveBtn.disabled = false; } }
+}
+async function deletePlan(id) {
+  if (!id) return;
+  if (!window.confirm("この販促プランを削除しますか？")) return;
+  try {
+    const res = await fetch("/api/plans", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ id }) });
+    if (!res.ok && res.status !== 200) { alert("削除に失敗しました。"); return; }
+    PLANS = PLANS.filter(p => p.id !== id);
+    applyPlans();
+    const ov = document.getElementById("planedit"); if (ov) ov.remove();
+    render();
+  } catch (e) { alert("削除に失敗しました（通信エラー）。"); }
+}
+// 既存の販促を複製して起票（前年の枠を今年に、など）。1年後の同月を初期値にする。
+function duplicatePlan(campId, code) {
+  const c = (DATA.campaigns || []).find(x => x.id === campId);
+  if (!c) { openPlanEditor({ store_code: code }); return; }
+  const plus1y = d => { if (!d) return ""; const [y, m, dd] = String(d).slice(0, 10).split("-"); return `${+y + 1}-${m}-${dd}`; };
+  openPlanEditor({
+    store_code: code, title: c.title, kind: c.kind || "osusume", bucket: c.bucket || "",
+    start: plus1y(c.start), end: plus1y(c.end || c.start), goal: (isPlan(c) ? c.plan_goal : targetOf(c)) || null,
+    note: "", source_id: c.id,
+  });
+}
+
 // アップロードした画像・PDFを、別タブに飛ばずアプリ内の小窓で見る。
 function openCreativePreview(url, mime, title, openUrl) {
   let ov = document.getElementById("crprev");
@@ -3989,14 +4142,19 @@ function renderStore(code) {
         return `<li data-camp="${c.id}">
           <span class="kchip" style="--kc:${k.color}">${k.label}</span>
           <div class="cbody">
-            <div class="ctitle">${c.title}${c.scope_all ? '<span class="tagx">全店</span>' : ""}<span class="cvm-wrap">${vmark}</span>${statusControl(c, st.label, st.k)}</div>
+            <div class="ctitle">${c.title}${c.planned ? '<span class="plbadge">計画</span>' : ""}${c.scope_all ? '<span class="tagx">全店</span>' : ""}<span class="cvm-wrap">${vmark}</span>${statusControl(c, st.label, st.k)}</div>
             ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
+            ${c.planned && c.plan_note ? `<div class="cnote">${escBr(c.plan_note)}</div>` : ""}
+            ${c.planned && c.plan_goal ? `<div class="ceff">目標 <b>${man(c.plan_goal)}円</b><span class="sub">（計画）</span></div>` : ""}
             ${effHtml}
             ${popHtml}
             ${campHeadline(c)}
             ${goalHtml}
             ${memoHtml}
             ${prevLearnHtml}
+            ${(PLANS_API_OK && WRITE_OK) ? `<div class="pactions">${c.planned
+              ? `<button class="plbtn" data-planedit="${c.id}">✎ 編集</button>`
+              : `<button class="plbtn" data-plandup="${c.id}">⧉ 複製して起票</button>`}</div>` : ""}
             <div class="cgo">詳細を確認 →</div>
           </div>
           <span class="crange">${range}</span>
@@ -4038,7 +4196,8 @@ function renderStore(code) {
     ${enginesHtml}
     <section class="block" id="promos">
       <div class="bhead"><h2>この店の販促（個別のPDCA）</h2>
-        <span class="bnote">${myCamps.length}件・各販促の効果◎/△・前回比・目標・POP・メモ。効いた/要改善で並べ替え。通年トレンドは上の「販促エンジン」で。</span></div>
+        <span class="bnote">${myCamps.length}件・各販促の効果◎/△・前回比・目標・POP・メモ。効いた/要改善で並べ替え。通年トレンドは上の「販促エンジン」で。</span>
+        ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋ 販促を起票</button>` : ""}</div>
       ${myCamps.length ? promoSummary + promoControls : ""}
       ${promoBlock}
     </section>

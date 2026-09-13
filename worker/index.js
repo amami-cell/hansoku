@@ -134,6 +134,13 @@ export default {
         return serverError(e);
       }
     }
+    if (url.pathname === "/api/plans") {
+      try {
+        return await handlePlans(request, env, me.who);
+      } catch (e) {
+        return serverError(e);
+      }
+    }
     // 制作物PDF（R2）。Access の内側で同一ドメイン配信する。
     if (url.pathname.startsWith("/creatives/")) {
       try {
@@ -146,6 +153,72 @@ export default {
     return env.ASSETS.fetch(request);
   },
 };
+
+// 販促プラン（アプリ内で起票・複製する計画）。GET=一覧 / POST=作成・更新 / DELETE=削除。
+// テーブルはマイグレーション（008）で作るが、初回でも動くよう冪等DDLで担保する。
+const PLAN_KINDS = ["gm", "lunch", "osusume", "bounenkai", "dev", "closure"];
+async function handlePlans(request, env, who) {
+  if (!env.DATABASE_URL) return json({ error: "no-db" }, 503);
+  const sql = neon(env.DATABASE_URL);
+  await sql`CREATE TABLE IF NOT EXISTS promo_plans (
+    id TEXT PRIMARY KEY, store_code TEXT NOT NULL, title TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'dev', bucket TEXT NOT NULL DEFAULT '',
+    start_date DATE NOT NULL, end_date DATE NOT NULL, goal BIGINT,
+    note TEXT NOT NULL DEFAULT '', source_id TEXT NOT NULL DEFAULT '',
+    set_by TEXT NOT NULL DEFAULT '', set_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
+
+  if (request.method === "GET") {
+    const rows = await sql`SELECT id, store_code, title, kind, bucket, start_date, end_date, goal, note, source_id, set_by, set_at FROM promo_plans ORDER BY start_date`;
+    const plans = rows.map((r) => ({
+      id: r.id, store_code: r.store_code, title: r.title, kind: r.kind || "dev",
+      bucket: r.bucket || "", start: String(r.start_date).slice(0, 10), end: String(r.end_date).slice(0, 10),
+      goal: r.goal == null ? null : Number(r.goal), note: r.note || "", source_id: r.source_id || "",
+      by: r.set_by || "", at: r.set_at,
+    }));
+    return json({ plans });
+  }
+
+  const email = who || "";
+  if (!email) return json({ error: "unauthenticated" }, 401);
+
+  let body;
+  try { body = await request.json(); } catch { return json({ error: "bad-json" }, 400); }
+
+  if (request.method === "DELETE") {
+    const id = typeof body.id === "string" ? body.id.slice(0, 128) : "";
+    if (!id) return json({ error: "no-id" }, 400);
+    await sql`DELETE FROM promo_plans WHERE id = ${id}`;
+    return json({ ok: true, id, deleted: true });
+  }
+
+  if (request.method === "POST") {
+    const id = (typeof body.id === "string" && body.id.trim())
+      ? body.id.trim().slice(0, 128)
+      : "plan-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
+    const store_code = typeof body.store_code === "string" ? body.store_code.slice(0, 32) : "";
+    const title = typeof body.title === "string" ? body.title.trim().slice(0, 200) : "";
+    const kind = PLAN_KINDS.includes(body.kind) ? body.kind : "dev";
+    const bucket = typeof body.bucket === "string" ? body.bucket.trim().slice(0, 80) : "";
+    const start = typeof body.start === "string" ? body.start.slice(0, 10) : "";
+    const end = typeof body.end === "string" ? body.end.slice(0, 10) : "";
+    const note = typeof body.note === "string" ? body.note.slice(0, 2000).trim() : "";
+    const source_id = typeof body.source_id === "string" ? body.source_id.slice(0, 128) : "";
+    const goal = (body.goal == null || body.goal === "") ? null : Math.max(0, Math.round(Number(body.goal) || 0));
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (!store_code || !title) return json({ error: "missing", detail: "店舗と販促名は必須です" }, 400);
+    if (!dateRe.test(start) || !dateRe.test(end) || end < start) return json({ error: "bad-date", detail: "期間（開始・終了）が不正です" }, 400);
+    await sql`
+      INSERT INTO promo_plans (id, store_code, title, kind, bucket, start_date, end_date, goal, note, source_id, set_by, set_at)
+      VALUES (${id}, ${store_code}, ${title}, ${kind}, ${bucket}, ${start}, ${end}, ${goal}, ${note}, ${source_id}, ${email}, now())
+      ON CONFLICT (id) DO UPDATE SET
+        store_code = EXCLUDED.store_code, title = EXCLUDED.title, kind = EXCLUDED.kind,
+        bucket = EXCLUDED.bucket, start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
+        goal = EXCLUDED.goal, note = EXCLUDED.note, set_by = EXCLUDED.set_by, set_at = now()`;
+    return json({ ok: true, plan: { id, store_code, title, kind, bucket, start, end, goal, note, source_id, by: email } });
+  }
+
+  return json({ error: "method" }, 405);
+}
 
 async function handleNotes(request, env, who) {
   if (!env.DATABASE_URL) return json({ error: "no-db" }, 503);

@@ -732,6 +732,31 @@ test("storeProductSearch：商品データが無ければ出さない", () => {
   assert.equal(call(ctx, `storeProductSearch("1006")`), "");
 });
 
+test("販促プラン：applyPlans で計画が DATA.campaigns に統合される", () => {
+  const c = camp({ id: "real", stores: ["1160"], bucket: "パフェ", start: "2026-01-01", end: "2026-01-31" });
+  const ctx = loadApp({ ...luqa, campaigns: [c] });
+  call(ctx, `PLANS=[{id:"plan-x",store_code:"1160",title:"秋パフェ計画",kind:"osusume",bucket:"パフェ",start:"2026-09-01",end:"2026-10-31",goal:1500000,note:"狙い",by:"me"}]; BASE_CAMPAIGNS=null; applyPlans();`);
+  assert.equal(call(ctx, `DATA.campaigns.length`), 2);
+  assert.equal(call(ctx, `DATA.campaigns.find(c=>c.id==="plan-x").planned`), true);
+});
+
+test("販促プラン：起票ボタン・計画バッジ・複製/編集が販促リストに出る（本番のみ）", () => {
+  const c = camp({ id: "real", stores: ["1160"], bucket: "パフェ", start: "2026-01-01", end: "2026-01-31" });
+  const ctx = loadApp({ ...luqa, campaigns: [c] });
+  const html = call(ctx, `PLANS_API_OK=true; WRITE_OK=true; PLANS=[{id:"plan-x",store_code:"1160",title:"秋パフェ計画",kind:"osusume",bucket:"パフェ",start:"2026-09-01",end:"2026-10-31",goal:1500000,note:"狙い",by:"me"}]; BASE_CAMPAIGNS=null; applyPlans(); renderStore("1160")`);
+  assert.ok(html.includes('data-plannew="1160"'), "＋販促を起票ボタン");
+  assert.ok(html.includes("秋パフェ計画") && html.includes("plbadge"), "計画がバッジ付きで並ぶ");
+  assert.ok(html.includes('data-planedit="plan-x"'), "計画は編集ボタン");
+  assert.ok(html.includes('data-plandup="real"'), "確定販促は複製ボタン");
+});
+
+test("販促プラン：閲覧専用（WRITE_OK=false）では起票・複製ボタンを出さない", () => {
+  const c = camp({ id: "real", stores: ["1160"], bucket: "パフェ", start: "2026-01-01", end: "2026-01-31" });
+  const ctx = loadApp({ ...luqa, campaigns: [c] });
+  const html = call(ctx, `PLANS_API_OK=true; WRITE_OK=false; renderStore("1160")`);
+  assert.ok(!html.includes("data-plannew") && !html.includes("data-plandup"), "閲覧専用では書き込み導線を出さない");
+});
+
 test("renderStore：今月の共有カード（会議/LINE用・コピー用テキスト）が出る", () => {
   const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
   const withBud = { ...base, budget: { 1006: { "2026-01": 10000000 } },
