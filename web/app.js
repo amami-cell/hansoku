@@ -671,19 +671,54 @@ function wireSearch() {
   });
 }
 
+// dashboard.json を読む。失敗の「種類」を見分けて、正しい直し方を出す。
+//  - 通信で弾かれた（"Failed to fetch"）＝ログイン期限切れ/ネットワーク/Access
+//    リダイレクト。→ 再読み込みを促す。夜間バッチとは無関係。
+//  - 404 ＝まだ書き出されていない。→ 夜間バッチ後に再試行。
+//  - その他HTTPエラー ＝サーバ側。→ 時間をおいて再読み込み。
+// 一時的な瞬断のために、通信エラー時だけ短く数回リトライする。
+async function loadDashboard() {
+  let last = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch("data/dashboard.json", { cache: "no-store" });
+      if (res.ok) return await res.json();
+      last = { kind: res.status === 404 ? "missing" : "server", detail: res.status };
+      if (res.status === 404) break;   // 404 は粘っても無駄
+    } catch (e) {
+      last = { kind: "network", detail: (e && e.message) || "通信エラー" };
+    }
+    if (attempt < 2) await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+  }
+  paintLoadError(last);
+  return null;
+}
+
+function paintLoadError(err) {
+  const app = document.getElementById("app");
+  const kind = err ? err.kind : "network";
+  let msg;
+  if (kind === "missing") {
+    msg = `データがまだ書き出されていません（404）。<br>夜間バッチ（毎日11:00）の後に、もう一度お試しください。`;
+  } else if (kind === "server") {
+    msg = `サーバでエラーが発生しました（${err.detail}）。<br>少し時間をおいてから再読み込みしてください。`;
+  } else {
+    msg = `データの取得が通信でブロックされました（${err ? err.detail : "通信エラー"}）。<br>
+      ログインの期限切れやネットワークの問題の可能性があります。まず再読み込みしてください。<br>
+      <span class="muted">それでも直らない場合は本部（システム担当）へご連絡ください。データ自体は正常です。</span>`;
+  }
+  app.innerHTML = `<div class="empty">${msg}<div style="margin-top:14px">
+    <button class="tbtn" data-reload>再読み込み</button></div></div>`;
+  const b = app.querySelector("[data-reload]");
+  if (b) b.addEventListener("click", () => location.reload());
+}
+
 // ── 起動 ─────────────────────────────────────────────────────────────────
 async function boot() {
   document.getElementById("today").textContent = formatToday();
   wireTheme();
-  try {
-    const res = await fetch("data/dashboard.json", { cache: "no-store" });
-    if (!res.ok) throw new Error(res.status);
-    DATA = await res.json();
-  } catch (e) {
-    document.getElementById("app").innerHTML =
-      `<div class="empty">データを読み込めませんでした（${e.message}）。<br>夜間バッチの書き出しをお待ちください。</div>`;
-    return;
-  }
+  DATA = await loadDashboard();
+  if (!DATA) return;   // 失敗時は loadDashboard が画面に理由を出して null を返す
   CAL_MONTH = CURRENT_MONTH;
   YEAR = new Date().getFullYear();
   GOALS = loadGoals();
