@@ -770,13 +770,24 @@ test("renderStore：前回比が一覧に併記される（同じ枠の前回の
   assert.ok(html.includes("前回比"), "前回比が一覧に出る");
 });
 
-test("storeAnnualChart：年サマリ＋月次の売上/構成比ミニチャートが頭に出る", () => {
+test("storeAnnualChart：年サマリ＋月次の推移（一覧・1行=1ヶ月）が頭に出る", () => {
   const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
   const ctx = loadApp({ ...base, campaigns: [c] });
   const html = call(ctx, `storeAnnualChart("1006","2026")`);
   assert.ok(html.includes("販促の効き"), "年サマリ");
-  assert.ok(html.includes("月次の売上と品目構成比"), "月次ミニチャート見出し");
-  assert.ok(html.includes("mmbar"), "月次の売上棒");
+  assert.ok(html.includes("月次の推移（一覧）"), "月次一覧の見出し");
+  assert.ok(html.includes('class="mtr"') || html.includes('class="mtr '), "1行=1ヶ月の行");
+  assert.ok(html.includes("前年比") && html.includes("予算"), "月ごとの結果（前年比・予算達成）");
+});
+
+test("storeMonthlyTable：確定月は売上・前年比・予算達成の数値が行に出る", () => {
+  const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
+  const withBud = { ...base, budget: { 1006: { "2026-01": 10000000 } }, campaigns: [c] };
+  const ctx = loadApp(withBud);
+  const html = call(ctx, `storeMonthlyTable("1006","2026")`);
+  assert.ok(html.includes('data-smonth="1006:2026-01"'), "行を押すと月の詳細へ");
+  assert.ok(html.includes("mtfill"), "売上の量を示すバー");
+  assert.ok(/予算<\/span><b[^>]*>\d+%/.test(html), "予算達成率の数値");
 });
 
 test("storeYearComposition：年間の売上構成比（区分名＋%・凡例）を出す", () => {
