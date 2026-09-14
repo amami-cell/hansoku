@@ -1978,9 +1978,15 @@ const prodsAtM = (code, m) => ((DATA.products_monthly || {})[code] || {})[m] || 
 // ジェラート… に束ね直して売上構成を見る。ルールが無い店は null（従来どおり部門で見る）。
 const catRules = code => (DATA.store_categories || {})[code] || null;
 const hasCats = code => !!((DATA.categories_monthly || {})[code]);
-function classifyCat(name, code) {
+// FWの区分見出し（例 "20:テイクアウトジェラート"）から先頭の "NN:" を落とした名前。
+const groupLabel = g => (g || "").replace(/^\s*\d+\s*[:：]\s*/, "").trim();
+function classifyCat(name, code, group) {
   const r = catRules(code);
   if (!r) return null;
+  // 内訳（全商品に出ない0円の選択商品）は素の風味名では区分を当てられないので、
+  // FW自身の区分見出し（groups マップ）を商品名より優先する。
+  const gmap = r.groups || {};
+  if (group) { const lb = groupLabel(group); if (gmap[lb]) return gmap[lb]; }
   const nm = name || "";
   for (const c of (r.categories || [])) {
     for (const kw of (c.keywords || [])) { if (kw && nm.includes(kw)) return c.name; }
@@ -1997,7 +2003,7 @@ function catsAtM(code, m) {
   const total = items.reduce((a, p) => a + (p.sales || 0), 0) || 1;
   const agg = {};
   for (const p of items) {
-    const c = classifyCat(p.name, code);
+    const c = classifyCat(p.name, code, p.group);
     (agg[c] = agg[c] || { sales: 0, count: 0 });
     agg[c].sales += p.sales || 0; agg[c].count += 1;
   }
@@ -2007,7 +2013,7 @@ function catsAtM(code, m) {
   }));
 }
 const catAtM = (code, m, cat) => catsAtM(code, m).find(c => c.name === cat) || null;
-const prodsInCat = (code, m, cat) => prodsAtM(code, m).filter(p => classifyCat(p.name, code) === cat);
+const prodsInCat = (code, m, cat) => prodsAtM(code, m).filter(p => classifyCat(p.name, code, p.group) === cat);
 
 // ── 構成比セルを押すと出る「小ウインドウ」（複数可・ドラッグ移動・×で閉じる）──────
 // 中身＝その区分×月の商品内訳（各商品の売上＝税抜 と、区分内の売上構成比%）。
@@ -4241,7 +4247,7 @@ function storeProductSearch(code) {
   if (!months.length) return "";
   const rows = [];
   for (const m of months) for (const p of prodsAtM(code, m)) {
-    rows.push({ name: p.name, m, sales: p.sales || 0, rank: p.rank || "", cat: classifyCat(p.name, code) || "" });
+    rows.push({ name: p.name, m, sales: p.sales || 0, rank: p.rank || "", cat: classifyCat(p.name, code, p.group) || "" });
   }
   rows.sort((a, b) => (a.name === b.name ? (a.m < b.m ? 1 : -1) : b.sales - a.sales));
   const rowHtml = rows.map(r =>

@@ -3,7 +3,26 @@ from datetime import date
 
 import pytest
 
-from hansoku.web.export import build
+from hansoku.web.export import build, classify_category
+
+
+def test_classify_category_group_overrides_name():
+    """内訳（0円の選択商品）は FW区分見出し（groups）を商品名より優先して束ねる。"""
+    rules = {
+        "other": "その他",
+        "groups": {"テイクアウトジェラート": "ジェラート", "TOシングル": "ジェラート"},
+        "categories": [
+            {"name": "パフェ", "keywords": ["サンデー", "パフェ"]},
+            {"name": "ジェラート", "keywords": ["ジェラート"]},
+        ],
+    }
+    # 素の風味名は商品名では当てられない → 所属グループで ジェラートへ。
+    assert classify_category("ベリーマニア", rules, "20:テイクアウトジェラート") == "ジェラート"
+    assert classify_category("TOシングル クッキー＆バニラ", rules, "22:TOシングル") == "ジェラート"
+    # groups に載らない見出しは従来どおり商品名で判定（サンデー→パフェ）。
+    assert classify_category("サンデーダブル ベリーマニア", rules, "06:ジェラートサンデーダブル") == "パフェ"
+    # グループ無し（全商品由来の売れ筋）は商品名で判定。
+    assert classify_category("丸ごと白桃のパフェ", rules, None) == "パフェ"
 
 
 @pytest.fixture

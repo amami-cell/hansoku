@@ -2323,6 +2323,49 @@ def ingest_abc_store(
                 n_prod += 1
             top = products[0]["name"][:16] if products else "-"
 
+            # --- 分類=メニュー：0円の選択商品（内訳）を所属グループ付きで拾う ---
+            # 全商品グリッドには内訳（テイクアウトジェラートの風味選択、サンデーの風味、
+            # フレンチトーストのトッピング等＝売価0円）が出ない。メニュー分類だと
+            # 「NN:区分名」見出しの下に選択商品が並ぶので、そこから点数のある内訳だけを、
+            # 所属グループ（例 "20:テイクアウトジェラート"）を product_category に載せて
+            # 点数(METRIC_PRODUCT_QTY)として取り込む。全商品で採れた商品は二重に数えない。
+            menu_rows: list[dict] = []
+            try:
+                if _abc_click_radio(session.page, "メニュー"):
+                    _abc_search_and_rows(session)
+                    menu_rows = _extract_product_grid_grouped(session)
+            except Exception as e:  # noqa: BLE001
+                print(f"[ABC店] {code} {month} メニュー内訳の取得に失敗（無害）: {e}")
+                menu_rows = []
+            n_break = 0
+            for prod in menu_rows:
+                nm = prod["name"]
+                if nm in picked_names:  # 全商品で採った商品は二重計上しない
+                    continue
+                ints = prod["ints"]
+                q = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
+                if q <= 0:
+                    continue
+                grp = (prod.get("group") or "")[:60] or None
+                collected.append(
+                    ActualRow(
+                        store_code=code,
+                        date=rep_date,
+                        grain=GRAIN_MONTH,
+                        metric=METRIC_PRODUCT_QTY,
+                        value=float(q),
+                        product_name=nm[:80],
+                        product_category=grp,  # ランクではなく FW区分見出しを載せる
+                        kind=KIND_FINAL,
+                        source=source,
+                        ingested_at=ingested_at,
+                    )
+                )
+                picked_names.add(nm)
+                n_break += 1
+            if n_break:
+                print(f"[ABC店] {code} {month} 0円内訳を {n_break}件 追加取込（メニュー分類）")
+
             # --- 分類=部門：ランチ/ドリンク等の内訳（数量・売上・原価率） ---
             # 部門グリッドは負荷時に埋まりきらず0件になる／部門ラジオに切替らず全商品の
             # ままになることがある（1069/1137）。「きれいな部門行」が出るまで

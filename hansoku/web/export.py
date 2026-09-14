@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -67,8 +68,24 @@ def load_store_categories(path: Path | None = None) -> dict:
     return stores if isinstance(stores, dict) else {}
 
 
-def classify_category(name: str, rules: dict) -> str:
-    """商品名を、その店の品目区分ルールで1つの区分に割り当てる。先に一致した区分が勝ち。"""
+def _group_label(group: str | None) -> str:
+    """FWの区分見出し（例 "20:テイクアウトジェラート"）から先頭の "NN:" を落とした名前。"""
+    if not group:
+        return ""
+    return re.sub(r"^\s*\d+\s*[:：]\s*", "", group).strip()
+
+
+def classify_category(name: str, rules: dict, group: str | None = None) -> str:
+    """商品名を、その店の品目区分ルールで1つの区分に割り当てる。先に一致した区分が勝ち。
+
+    group（FWの区分見出し。例 "20:テイクアウトジェラート"）が rules["groups"] に載っていれば
+    そちらを優先する。全商品グリッドに出ない内訳（テイクアウトジェラートの風味選択など）は
+    素の風味名だと商品名から区分を当てられないため、FW自身の区分見出しで束ねる。"""
+    gmap = rules.get("groups") or {}
+    if group:
+        label = _group_label(group)
+        if label in gmap:
+            return gmap[label]
     nm = name or ""
     for cat in rules.get("categories", []):
         for kw in cat.get("keywords", []):
@@ -88,7 +105,7 @@ def _categories_for_month(items: list[dict], rules: dict, total_sales: float) ->
     order.append(other)
     agg: dict[str, dict] = {}
     for it in items:
-        cat = classify_category(it.get("name", ""), rules)
+        cat = classify_category(it.get("name", ""), rules, it.get("group"))
         a = agg.setdefault(cat, {"sales": 0.0, "count": 0})
         a["sales"] += it.get("sales", 0)
         a["count"] += 1
@@ -488,7 +505,10 @@ def _build_abc_by_month(
             }
         )
     # 商品別の販売点数（数量）。税抜換算しない。同じ (店,月,商品名) の売上行に qty を足す。
+    # product_category も引く：店別ABC取込の点数行には FWの区分見出し（例
+    # "20:テイクアウトジェラート"）を載せてある（内訳＝素の風味名を正しい区分へ束ねる用）。
     qty_map: dict[tuple, float] = {}
+    group_map: dict[tuple, str] = {}
     for row in warehouse.aggregate(
         AggregateQuery(
             date_from=date_from,
@@ -496,27 +516,36 @@ def _build_abc_by_month(
             grain=GRAIN_MONTH,
             metrics=[METRIC_PRODUCT_QTY],
             store_codes=codes,
-            group_by=("store_code", "date", "product_name"),
+            group_by=("store_code", "date", "product_name", "product_category"),
         )
     ):
         m = row["date"].strftime("%Y-%m")
-        qty_map[(row["store_code"], m, row["product_name"])] = row["value"]
+        key = (row["store_code"], m, row["product_name"])
+        qty_map[key] = qty_map.get(key, 0.0) + row["value"]
+        cat = row.get("product_category")
+        # 区分見出し（"NN:名前"）のときだけグループとして採る。ランク(A/B/C)は無視。
+        if cat and re.match(r"^\s*\d+\s*[:：]", str(cat)):
+            group_map[key] = str(cat)
     # 売上行のある商品に qty を足す。
     seen: set[tuple] = set()
     for code, months in prod_tmp.items():
         for m, items in months.items():
             for it in items:
-                seen.add((code, m, it["name"]))
-                q = qty_map.get((code, m, it["name"]))
+                key = (code, m, it["name"])
+                seen.add(key)
+                q = qty_map.get(key)
                 if q:
                     it["qty"] = round(q)
+                if key in group_map:
+                    it["group"] = group_map[key]
     # 売価0円だが点数がある商品（例: テイクアウトジェラートの内訳）を、点数だけの
-    # 商品として追加する（売上行が無いので上のループには入っていない）。
+    # 商品として追加する（売上行が無いので上のループには入っていない）。所属区分も付ける。
     for (code, m, name), q in qty_map.items():
         if (code, m, name) in seen or not q:
             continue
         prod_tmp.setdefault(code, {}).setdefault(m, []).append(
-            {"name": name, "sales": 0, "rank": None, "qty": round(q)}
+            {"name": name, "sales": 0, "rank": None, "qty": round(q),
+             "group": group_map.get((code, m, name))}
         )
 
     products_monthly: dict[str, dict[str, list]] = {}
