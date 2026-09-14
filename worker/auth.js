@@ -98,7 +98,9 @@ export function readCookie(header, name) {
 }
 
 export const COOKIE = "hansoku_session";
-export const SESSION_DAYS = 30;
+// 一度ログインしたら、その端末ではずっと入れっぱなしにする（実質1年）。
+// 期限が来ても、使っていれば下の「延長」で自動で伸びるので再ログインは要らない。
+export const SESSION_DAYS = 365;
 
 export function sessionCookie(token, days = SESSION_DAYS) {
   const maxAge = Math.round(days * 24 * 60 * 60);

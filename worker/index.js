@@ -204,13 +204,24 @@ export default {
     }
 
     // 画面が「誰でログイン中か・書き込めるか」を知るための軽いエンドポイント。
+    // 画面を開くたびにここが呼ばれるので、ログイン中の人はここで有効期限を
+    // 手前から1年に伸ばし直す（＝使っている限り再ログイン不要＝ずっと入れっぱなし）。
     if (url.pathname === "/api/me") {
-      return json({
+      const body = JSON.stringify({
         name: me.via === "open" ? "" : me.who,
         role: me.via === "open" ? "open" : (me.role || "editor"),
         via: me.via, canWrite,
         owner: me.via !== "open" && me.role === "owner",
       });
+      const headers = { ...JSON_HEADERS };
+      if (me.via === "user" && env.COOKIE_SECRET) {
+        const token = await makeToken(
+          env.COOKIE_SECRET, me.who, me.role || "editor",
+          Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000,
+        );
+        headers["set-cookie"] = sessionCookie(token);
+      }
+      return new Response(body, { status: 200, headers });
     }
 
     if (url.pathname === "/api/targets") {
