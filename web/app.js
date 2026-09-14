@@ -3470,15 +3470,36 @@ function storeAnnualChart(code, year) {
     `<button class="gmh" data-smonth="${code}:${year}-${String(i + 1).padStart(2, "0")}">${i + 1}</button>`).join("");
 
   // 販促を「対象区分」（パフェ/ケーキ/コラボ…）でまとめ、区分ごとに1レーン＝1行にする。
-  // 帯の色も区分色でそろえる。同じ区分で期間が被る販促があれば、その区分に2レーン目
-  // （例: パフェ2）を作る。
+  // 帯の色も区分色でそろえる。同じ区分で“日付”が重なる販促があるときだけ、その区分に
+  // 2レーン目（例: パフェ2）を作る（月がたまたま同じでも、日付が重ならなければ同じ行）。
   const catOf = c => c.bucket || campKindBucket(c.kind) || "その他";
-  const makeBar = c => {
-    const cat = catOf(c), col = catColor(cat), st = campStatus(c);
+  // 区分色。CAT_COLORS に無い区分（テイクアウトジェラート・おすすめ等）が灰色に
+  // ならないよう、名前寄せ→はっきり違う予備パレットの順で必ず色を割り当てる。
+  const CHART_FALLBACK = ["#e07a3e", "#2e8b57", "#7b5cd6", "#3aa0a0", "#c94f7c", "#c9a227", "#5b8def"];
+  const laneColor = {};
+  const assignColor = (cat, i) => {
+    let c = catColor(cat);
+    if (!c || c === "var(--ink-3)") {
+      if (cat.includes("ジェラート")) c = catColor("ジェラート");
+      else if (cat.includes("パフェ")) c = catColor("パフェ");
+      else if (cat.includes("ケーキ")) c = catColor("ケーキ");
+      else if (cat.includes("コラボ")) c = catColor("コラボ");
+      else c = CHART_FALLBACK[i % CHART_FALLBACK.length];
+    }
+    return c;
+  };
+  const makeBar = (c, col) => {
+    const st = campStatus(c);
     const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
-    const sM = s < ys ? 1 : +s.slice(5, 7);
-    const eM = e > ye ? 12 : +e.slice(5, 7);
-    const left = (sM - 1) / 12 * 100, w = Math.max(1, (eM - sM + 1)) / 12 * 100;
+    // 帯の位置は「分数月」（月内の日付も反映）。同じ月に接する2件が重なって見えない。
+    const monthFrac = (ds, end = false) => {
+      let dd = ds < ys ? ys : (ds > ye ? ye : ds);
+      const mo = +dd.slice(5, 7), day = +dd.slice(8, 10);
+      const dim = new Date(+dd.slice(0, 4), mo, 0).getDate();
+      return Math.min(1, Math.max(0, ((mo - 1) + (end ? day : day - 1) / dim) / 12));
+    };
+    const left = monthFrac(s) * 100;
+    const w = Math.max(1.2, (monthFrac(e, true) - monthFrac(s)) * 100);
     const ef = storeCampEffect(c, code);
     const mark = ef.mark || (VERDICT_MARK[campVerdict(c).tone] || "");
     const tone = ef.mark ? ef.tone : campVerdict(c).tone;
@@ -3489,35 +3510,36 @@ function storeAnnualChart(code, year) {
       const prevOcc = campPrevOccurrence(c);
       if (prevOcc) { const pb = campTargeted(prevOcc, code); if (pb && pb.cur) tip += `・前回${signed((ef.cur / pb.cur - 1) * 100)}%`; }
     } else if (ef.state) { tip += `｜${ef.state}`; }
-    const html = `<button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${col}"
+    return `<button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${col}"
       data-tip="${esc(tip)}">${mark ? `<span class="gvm ${tone}">${mark}</span>` : ""}<span class="gbt">${esc(c.title)}</span></button>`;
-    return { sM, eM, html };
   };
   // 区分ごとにまとめる。並びは販促件数が多い区分を上に（同数は開始が早い順）。
   const byCat = new Map();
   for (const c of camps) { const k = catOf(c); (byCat.get(k) || byCat.set(k, []).get(k)).push(c); }
   const catOrder = [...byCat.keys()].sort((a, b) =>
     (byCat.get(b).length - byCat.get(a).length) || (byCat.get(a)[0].start < byCat.get(b)[0].start ? -1 : 1));
+  catOrder.forEach((cat, i) => { laneColor[cat] = assignColor(cat, i); });
   const laneHtml = [];
   for (const cat of catOrder) {
+    const col = laneColor[cat];
     const list = byCat.get(cat).slice().sort((a, b) => a.start < b.start ? -1 : 1);
-    const sub = []; // この区分の中のサブレーン（被ったら増える）
+    const sub = []; // この区分の中のサブレーン（“日付”が重なったときだけ増える）
     for (const c of list) {
-      const b = makeBar(c);
-      let lane = sub.find(L => L.lastM < b.sM);
-      if (!lane) { lane = { lastM: 0, bars: [] }; sub.push(lane); }
-      lane.bars.push(b.html); lane.lastM = b.eM;
+      const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
+      let lane = sub.find(L => L.lastEnd < s);   // 前の帯の終了日より後に始まれば同じ行
+      if (!lane) { lane = { lastEnd: "", bars: [] }; sub.push(lane); }
+      lane.bars.push(makeBar(c, col)); if (e > lane.lastEnd) lane.lastEnd = e;
     }
     sub.forEach((L, idx) => {
       const label = idx === 0 ? cat : `${cat}${idx + 1}`;
-      laneHtml.push(`<div class="grow"><div class="glabel gcat"><span class="kdot" style="background:${catColor(cat)}"></span>${esc(label)}</div><div class="gtrack">${L.bars.join("")}</div></div>`);
+      laneHtml.push(`<div class="grow"><div class="glabel gcat"><span class="kdot" style="background:${col}"></span>${esc(label)}</div><div class="gtrack">${L.bars.join("")}</div></div>`);
     });
   }
   const rows = laneHtml.join("");
 
   // 凡例（その年に出ている種類）＋見方（誰が見ても操作が分かるように）
   const legend = catOrder.length
-    ? `<div class="glegend">${catOrder.map(cc => `<span class="glg"><i style="background:${catColor(cc)}"></i>${esc(cc)}</span>`).join("")}
+    ? `<div class="glegend">${catOrder.map(cc => `<span class="glg"><i style="background:${laneColor[cc]}"></i>${esc(cc)}</span>`).join("")}
         <span class="glg"><i class="gvm good">◎</i>効果あり</span><span class="glg"><i class="gvm warn">△</i>要改善</span></div>
        <div class="ghelp">区分ごとに帯をまとめています（色＝品目区分）。同じ区分で期間が重なる販促は「パフェ2」のように行を分けます。<b>帯や販促名</b>を押すと詳細、<b>上の月番号</b>を押すとその月の詳細（構成比・POP）へ。◎/△は対象区分の前年比で自動判定。</div>`
     : "";
