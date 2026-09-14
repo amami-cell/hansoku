@@ -2333,23 +2333,31 @@ def ingest_abc_store(
             # 点数(METRIC_PRODUCT_QTY)として取り込む。全商品で採れた商品は二重に数えない。
             menu_rows: list[dict] = []
             try:
+                # グループ→メニューの順に踏むと、区分見出しの下の内訳まで描かれやすい
+                # （全商品→メニューの直行だと 60/98 しか描けず取りこぼす）。
+                if _abc_click_radio(session.page, "グループ"):
+                    _abc_search_and_rows(session)
                 if _abc_click_radio(session.page, "メニュー"):
                     _abc_search_and_rows(session)
-                    # メニューは全商品より行数が多く、初回抽出時にまだ描き切れていない
-                    # ことがある（1160で 60/98 しか採れない事象）。行数が伸び止まるまで
-                    # 数回粘り、最大件数の抽出を採る。
-                    prev = -1
-                    for _ in range(8):
+                    # 行数が伸び止まるまで粘り、最大件数の抽出を採る。描画がまだ途中の
+                    # ことがあるので、同数が3回続くまで（＝安定するまで）待つ。
+                    stable = 0
+                    for _ in range(12):
                         cur = _extract_product_grid_grouped(session)
-                        if len(cur) >= len(menu_rows):
+                        if len(cur) > len(menu_rows):
                             menu_rows = cur
-                        if len(cur) == prev:
-                            break
-                        prev = len(cur)
-                        time.sleep(1.5)
+                            stable = 0
+                        else:
+                            stable += 1
+                            if stable >= 3:
+                                break
+                        time.sleep(1.2)
             except Exception as e:  # noqa: BLE001
                 print(f"[ABC店] {code} {month} メニュー内訳の取得に失敗（無害）: {e}")
                 menu_rows = []
+            # 取り込んだ内訳のうち区分見出しが付いた件数（付かない＝分類が効かないので警告）。
+            n_grouped = sum(1 for p in menu_rows if p.get("group"))
+            print(f"[ABC店] {code} {month} メニュー内訳 抽出{len(menu_rows)}行 / 区分見出し付き{n_grouped}行")
             n_break = 0
             for prod in menu_rows:
                 nm = prod["name"]
