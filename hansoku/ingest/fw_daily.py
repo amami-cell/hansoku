@@ -2230,41 +2230,48 @@ def ingest_abc_store(
             _abc_click_radio(session.page, "全商品")
             _abc_search_and_rows(session)  # グリッド充填まで粘る
             products = _extract_product_grid(session)
-            products.sort(
-                key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
-                reverse=True,
-            )
+            _sales_of = lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0
+            _qty_of = lambda p: p["ints"][_ABC_QTY] if len(p["ints"]) > _ABC_QTY else 0
+            products.sort(key=_sales_of, reverse=True)
+            # 売上上位 top_n に加え、「売価0円だが点数がある」商品（例: テイクアウトジェラートの
+            # 内訳）も取りこぼさないよう別枠で拾う。0円は売上順だと最下位に沈み top_n から切れる。
+            picked = list(products[:top_n])
+            picked_names = {p["name"] for p in picked}
+            for p in products:
+                if _sales_of(p) <= 0 and _qty_of(p) > 0 and p["name"] not in picked_names:
+                    picked.append(p)
+                    picked_names.add(p["name"])
             n_prod = 0
-            for prod in products[:top_n]:
+            for prod in picked:
                 ints = prod["ints"]
-                if len(ints) <= _ABC_SALES:
+                sales = _sales_of(prod)
+                qty = _qty_of(prod)
+                if sales <= 0 and qty <= 0:
                     continue
-                sales = ints[_ABC_SALES]
-                if sales <= 0:
-                    continue
-                collected.append(
-                    ActualRow(
-                        store_code=code,
-                        date=rep_date,
-                        grain=GRAIN_MONTH,
-                        metric=METRIC_PRODUCT_SALES,
-                        value=float(sales),
-                        product_name=prod["name"][:80],
-                        product_category=prod["rank"],
-                        kind=KIND_FINAL,
-                        source=source,
-                        ingested_at=ingested_at,
+                if sales > 0:
+                    collected.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_SALES,
+                            value=float(sales),
+                            product_name=prod["name"][:80],
+                            product_category=prod["rank"],
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
                     )
-                )
-                # 販売点数（何個売れたか）も同じ商品名で保存する。
-                if len(ints) > _ABC_QTY and ints[_ABC_QTY] > 0:
+                # 販売点数（何個売れたか）。売価0円の商品でも点数があれば残す。
+                if qty > 0:
                     collected.append(
                         ActualRow(
                             store_code=code,
                             date=rep_date,
                             grain=GRAIN_MONTH,
                             metric=METRIC_PRODUCT_QTY,
-                            value=float(ints[_ABC_QTY]),
+                            value=float(qty),
                             product_name=prod["name"][:80],
                             product_category=prod["rank"],
                             kind=KIND_FINAL,

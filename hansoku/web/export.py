@@ -501,12 +501,23 @@ def _build_abc_by_month(
     ):
         m = row["date"].strftime("%Y-%m")
         qty_map[(row["store_code"], m, row["product_name"])] = row["value"]
+    # 売上行のある商品に qty を足す。
+    seen: set[tuple] = set()
     for code, months in prod_tmp.items():
         for m, items in months.items():
             for it in items:
+                seen.add((code, m, it["name"]))
                 q = qty_map.get((code, m, it["name"]))
                 if q:
                     it["qty"] = round(q)
+    # 売価0円だが点数がある商品（例: テイクアウトジェラートの内訳）を、点数だけの
+    # 商品として追加する（売上行が無いので上のループには入っていない）。
+    for (code, m, name), q in qty_map.items():
+        if (code, m, name) in seen or not q:
+            continue
+        prod_tmp.setdefault(code, {}).setdefault(m, []).append(
+            {"name": name, "sales": 0, "rank": None, "qty": round(q)}
+        )
 
     products_monthly: dict[str, dict[str, list]] = {}
     categories_monthly: dict[str, dict[str, list]] = {}
@@ -520,7 +531,12 @@ def _build_abc_by_month(
                 cats = _categories_for_month(items, rules, total)
                 if cats:
                     categories_monthly.setdefault(code, {})[m] = cats
-            products_monthly.setdefault(code, {})[m] = items[:MONTHLY_PRODUCTS_N]
+            # 売れ筋 top-N に加え、売価0円だが点数のある商品（0円内訳）は必ず残す。
+            keep = items[:MONTHLY_PRODUCTS_N]
+            kept = {id(p) for p in keep}
+            extra = [p for p in items[MONTHLY_PRODUCTS_N:]
+                     if not p.get("sales") and p.get("qty") and id(p) not in kept]
+            products_monthly.setdefault(code, {})[m] = keep + extra
     return departments_monthly, products_monthly, categories_monthly
 
 
