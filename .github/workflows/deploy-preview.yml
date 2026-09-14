@@ -82,3 +82,11 @@ jobs:
             echo "::warning::HANSOKU_APP_PASSWORD 未設定。プレビューの個人ログイン（/join）は無効です。"
           fi
           [ -n "$url" ] && { echo "## 公開URL（認証なし）" >> "$GITHUB_STEP_SUMMARY"; echo "**$url**" >> "$GITHUB_STEP_SUMMARY"; }
+
+      - name: 一時E2E診断（login→setpw を実際に叩く）
+        env:
+          APP_PASSWORD: ${{ secrets.HANSOKU_APP_PASSWORD }}
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          sleep 5   # 反映待ち
+          bash scripts/diag_e2e.sh
