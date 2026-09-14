@@ -2365,23 +2365,45 @@ def ingest_abc_store(
                     continue
                 ints = prod["ints"]
                 q = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
-                if q <= 0:
+                s = ints[_ABC_SALES] if len(ints) > _ABC_SALES else 0
+                if q <= 0 and s <= 0:
                     continue
                 grp = (prod.get("group") or "")[:60] or None
-                collected.append(
-                    ActualRow(
-                        store_code=code,
-                        date=rep_date,
-                        grain=GRAIN_MONTH,
-                        metric=METRIC_PRODUCT_QTY,
-                        value=float(q),
-                        product_name=nm[:80],
-                        product_category=grp,  # ランクではなく FW区分見出しを載せる
-                        kind=KIND_FINAL,
-                        source=source,
-                        ingested_at=ingested_at,
+                if nm in ("ピスタチオ", "リッチミルク"):  # TOジェラートの+50円風味の所属確認用
+                    print(f"[ABC店] {code} {month} 内訳確認 {nm} → group={grp} sales={s} qty={q}")
+                # 売価のある内訳（例: テイクアウトジェラートの +50円 風味 ピスタチオ/リッチミルク）は
+                # 売上も焼く。区分見出しは点数行の product_category に載せるので、売上行は
+                # ランク欄を空にする（見出し文字列をランクとして表示しないため）。
+                if s > 0:
+                    collected.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_SALES,
+                            value=float(s),
+                            product_name=nm[:80],
+                            product_category=None,
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
                     )
-                )
+                if q > 0:
+                    collected.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_QTY,
+                            value=float(q),
+                            product_name=nm[:80],
+                            product_category=grp,  # ランクではなく FW区分見出しを載せる
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
+                    )
                 picked_names.add(nm)
                 n_break += 1
             if n_break:

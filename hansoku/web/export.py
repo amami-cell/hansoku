@@ -560,11 +560,13 @@ def _build_abc_by_month(
                 cats = _categories_for_month(items, rules, total)
                 if cats:
                     categories_monthly.setdefault(code, {})[m] = cats
-            # 売れ筋 top-N に加え、売価0円だが点数のある商品（0円内訳）は必ず残す。
+            # 売れ筋 top-N に加え、内訳（FW区分見出し付き＝選択商品）と、売価0円だが点数の
+            # ある商品は必ず残す。内訳は点数が本体なので top-N から切れても消さない。
             keep = items[:MONTHLY_PRODUCTS_N]
             kept = {id(p) for p in keep}
             extra = [p for p in items[MONTHLY_PRODUCTS_N:]
-                     if not p.get("sales") and p.get("qty") and id(p) not in kept]
+                     if id(p) not in kept
+                     and (p.get("group") or (not p.get("sales") and p.get("qty")))]
             products_monthly.setdefault(code, {})[m] = keep + extra
     return departments_monthly, products_monthly, categories_monthly
 
