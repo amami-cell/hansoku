@@ -110,6 +110,14 @@ export function sessionCookie(token, days = SESSION_DAYS) {
 export const clearCookie = () =>
   `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
 
+// パスワード設定画面へ渡す短命の本人確認クッキー（15分）。ログイン用の本セッションとは
+// 別クッキーにして、設定完了前に本セッションとして使い回せないようにする。
+export const PENDING_COOKIE = "hansoku_setpw";
+export const pendingCookie = (token) =>
+  `${PENDING_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=900; HttpOnly; Secure; SameSite=Lax`;
+export const clearPending = () =>
+  `${PENDING_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+
 /**
  * 誰として扱うかを決める。null なら入れない。判断材料は署名クッキーだけ。
  *
@@ -129,5 +137,8 @@ export async function identify(request, env) {
   if (!env.COOKIE_SECRET) return null;
   const token = readCookie(request.headers.get("cookie"), COOKIE);
   const v = token && (await readToken(env.COOKIE_SECRET, token));
-  return v ? { who: v.name, role: v.role, via: "user" } : null;
+  // 「setpw」はパスワード設定画面へ渡すための一時マーカー。本セッションとしては認めない
+  // （別クッキーに入っていても、万一 session クッキーに移されても入場させない）。
+  if (!v || v.role === "setpw") return null;
+  return { who: v.name, role: v.role, via: "user" };
 }
