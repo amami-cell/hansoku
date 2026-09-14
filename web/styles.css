@@ -917,7 +917,8 @@ tbody tr:last-child td{border-bottom:0;}
 .annualbar .ytabs{display:flex;flex-wrap:wrap;gap:4px;}
 /* チャート（帯・ガント）。狭い画面では横スクロールで月幅を確保する */
 .gantt{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-.grow{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:8px;padding:3px 0;min-width:540px;}
+.grow{display:grid;grid-template-columns:48px 1fr;align-items:center;gap:8px;padding:3px 0;min-width:540px;}
+.glabel.gspace{cursor:default;}
 .grow.ghead{border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:4px;position:sticky;top:0;background:var(--surface);}
 .glabel{font-size:12px;font-weight:600;color:var(--ink);text-align:left;background:none;border:none;cursor:pointer;
   display:flex;align-items:center;gap:6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:0;}
@@ -932,6 +933,7 @@ tbody tr:last-child td{border-bottom:0;}
 .gbar:hover{opacity:1;box-shadow:0 1px 6px rgba(0,0,0,.18);}
 .gbar.done{opacity:.6;}
 .gbt{pointer-events:none;}
+.gbar .gvm{color:#fff;font-weight:800;margin-right:3px;pointer-events:none;}
 .kdot{display:inline-block;width:9px;height:9px;border-radius:999px;flex:0 0 auto;}
 /* 効果判定マーカー・凡例 */
 .gvm{font-size:11px;font-weight:700;margin-right:2px;}
@@ -968,7 +970,13 @@ tbody tr:last-child td{border-bottom:0;}
 .ymxt td.prov,.ymxt th.prov button{opacity:.55;}
 .ymxsum{background:var(--surface-2);font-weight:700;border-left:1px solid var(--line-strong);}
 .ymxt thead .ymxsum{color:var(--ink);}
-/* 年間の品目構成比（読める凡例。マトリクス内の小さな縦バーは廃止） */
+/* 品目構成比を「区分×月」の行で読める形に（各月＝売上に占める割合／年計＝年間シェア） */
+.ymxt tr.ymxsec th{background:var(--surface-2);color:var(--ink-2);font-weight:700;font-size:11.5px;
+  border-top:2px solid var(--line-strong);}
+.ymxt tr.ymxsec td{background:var(--surface-2);border-top:2px solid var(--line-strong);}
+.ymxt tr.ymxcompo-row th{font-weight:600;color:var(--ink-2);}
+.ymxt tr.ymxcompo-row td.ymxcompo-c{color:var(--ink-2);}
+.ymxcdot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:middle;}
 .ymxcompo-lg{margin-top:10px;}
 .ymxcl-t{font-size:12px;font-weight:600;color:var(--ink-2);}
 /* 前年差の内訳（なぜ増えた/減った：区分ごとの差を大きい順に） */

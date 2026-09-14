@@ -3469,7 +3469,8 @@ function storeAnnualChart(code, year) {
   const head = Array.from({ length: 12 }, (_, i) =>
     `<button class="gmh" data-smonth="${code}:${year}-${String(i + 1).padStart(2, "0")}">${i + 1}</button>`).join("");
 
-  const rows = camps.map(c => {
+  // 各販促を1本の帯にする（名前は帯の中に入れる）。
+  const bars = camps.map(c => {
     const k = kindOf(c.kind), st = campStatus(c);
     const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
     const sM = s < ys ? 1 : +s.slice(5, 7);
@@ -3485,13 +3486,20 @@ function storeAnnualChart(code, year) {
       const prevOcc = campPrevOccurrence(c);
       if (prevOcc) { const pb = campTargeted(prevOcc, code); if (pb && pb.cur) tip += `・前回${signed((ef.cur / pb.cur - 1) * 100)}%`; }
     } else if (ef.state) { tip += `｜${ef.state}`; }
-    return `<div class="grow">
-      <button class="glabel" data-camp="${c.id}"><span class="kdot" style="background:${k.color}"></span>${mark ? `<span class="gvm ${tone}">${mark}</span>` : ""}${esc(c.title)}</button>
-      <div class="gtrack">
-        <button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${k.color}"
-          data-tip="${esc(tip)}"><span class="gbt">${esc(c.title)}</span></button>
-      </div></div>`;
-  }).join("");
+    const html = `<button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${k.color}"
+      data-tip="${esc(tip)}">${mark ? `<span class="gvm ${tone}">${mark}</span>` : ""}<span class="gbt">${esc(c.title)}</span></button>`;
+    return { sM, eM, html };
+  });
+  // レーン詰め：期間が重ならない販促は同じ行にまとめ、バラバラに分かれないようにする
+  // （帯は開始月順。空いている最初のレーンへ入れる＝行数を最小化）。
+  const lanes = [];
+  for (const b of bars) {
+    let lane = lanes.find(L => L.lastM < b.sM);
+    if (!lane) { lane = { lastM: 0, bars: [] }; lanes.push(lane); }
+    lane.bars.push(b.html); lane.lastM = b.eM;
+  }
+  const rows = lanes.map(L =>
+    `<div class="grow"><div class="glabel gspace"></div><div class="gtrack">${L.bars.join("")}</div></div>`).join("");
 
   // 凡例（その年に出ている種類）＋見方（誰が見ても操作が分かるように）
   const kinds = [...new Set(camps.map(c => c.kind))];
@@ -3525,7 +3533,7 @@ function storeAnnualChart(code, year) {
   return `${yearSummary}${storeYearMatrix(code, year)}
     <div class="mmhd" style="margin-top:16px">販促 年間チャート<span class="mmhint">帯＝実施期間（横軸＝月）。◎効いた/△要改善。帯や販促名を押すと詳細、月番号を押すと月の詳細へ</span></div>
     <div class="panel gantt">
-    <div class="grow ghead"><div class="glabel gh">販促 / 月</div><div class="gmonths">${head}</div></div>
+    <div class="grow ghead"><div class="glabel gh">販促</div><div class="gmonths">${head}</div></div>
     ${camps.length ? rows : `<div class="empty">${year}年に走った販促はありません。</div>`}
   </div>${legend}`;
 }
@@ -3575,12 +3583,25 @@ function storeYearMatrix(code, year) {
   const rowCov = `<tr><th>客数</th>${rows.map(r => numCell(r.i, r.cov != null ? nin(r.cov) : "―")).join("")}<td class="ymxsum">${sumCov ? nin(sumCov) : "―"}</td></tr>`;
   const rowKt = `<tr><th>客単価</th>${rows.map(r => numCell(r.i, r.spp != null ? yen(r.spp) : "―")).join("")}<td class="ymxsum">${yKt != null ? yen(yKt) : "―"}</td></tr>`;
 
-  // 年間の品目構成比は「凡例（区分名＋%）」の読める形だけ残す（マトリクス内の小さな縦バーは廃止）。
+  // 品目構成比は「月ごと」に読めるよう、区分×月の行にする。各月＝その月の売上に占める割合、
+  // 年計＝確定分の年間シェア。区分は年間シェアの大きい順に並べる（色はチャートと共通）。
   const yearAgg = new Map();
   for (const r of conf) for (const c of r.cats) yearAgg.set(c.name, (yearAgg.get(c.name) || 0) + c.sales);
   const yTot = [...yearAgg.values()].reduce((a, b) => a + b, 0);
-  const compoLg = yTot ? `<div class="ymxcompo-lg"><span class="ymxcl-t">品目構成比（確定分）</span><div class="yclgs">${[...yearAgg.entries()].sort((a, b) => b[1] - a[1]).map(([n, v]) =>
-    `<span class="yclg"><i style="background:${catColor(n)}"></i>${esc(n)} <b>${Math.round(v / yTot * 100)}%</b></span>`).join("")}</div></div>` : "";
+  const catNames = [...yearAgg.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
+  const compoSec = catNames.length
+    ? `<tr class="ymxsec"><th>品目構成比</th>${months.map((m, i) => `<td class="${cellCls(i)}"></td>`).join("")}<td class="ymxsum"></td></tr>`
+    : "";
+  const compoRows = catNames.map(n => {
+    const cells = rows.map(r => {
+      const tot = r.cats.reduce((a, x) => a + (x.sales || 0), 0);
+      const c = r.cats.find(x => x.name === n);
+      const pct = (r.has && c && tot) ? Math.round((c.sales || 0) / tot * 100) : null;
+      return numCell(r.i, pct != null ? pct + "%" : "―", "ymxcompo-c");
+    }).join("");
+    const yPct = yTot ? Math.round((yearAgg.get(n) || 0) / yTot * 100) : null;
+    return `<tr class="ymxcompo-row"><th><span class="ymxcdot" style="background:${catColor(n)}"></span>${esc(n)}</th>${cells}<td class="ymxsum">${yPct != null ? yPct + "%" : "―"}</td></tr>`;
+  }).join("");
 
   // 予算未入力の月（売上はあるが予算が無い確定月）を明示。FW入力を促す。
   const budMissing = rows.filter(r => r.has && r.m < CURRENT_MONTH && !(typeof r.bud === "number" && r.bud));
@@ -3591,8 +3612,8 @@ function storeYearMatrix(code, year) {
   return `<div class="ymx">
     <div class="mmhd">${year}年 一覧（縦＝指標／横＝月）<span class="mmhint">1画面で年間を管理。月(列見出し)を押すとその月の詳細へ。緑=前年超/赤=前年割れ・薄い列＝暫定/未取込・右端＝年計</span></div>
     <div class="ymxwrap"><table class="ymxt"><thead><tr>${th}</tr></thead>
-      <tbody>${rowSales}${rowYoY}${rowBud}${rowCov}${rowKt}</tbody></table></div>
-    ${budHint}${compoLg}</div>`;
+      <tbody>${rowSales}${rowYoY}${rowBud}${rowCov}${rowKt}${compoSec}${compoRows}</tbody></table></div>
+    ${budHint}</div>`;
 }
 
 // カレンダー表＝月を縦に一覧。各月に 予算/売上/集客/客単価 と品目区分の構成比。
