@@ -337,6 +337,15 @@ METRICS = [
     METRIC_DRINK_THEORY_COST,
 ]
 
+# 税込→税抜の除数。店長会シート（税抜）と月別日別売上推移（税込）が両方そろう月で
+# 実測すると、全店・全月で ちょうど 税込 = 税抜 × 1.10（warehouse.py 参照）。
+# 画面の金額を税抜に統一するため、税込で入っている指標だけを 1.10 で割る。
+#   割る（税込）  : 売上(METRIC_SALES＝月別推移で統一)・ABC部門売上・ABC商品売上
+#   割らない(税抜): 予算・理論原価・F売上/D売上（いずれも店長会シート由来）・客数(人)
+NET_DIVISOR = 1.10
+# 税込で入っており税抜へ割り戻す対象の指標。
+NET_ADJUST_METRICS = frozenset({METRIC_SALES, METRIC_DEPT_SALES, METRIC_PRODUCT_SALES})
+
 
 def _assemble_departments(depts: dict[str, dict]) -> dict:
     """1店・1ヶ月ぶんの生部門（{部門名:{sales,qty,rate}}）を、標準バケット構成
@@ -435,7 +444,7 @@ def _build_abc_by_month(
             .setdefault(m, {})
             .setdefault(row["product_name"], {"sales": 0.0, "qty": 0.0, "rate": rate})
         )
-        d["sales"] += row["value"]
+        d["sales"] += row["value"] / NET_DIVISOR   # 税込→税抜
         if rate is not None:
             d["rate"] = rate
     # 部門数量（店×月×部門）
@@ -473,7 +482,7 @@ def _build_abc_by_month(
         prod_tmp.setdefault(row["store_code"], {}).setdefault(m, []).append(
             {
                 "name": row["product_name"],
-                "sales": round(row["value"]),
+                "sales": round(row["value"] / NET_DIVISOR),   # 税込→税抜
                 "rank": row["product_category"],
             }
         )
@@ -520,8 +529,9 @@ def build(
     for row in rows:
         month = row["date"].strftime("%Y-%m")
         months.add(month)
+        val = row["value"] / NET_DIVISOR if row["metric"] in NET_ADJUST_METRICS else row["value"]
         monthly.setdefault(row["store_code"], {}).setdefault(month, {})[row["metric"]] = (
-            round(row["value"])
+            round(val)
         )
 
     # 売上予算（FW 月別予算登録）。予算対比の基準。指標選択には出さず別枠で持つ。
@@ -571,8 +581,9 @@ def build(
         )
     ):
         h = str(int(row["hour"]))
+        hval = row["value"] / NET_DIVISOR if row["metric"] in NET_ADJUST_METRICS else row["value"]
         hourly.setdefault(row["store_code"], {}).setdefault(h, {})[row["metric"]] = round(
-            row["value"]
+            hval
         )
     # 代表月（何月ぶんの時間帯プロファイルか）をラベル用に1つ拾う
     for row in warehouse.aggregate(
@@ -605,7 +616,7 @@ def build(
         group_by_month.setdefault(row["date"].strftime("%Y-%m"), []).append(
             {
                 "name": row["product_name"],
-                "sales": round(row["value"]),
+                "sales": round(row["value"] / NET_DIVISOR),   # 税込→税抜
                 "rank": row["product_category"],
             }
         )

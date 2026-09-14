@@ -86,7 +86,8 @@ def test_時間帯別がhourlyに焼かれる(loaded, master):
     )
     payload = build(loaded, master, date_from=date(2025, 1, 1), date_to=date(2026, 12, 31))
     assert payload["hourly_month"] == "2026-07"
-    assert payload["hourly"].get(code, {}).get("12") == {"sales": 942288, "covers": 389}
+    # 売上は税込で入る→税抜へ割り戻す（÷1.10）。客数は人なのでそのまま。
+    assert payload["hourly"].get(code, {}).get("12") == {"sales": round(942288 / 1.10), "covers": 389}
 
 
 def test_売れ筋商品がproductsに焼かれる(loaded, master):
@@ -110,7 +111,8 @@ def test_売れ筋商品がproductsに焼かれる(loaded, master):
     payload = build(loaded, master, date_from=date(2025, 1, 1), date_to=date(2026, 12, 31))
     assert payload["products_month"] == "2026-07"
     got = payload["products"].get(code)
-    assert got and got[0] == {"name": "生ビール中", "sales": 682000, "rank": "A"}
+    # ABC商品売上は税込→税抜へ割り戻す（÷1.10）。
+    assert got and got[0] == {"name": "生ビール中", "sales": round(682000 / 1.10), "rank": "A"}
 
 
 def test_全店の売れ筋がproducts_groupに焼かれる(loaded, master):
@@ -132,7 +134,8 @@ def test_全店の売れ筋がproducts_groupに焼かれる(loaded, master):
     )
     payload = build(loaded, master, date_from=date(2025, 1, 1), date_to=date(2026, 12, 31))
     group = payload["products_group"]
-    assert group[0] == {"name": "名物もつ鍋", "sales": 5200000, "rank": "A"}
+    # ABC商品売上は税込→税抜へ割り戻す（÷1.10）。
+    assert group[0] == {"name": "名物もつ鍋", "sales": round(5200000 / 1.10), "rank": "A"}
     # 全店の擬似店舗は店舗別 products には混ざらない
     assert "_group" not in payload["products"]
 

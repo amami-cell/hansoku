@@ -3628,7 +3628,7 @@ function storeYearMatrix(code, year) {
     : "";
 
   return `<div class="ymx">
-    <div class="mmhd">${year}年 一覧（縦＝指標／横＝月）<span class="mmhint">1画面で年間を管理。月(列見出し)を押すとその月の詳細へ。緑=前年超/赤=前年割れ・薄い列＝暫定/未取込・右端＝年計</span></div>
+    <div class="mmhd">${year}年 一覧（縦＝指標／横＝月）<span class="mmhint">金額はすべて税抜。1画面で年間を管理。月(列見出し)を押すとその月の詳細へ。緑=前年超/赤=前年割れ・薄い列＝暫定/未取込・右端＝年計</span></div>
     <div class="ymxwrap"><table class="ymxt"><thead><tr>${th}</tr></thead>
       <tbody>${rowSales}${rowYoY}${rowBud}${rowCov}${rowKt}${compoSec}${compoRows}</tbody></table></div>
     ${budHint}</div>`;
