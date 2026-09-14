@@ -2005,6 +2005,65 @@ def report_abc_detail(
             return 1
         codes = sorted(want)
 
+    if len(span) > 1 and "rotation" in (items or ""):
+        # ローテーション地図: 品目区分ごとに、各商品が「どの月に出たか」を presence 文字列で
+        # 並べる（●=出た/·=無し）。売価0円の内訳（TOジェラートの風味等）も点数で拾うので、
+        # 季節ローテ（毎月入れ替わる限定品）と定番(GM=全期間●)が一目で分かる。
+        from ..model import METRIC_PRODUCT_QTY as _MQ
+        from ..web.export import classify_category as _classify
+        from ..web.export import load_store_categories as _loadcats
+        allrules = _loadcats()
+        # (code,name,month)->sales / qty、(code,name)->group（点数行の "NN:" 見出し）
+        sales_m: dict[tuple, float] = {}
+        qty_m: dict[tuple, float] = {}
+        grp: dict[tuple, str] = {}
+        for row in warehouse.aggregate(AggregateQuery(
+                date_from=d_from, date_to=d_to, grain=GRAIN_MONTH,
+                metrics=[METRIC_PRODUCT_SALES], store_codes=codes,
+                group_by=("store_code", "date", "product_name"))):
+            sales_m[(row["store_code"], row["product_name"], row["date"].strftime("%Y-%m"))] = row["value"]
+        for row in warehouse.aggregate(AggregateQuery(
+                date_from=d_from, date_to=d_to, grain=GRAIN_MONTH,
+                metrics=[_MQ], store_codes=codes,
+                group_by=("store_code", "date", "product_name", "product_category"))):
+            key = (row["store_code"], row["product_name"], row["date"].strftime("%Y-%m"))
+            qty_m[key] = qty_m.get(key, 0.0) + (row["value"] or 0)
+            cat = row.get("product_category")
+            if cat and re.match(r"^\s*\d+\s*[:：]", str(cat)):
+                grp[(row["store_code"], row["product_name"])] = str(cat)
+        names_by_store: dict[str, set] = {}
+        for (code_, name_, _mm) in list(sales_m) + list(qty_m):
+            names_by_store.setdefault(code_, set()).add(name_)
+        print(f"=== ローテーション地図 {span[0]}〜{span[-1]}（●=出た月 / 区分別） ===")
+        for st in master.active:
+            if st.store_code not in codes or st.store_code not in names_by_store:
+                continue
+            rules = allrules.get(st.store_code)
+            print(f"\n── {st.store_code} {st.store_name} ──  月: {' '.join(mm for mm in span)}")
+            # 区分→[(name, presence, salesΣ, qtyΣ, active月数)]
+            bycat: dict[str, list] = {}
+            for name_ in names_by_store[st.store_code]:
+                g = grp.get((st.store_code, name_))
+                cat = _classify(name_, rules, g) if rules else "-"
+                pres = "".join(
+                    "●" if (sales_m.get((st.store_code, name_, mm), 0) or qty_m.get((st.store_code, name_, mm), 0))
+                    else "·" for mm in span)
+                sΣ = sum(sales_m.get((st.store_code, name_, mm), 0) for mm in span)
+                qΣ = sum(qty_m.get((st.store_code, name_, mm), 0) for mm in span)
+                active = pres.count("●")
+                bycat.setdefault(cat, []).append((name_, pres, sΣ, qΣ, active))
+            order = [c["name"] for c in (rules.get("categories", []) if rules else [])] + [(rules or {}).get("other", "その他")]
+            for cat in order:
+                rows_ = bycat.get(cat)
+                if not rows_:
+                    continue
+                # 全期間●=定番(GM)は末尾、抜けのある=ローテ/限定を上に。
+                rows_.sort(key=lambda r: (r[4], -r[2]))
+                print(f"  【{cat}】")
+                for name_, pres, sΣ, qΣ, active in rows_:
+                    tag = "GM" if active == len(span) else "限定"
+                    print(f"    {pres}  {tag:<3} {name_[:28]:<28} 売上Σ{int(sΣ):>9,} 点数Σ{int(qΣ):>6,} ({active}/{len(span)}月)")
+        return 0
     if len(span) > 1:
         # 月ごとの売れ筋を並べる（推移を見る形）。店は1つに絞って使うのが前提。
         by_month: dict[str, list[tuple[str, float]]] = {}
