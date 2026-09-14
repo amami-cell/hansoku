@@ -14,6 +14,9 @@ stores:
     name: ルクアLargo
     other: その他
     categories:
+      # 「フレンチ)〜」はフレンチトースト用の選択商品。TO/ジェラートより先にフードへ。
+      - name: フード
+        keywords: ["フレンチ)", フレンチトースト]
       - name: コラボ
         keywords: [コラボ, くまモン, くまもと, カエル, ピクルス, 白桃Days, ダックス]
       - name: ジェラート

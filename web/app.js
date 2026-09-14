@@ -2067,9 +2067,11 @@ function panelContent(d) {
       if (prods.length) {
         for (const p of prods) {
           const ppct = c.sales ? Math.round((p.sales || 0) / c.sales * 100) : 0;
-          const pOn = hits.items.has(p.name);
+          // 販促マークは「販促の対象商品」か「販促のある区分の“限定/おすすめ”商品」だけ。
+          // GM(定番＝6か月連続)には付けない。
+          const pOn = hits.items.has(p.name) || (on && isLimitedProduct(d.code, d.m, p.name));
           const q = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
-          html += `<li class="fw-subrow${on || pOn ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${ppct}%</span></span></li>`;
+          html += `<li class="fw-subrow${pOn ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${pOn ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${ppct}%</span></span></li>`;
         }
       } else {
         html += `<li class="fw-subrow" style="--cc:${col}"><span class="muted">商品明細なし</span></li>`;
@@ -2084,7 +2086,8 @@ function panelContent(d) {
   const list = prods.length ? prods.map(p => {
     const pct = tot ? Math.round((p.sales || 0) / tot * 100) : 0;
     const qty = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
-    const on = (catOn || hits.items.has(p.name)) ? " promo" : "";
+    // 販促マーク：対象商品か、販促のある区分の“限定/おすすめ”商品だけ（GMは付けない）。
+    const on = hits.items.has(p.name) || (catOn && isLimitedProduct(d.code, d.m, p.name));
     return `<li class="${on ? "promo" : ""}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`;
   }).join("") : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
   return { key: panelKey(d), color: catColor(d.cat), title: `${d.cat}｜${mo}月`, tab: `${d.cat} ${mo}月`, sub: `${man(tot)}・${prods.length}品`, list };
@@ -3409,6 +3412,21 @@ function promoHitsForMonth(code, m) {
     for (const it of (c.items || [])) if (it) items.add(it);
   }
   return { cats, items };
+}
+// m から k か月前の "YYYY-MM"。
+function monthMinus(m, k) {
+  let y = +m.slice(0, 4), mo = +m.slice(5, 7) - k;
+  while (mo <= 0) { mo += 12; y -= 1; }
+  return `${y}-${String(mo).padStart(2, "0")}`;
+}
+// 定番(GM)か限定(おすすめ)か。直近6か月で毎月連続して出ていれば GM（＝限定でない）。
+// どこか抜けがあれば限定＝おすすめ＝販促対象。履歴が浅い月は限定側に倒す（安全にマーク）。
+function isLimitedProduct(code, m, name) {
+  const pm = (DATA.products_monthly || {})[code] || {};
+  const win = [0, 1, 2, 3, 4, 5].map(k => monthMinus(m, k));
+  const dataMonths = win.filter(mm => pm[mm] && pm[mm].length);
+  if (dataMonths.length < 4) return true;   // 6か月の履歴が揃っていない→限定扱い
+  return dataMonths.some(mm => !(pm[mm] || []).some(p => p.name === name));
 }
 // 同じ店・同じ区分（bucket）の“前回の回”。前回比（直近比較）に使う。
 function campPrevOccurrence(c) {
