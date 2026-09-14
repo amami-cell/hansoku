@@ -10,8 +10,9 @@ import { neon } from "@neondatabase/serverless";
 
 import {
   clearCookie, identify, makeToken, sessionCookie, SESSION_DAYS, timingSafeEqual,
+  hashPassword, verifyPassword,
 } from "./auth.js";
-import { htmlResponse, loginPage } from "./login.js";
+import { htmlResponse, loginPage, joinPage } from "./login.js";
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -28,33 +29,122 @@ const serverError = (e) => {
   return json({ error: "server-error" }, 500);
 };
 
-/** 合言葉が正しければセッションを発行する。 */
+// ── 個人アカウント（app_users）・監査ログ（audit_log）の土台 ────────────────
+const normName = (s) => String(s || "").trim().replace(/\s+/g, " ").slice(0, 40);
+// オーナーは名前で固定（空白ゆらぎを無視して一致判定）。env で差し替え可。
+const OWNER_DEFAULT = "天見 真悟";
+const isOwnerName = (name, env) => {
+  const owner = (env.OWNER_NAME || OWNER_DEFAULT).replace(/\s+/g, "");
+  return normName(name).replace(/\s+/g, "") === owner;
+};
+async function ensureUsers(sql) {
+  await sql`CREATE TABLE IF NOT EXISTS app_users (
+    name TEXT PRIMARY KEY, pass_hash TEXT NOT NULL DEFAULT '', pass_salt TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT 'editor', disabled BOOLEAN NOT NULL DEFAULT false,
+    must_reset BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_login TIMESTAMPTZ)`;
+}
+async function getUser(env, name) {
+  if (!env.DATABASE_URL) return null;
+  const sql = neon(env.DATABASE_URL);
+  await ensureUsers(sql);
+  const rows = await sql`SELECT name, pass_hash, pass_salt, role, disabled, must_reset FROM app_users WHERE name = ${name}`;
+  return rows[0] || null;
+}
+// 監査ログ（書き込み操作の 名前・日時・内容）。失敗しても本処理は止めない。
+async function logAudit(env, actor, action, target, detail) {
+  if (!env.DATABASE_URL) return;
+  try {
+    const sql = neon(env.DATABASE_URL);
+    await sql`CREATE TABLE IF NOT EXISTS audit_log (id BIGSERIAL PRIMARY KEY,
+      at TIMESTAMPTZ NOT NULL DEFAULT now(), actor TEXT NOT NULL DEFAULT '',
+      action TEXT NOT NULL DEFAULT '', target TEXT NOT NULL DEFAULT '', detail TEXT NOT NULL DEFAULT '')`;
+    await sql`INSERT INTO audit_log (actor, action, target, detail)
+      VALUES (${actor || ""}, ${String(action).slice(0, 60)}, ${String(target || "").slice(0, 200)}, ${String(detail || "").slice(0, 500)})`;
+  } catch (e) { console.error("[hansoku][audit]", String(e)); }
+}
+
+/** ログイン（名前＋自分のパスワード）。 */
 async function handleLogin(request, env) {
-  if (!env.APP_PASSWORD || !env.COOKIE_SECRET) {
-    return htmlResponse(
-      loginPage({ error: "合言葉がまだ設定されていません。本部（システム担当）へ連絡してください。" }),
-      503,
-    );
+  if (!env.COOKIE_SECRET) {
+    return htmlResponse(loginPage({ error: "ログインの初期設定が未完了です。本部（システム担当）へ連絡してください。" }), 503);
   }
   if (request.method === "GET") return htmlResponse(loginPage());
   if (request.method !== "POST") return json({ error: "method" }, 405);
 
   const form = await request.formData();
-  const name = String(form.get("name") || "").trim().slice(0, 40);
+  const name = normName(form.get("name"));
   const password = String(form.get("password") || "");
+  await new Promise((r) => setTimeout(r, 400));   // 総当たり対策：合否に依らず待つ
 
-  // 総当たりを少しでも割に合わなくする。合否によらず同じだけ待つ。
+  if (!name) return htmlResponse(loginPage({ error: "お名前を入れてください。" }), 400);
+  const user = await getUser(env, name);
+  if (!user || !user.pass_hash || user.must_reset) {
+    return htmlResponse(loginPage({
+      error: "アカウントが無いか、パスワード未設定です。『初めての方・パスワードを忘れた方』から設定してください。",
+      name,
+    }), 401);
+  }
+  if (user.disabled) return htmlResponse(loginPage({ error: "このアカウントは停止中です。本部へご連絡ください。", name }), 403);
+  if (!(await verifyPassword(password, user.pass_salt, user.pass_hash))) {
+    return htmlResponse(loginPage({ error: "パスワードが違います。", name }), 401);
+  }
+  // オーナー名は常にオーナー権限に寄せる。
+  let role = user.role || "editor";
+  if (isOwnerName(name, env) && role !== "owner") {
+    role = "owner";
+    try { const sql = neon(env.DATABASE_URL); await sql`UPDATE app_users SET role='owner', updated_at=now() WHERE name=${name}`; } catch {}
+  }
+  try { const sql = neon(env.DATABASE_URL); await sql`UPDATE app_users SET last_login=now() WHERE name=${name}`; } catch {}
+  const token = await makeToken(env.COOKIE_SECRET, name, role, Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
+  return new Response(null, {
+    status: 303,
+    headers: { location: "/", "set-cookie": sessionCookie(token), "cache-control": "no-store" },
+  });
+}
+
+/** 初回登録・パスワード再設定（名前＋参加コード8888 → 新パスワード）。 */
+async function handleJoin(request, env) {
+  if (!env.APP_PASSWORD || !env.COOKIE_SECRET || !env.DATABASE_URL) {
+    return htmlResponse(joinPage({ error: "登録の初期設定が未完了です。本部（システム担当）へ連絡してください。" }), 503);
+  }
+  if (request.method === "GET") return htmlResponse(joinPage());
+  if (request.method !== "POST") return json({ error: "method" }, 405);
+
+  const form = await request.formData();
+  const name = normName(form.get("name"));
+  const code = String(form.get("code") || "");
+  const password = String(form.get("password") || "");
+  const password2 = String(form.get("password2") || "");
   await new Promise((r) => setTimeout(r, 400));
 
-  if (!timingSafeEqual(password, env.APP_PASSWORD)) {
-    return htmlResponse(loginPage({ error: "合言葉が違います。", name }), 401);
+  if (!name) return htmlResponse(joinPage({ error: "お名前を入れてください。" }), 400);
+  if (!timingSafeEqual(code, env.APP_PASSWORD)) {
+    return htmlResponse(joinPage({ error: "参加コードが違います。", name }), 401);
   }
-  if (!name) {
-    return htmlResponse(loginPage({ error: "お名前を入れてください。" }), 400);
+  if (password.length < 4) return htmlResponse(joinPage({ error: "パスワードは4文字以上にしてください。", name }), 400);
+  if (password !== password2) return htmlResponse(joinPage({ error: "確認用パスワードが一致しません。", name }), 400);
+
+  const existing = await getUser(env, name);
+  // 既に本人がパスワードを持っている名前は、参加コードでは上書きさせない（乗っ取り防止）。
+  // 本部が「初期化（must_reset）」した場合のみ、この画面から再設定できる。
+  if (existing && existing.pass_hash && !existing.must_reset) {
+    return htmlResponse(joinPage({ error: "この名前は登録済みです。ログインしてください（忘れた場合は本部が初期化します）。", name }), 409);
   }
-  const token = await makeToken(
-    env.COOKIE_SECRET, name, Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000,
-  );
+  const { hash, salt } = await hashPassword(password);
+  let role = existing ? (existing.role || "editor") : "editor";
+  if (isOwnerName(name, env)) role = "owner";
+  const sql = neon(env.DATABASE_URL);
+  await ensureUsers(sql);
+  await sql`
+    INSERT INTO app_users (name, pass_hash, pass_salt, role, disabled, must_reset, created_at, updated_at, last_login)
+    VALUES (${name}, ${hash}, ${salt}, ${role}, false, false, now(), now(), now())
+    ON CONFLICT (name) DO UPDATE
+      SET pass_hash=EXCLUDED.pass_hash, pass_salt=EXCLUDED.pass_salt, role=${role},
+          must_reset=false, updated_at=now(), last_login=now()`;
+  await logAudit(env, name, existing ? "user.reset" : "user.join", name, role);
+  const token = await makeToken(env.COOKIE_SECRET, name, role, Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
   return new Response(null, {
     status: 303,
     headers: { location: "/", "set-cookie": sessionCookie(token), "cache-control": "no-store" },
@@ -68,6 +158,13 @@ export default {
     if (url.pathname === "/login") {
       try {
         return await handleLogin(request, env);
+      } catch (e) {
+        return serverError(e);
+      }
+    }
+    if (url.pathname === "/join") {
+      try {
+        return await handleJoin(request, env);
       } catch (e) {
         return serverError(e);
       }
@@ -99,11 +196,21 @@ export default {
       });
     }
 
-    // 開放モード（ログイン無し）は「閲覧専用」。誰でも見られるが、共有データ
-    // （制作物POP・目標・要因メモ）の書き換え・削除・アップロードはさせない。
-    // 書き込みは本人が特定できる入口（合言葉／Access）の内側だけに限る。
-    if (me.via === "open" && url.pathname.startsWith("/api/") && request.method !== "GET") {
-      return json({ error: "read-only", detail: "開放モードは閲覧専用です" }, 403);
+    // 書き込み権限：開放モード（ログイン無し）と「閲覧」権限は読み取り専用。
+    // 編集・オーナーだけが POST/DELETE できる。
+    const canWrite = me.via !== "open" && me.role !== "viewer";
+    if (!canWrite && url.pathname.startsWith("/api/") && request.method !== "GET") {
+      return json({ error: "read-only", detail: me.via === "open" ? "閲覧専用です（ログインすると編集できます）" : "この権限では編集できません（本部にご相談ください）" }, 403);
+    }
+
+    // 画面が「誰でログイン中か・書き込めるか」を知るための軽いエンドポイント。
+    if (url.pathname === "/api/me") {
+      return json({
+        name: me.via === "open" ? "" : me.who,
+        role: me.via === "open" ? "open" : (me.role || "editor"),
+        via: me.via, canWrite,
+        owner: me.via !== "open" && me.role === "owner",
+      });
     }
 
     if (url.pathname === "/api/targets") {
@@ -208,6 +315,7 @@ async function handlePlans(request, env, who) {
     const id = typeof body.id === "string" ? body.id.slice(0, 128) : "";
     if (!id) return json({ error: "no-id" }, 400);
     await sql`DELETE FROM promo_plans WHERE id = ${id}`;
+    await logAudit(env, email, "plan.delete", id, "");
     return json({ ok: true, id, deleted: true });
   }
 
@@ -234,6 +342,7 @@ async function handlePlans(request, env, who) {
         store_code = EXCLUDED.store_code, title = EXCLUDED.title, kind = EXCLUDED.kind,
         bucket = EXCLUDED.bucket, start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
         goal = EXCLUDED.goal, note = EXCLUDED.note, set_by = EXCLUDED.set_by, set_at = now()`;
+    await logAudit(env, email, "plan.set", id, title);
     return json({ ok: true, plan: { id, store_code, title, kind, bucket, start, end, goal, note, source_id, by: email } });
   }
 
@@ -269,6 +378,7 @@ async function handleNotes(request, env, who) {
     const note = typeof body.note === "string" ? body.note.slice(0, 2000).trim() : "";
     if (!note) {
       await sql`DELETE FROM promo_notes WHERE campaign_id = ${id}`;
+      await logAudit(env, email, "note.delete", id, "");
       return json({ ok: true, id, note: "" });
     }
     await sql`
@@ -276,6 +386,7 @@ async function handleNotes(request, env, who) {
       VALUES (${id}, ${note}, ${email}, now())
       ON CONFLICT (campaign_id) DO UPDATE
         SET note = EXCLUDED.note, set_by = EXCLUDED.set_by, set_at = now()`;
+    await logAudit(env, email, "note.set", id, note.slice(0, 60));
     return json({ ok: true, id, note, by: email });
   }
 
@@ -313,6 +424,7 @@ async function handleStatus(request, env, who) {
     const s = typeof body.status === "string" ? body.status.trim() : "";
     if (!s || !STATUS_ALLOWED.includes(s)) {
       await sql`DELETE FROM promo_status WHERE campaign_id = ${id}`;
+      await logAudit(env, email, "status.clear", id, "");
       return json({ ok: true, id, status: null });
     }
     await sql`
@@ -320,6 +432,7 @@ async function handleStatus(request, env, who) {
       VALUES (${id}, ${s}, ${email}, now())
       ON CONFLICT (campaign_id) DO UPDATE
         SET status = EXCLUDED.status, set_by = EXCLUDED.set_by, set_at = now()`;
+    await logAudit(env, email, "status.set", id, s);
     return json({ ok: true, id, status: s, by: email });
   }
 
@@ -396,6 +509,7 @@ async function handleCreatives(request, env, who) {
       INSERT INTO promo_creatives (id, campaign_id, store_code, title, kind, r2_key, mime, doc_date, set_by, set_at)
       VALUES (${rand + "_" + Date.now()}, ${campaign}, ${store}, ${title}, ${kind}, ${bucketKey}, ${mime}, ${docDate}, ${email}, now())`;
 
+    await logAudit(env, email, "creative.add", campaign || store, title);
     return json({
       ok: true,
       creative: {
@@ -417,6 +531,7 @@ async function handleCreatives(request, env, who) {
       try { await env.CREATIVES.delete(rows[0].r2_key); } catch (e) { console.error("[hansoku] r2 delete", e); }
     }
     await sql`DELETE FROM promo_creatives WHERE id = ${id}`;
+    await logAudit(env, email, "creative.delete", id, "");
     return json({ ok: true, id });
   }
 
@@ -466,6 +581,7 @@ async function handleTargets(request, env, who) {
     const t = body.target;
     if (t === null || t === undefined || t === "") {
       await sql`DELETE FROM promo_targets WHERE campaign_id = ${id}`;
+      await logAudit(env, email, "target.clear", id, "");
       return json({ ok: true, id, target: null });
     }
     const value = Math.round(Number(t));
@@ -475,6 +591,7 @@ async function handleTargets(request, env, who) {
       VALUES (${id}, ${value}, ${email}, now())
       ON CONFLICT (campaign_id) DO UPDATE
         SET target_value = EXCLUDED.target_value, set_by = EXCLUDED.set_by, set_at = now()`;
+    await logAudit(env, email, "target.set", id, String(value));
     return json({ ok: true, id, target: value, by: email });
   }
 

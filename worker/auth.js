@@ -34,13 +34,13 @@ export function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
-/** 名前と期限を署名して1本の文字列にする。 */
-export async function makeToken(secret, name, expiresAtMs) {
-  const payload = b64url(enc.encode(JSON.stringify({ n: name, e: expiresAtMs })));
+/** 名前・権限・期限を署名して1本の文字列にする。 */
+export async function makeToken(secret, name, role, expiresAtMs) {
+  const payload = b64url(enc.encode(JSON.stringify({ n: name, r: role || "editor", e: expiresAtMs })));
   return `${payload}.${await hmac(secret, payload)}`;
 }
 
-/** 署名と期限を確かめて名前を返す。だめなら null。 */
+/** 署名と期限を確かめて名前・権限を返す。だめなら null。 */
 export async function readToken(secret, token) {
   if (typeof token !== "string" || !token.includes(".")) return null;
   const cut = token.lastIndexOf(".");
@@ -58,7 +58,28 @@ export async function readToken(secret, token) {
   }
   if (!data || typeof data.n !== "string" || typeof data.e !== "number") return null;
   if (Date.now() >= data.e) return null;   // 期限切れ
-  return { name: data.n, expiresAt: data.e };
+  return { name: data.n, role: typeof data.r === "string" ? data.r : "editor", expiresAt: data.e };
+}
+
+// ── 個人パスワード（PBKDF2でハッシュ化して保存。平文は保存しない）─────────────
+const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const PBKDF2_ITER = 120000;
+
+/** パスワードをハッシュ化。saltB64 を渡さなければ新しい塩を作る。 */
+export async function hashPassword(password, saltB64) {
+  const salt = saltB64 ? unb64(saltB64) : crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey("raw", enc.encode(String(password)), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations: PBKDF2_ITER, hash: "SHA-256" }, key, 256);
+  return { hash: b64(new Uint8Array(bits)), salt: b64(salt) };
+}
+
+/** 保存済みの塩・ハッシュと照合（定数時間比較）。 */
+export async function verifyPassword(password, saltB64, hashB64) {
+  if (!saltB64 || !hashB64) return false;
+  const { hash } = await hashPassword(password, saltB64);
+  return timingSafeEqual(hash, hashB64);
 }
 
 export function readCookie(header, name) {
@@ -103,8 +124,8 @@ export const clearCookie = () =>
  * 検証しないヘッダは、無いのと同じ。
  */
 export async function identify(request, env) {
-  if (!env.APP_PASSWORD || !env.COOKIE_SECRET) return null;
+  if (!env.COOKIE_SECRET) return null;
   const token = readCookie(request.headers.get("cookie"), COOKIE);
   const v = token && (await readToken(env.COOKIE_SECRET, token));
-  return v ? { who: v.name, via: "passphrase" } : null;
+  return v ? { who: v.name, role: v.role, via: "user" } : null;
 }

@@ -739,6 +739,8 @@ async function boot() {
   await fetchServerStatus();    // 手動ステータス（本番=共有、無ければ端末内）
   await fetchServerCreatives(); // アップロード制作物（本番のみ・無ければ台帳ぶんだけ）
   await fetchServerPlans();     // アプリ内で起票した販促プラン（本番のみ・台帳と統合）
+  await fetchServerMe();        // 誰でログイン中か・書き込めるか（WRITE_OK を確定）
+  paintAccount();
   // URL が指定されていればそれに従う。無ければ「うちの店」。それも無ければ全店。
   if (location.hash && location.hash !== "#") {
     VIEW = hashToView(location.hash);
@@ -1696,6 +1698,32 @@ async function fetchServerPlans() {
   } catch (e) { /* API 無し → 台帳ぶんだけ */ }
 }
 const planById = id => PLANS.find(p => p.id === id) || null;
+
+// ── ログイン状態（誰で入っているか・書き込めるか）───────────────────────────
+let ME = { name: "", role: "open", via: "open", canWrite: false, owner: false };
+async function fetchServerMe() {
+  try {
+    const res = await fetch("/api/me", { headers: { accept: "application/json" }, cache: "no-store" });
+    const ct = res.headers.get("content-type") || "";
+    if (!res.ok || !ct.includes("application/json")) return;
+    const d = await res.json();
+    if (d && typeof d === "object") { ME = d; WRITE_OK = !!d.canWrite; }
+  } catch (e) { /* API 無し（プレビュー等）→ 既定のまま */ }
+}
+// 上部バーのアカウント表示。未ログイン=「ログイン」、ログイン中=「名前・ログアウト」。
+function paintAccount() {
+  const btn = document.getElementById("logoutbtn");
+  if (!btn) return;
+  const ic = btn.querySelector(".tbtn-ic"), t = btn.querySelector(".tbtn-t");
+  if (ME.via === "open") {
+    btn.href = "/login"; btn.setAttribute("aria-label", "ログイン");
+    if (ic) ic.textContent = "→"; if (t) t.textContent = "ログイン";
+  } else {
+    btn.href = "/logout"; btn.setAttribute("aria-label", "ログアウト");
+    if (ic) ic.textContent = "⏻";
+    if (t) t.textContent = `${ME.name || ""}${ME.owner ? "（管理）" : ""}・ログアウト`;
+  }
+}
 
 // 画面から施策/店にファイルを足す。PDF・画像・Excel対応。押すとその場でファイル選択。
 function promptUpload(campaign, store) {

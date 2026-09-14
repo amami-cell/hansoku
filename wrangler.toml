@@ -26,6 +26,8 @@ binding = "CREATIVES"
 bucket_name = "hansoku-creatives"
 
 # 開放モード（ログイン無し）。合言葉を外して誰でも入れる。
-#   1 = 開放（全店の実売上がURLだけで見える）／ 消す or "0" = 合言葉ログインに戻す。
+#   1 = 開放（全店の実売上がURLだけで見える）／ 消す or "0" = 個人ログイン必須に戻す。
+# OWNER_NAME = アカウント管理（権限変更・パスワード初期化）ができるオーナーの表示名。
 [vars]
 OPEN_ACCESS = "1"
+OWNER_NAME = "天見 真悟"
