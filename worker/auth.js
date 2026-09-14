@@ -64,7 +64,10 @@ export async function readToken(secret, token) {
 // ── 個人パスワード（PBKDF2でハッシュ化して保存。平文は保存しない）─────────────
 const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-const PBKDF2_ITER = 120000;
+// Cloudflare Workers の WebCrypto は PBKDF2 の反復回数上限が 100000（超えると
+// NotSupportedError）。上限いっぱいの 100000 を使う。まだ誰もハッシュ未保存なので
+// 過去分の再ハッシュは不要（既存があれば保存時の回数で検証する必要が出る点に注意）。
+const PBKDF2_ITER = 100000;
 
 /** パスワードをハッシュ化。saltB64 を渡さなければ新しい塩を作る。 */
 export async function hashPassword(password, saltB64) {
