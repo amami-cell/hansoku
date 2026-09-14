@@ -2274,14 +2274,16 @@ def ingest_abc_store(
             _sales_of = lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0
             _qty_of = lambda p: p["ints"][_ABC_QTY] if len(p["ints"]) > _ABC_QTY else 0
             products.sort(key=_sales_of, reverse=True)
-            # 売上上位 top_n に加え、「売価0円だが点数がある」商品（例: テイクアウトジェラートの
-            # 内訳）も取りこぼさないよう別枠で拾う。0円は売上順だと最下位に沈み top_n から切れる。
+            # 売れ筋は売上上位 top_n。0円の選択商品（内訳）はメニュー分類で所属グループ付きに
+            # 拾う（下の分類=メニュー）。全商品グリッドには本来これらは出ないが、店/日により
+            # 混じることがあるので zero_flat に控え、メニューが取れなかったときだけ点数を
+            # 焼くフォールバックにする（＝二重計上を避けつつ、内訳が丸ごと欠けるのを防ぐ）。
             picked = list(products[:top_n])
             picked_names = {p["name"] for p in picked}
-            for p in products:
-                if _sales_of(p) <= 0 and _qty_of(p) > 0 and p["name"] not in picked_names:
-                    picked.append(p)
-                    picked_names.add(p["name"])
+            zero_flat = [
+                p for p in products
+                if _sales_of(p) <= 0 and _qty_of(p) > 0 and p["name"] not in picked_names
+            ]
             n_prod = 0
             for prod in picked:
                 ints = prod["ints"]
@@ -2365,6 +2367,31 @@ def ingest_abc_store(
                 n_break += 1
             if n_break:
                 print(f"[ABC店] {code} {month} 0円内訳を {n_break}件 追加取込（メニュー分類）")
+            elif zero_flat:
+                # メニュー分類が取れなかった。全商品に混じっていた0円の点数だけでも焼く
+                # （所属グループは付かないので商品名で区分される。従来挙動のフォールバック）。
+                for p in zero_flat:
+                    q = _qty_of(p)
+                    if q <= 0 or p["name"] in picked_names:
+                        continue
+                    collected.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_QTY,
+                            value=float(q),
+                            product_name=p["name"][:80],
+                            product_category=None,
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
+                    )
+                    picked_names.add(p["name"])
+                    n_break += 1
+                if n_break:
+                    print(f"[ABC店] {code} {month} 0円内訳を {n_break}件 取込（全商品フォールバック）")
 
             # --- 分類=部門：ランチ/ドリンク等の内訳（数量・売上・原価率） ---
             # 部門グリッドは負荷時に埋まりきらず0件になる／部門ラジオに切替らず全商品の
