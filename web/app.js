@@ -2061,11 +2061,22 @@ function openCompoWindow(code, m, cat) {
   win.style.top = (84 + off) + "px";
   win.innerHTML = `<div class="fw-head"><span class="fw-dot" style="background:${catColor(cat)}"></span>` +
     `<span class="fw-ti">${esc(cat)}｜${mo}月</span><span class="fw-sub">${man(tot)}・${prods.length}品</span>` +
+    `<button class="fw-sz" aria-label="大きさを切替">⤢</button>` +
     `<button class="fw-x" aria-label="閉じる">×</button></div>` +
     `<ul class="fw-list">${list}</ul>`;
   layer.appendChild(win);
   fwinFront(win);
   win.querySelector(".fw-x").addEventListener("click", () => win.remove());
+  // 大きく／小さく（標準→大→特大→標準…と切替）。中身が長くても読みやすく。
+  const SIZES = ["", "fw-lg", "fw-xl"];
+  win.querySelector(".fw-sz").addEventListener("click", e => {
+    e.stopPropagation();
+    const cur = SIZES.findIndex(s => s && win.classList.contains(s));
+    win.classList.remove("fw-lg", "fw-xl");
+    const next = SIZES[(cur + 1 + 1) % SIZES.length];  // 見つからない(-1)なら fw-lg から
+    if (next) win.classList.add(next);
+    fwinFront(win);
+  });
   win.addEventListener("mousedown", () => fwinFront(win));
   fwinDrag(win, win.querySelector(".fw-head"));
 }

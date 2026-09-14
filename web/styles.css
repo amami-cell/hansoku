@@ -991,9 +991,17 @@ tbody tr:last-child td{border-bottom:0;}
 .fw-dot{width:9px;height:9px;border-radius:2px;flex:0 0 auto;}
 .fw-ti{font-weight:700;color:var(--ink);}
 .fw-sub{color:var(--ink-3);font-size:11px;}
-.fw-x{margin-left:auto;background:none;border:0;font-size:17px;line-height:1;color:var(--ink-3);
-  cursor:pointer;padding:0 2px;}
+.fw-sz{margin-left:auto;background:none;border:0;font-size:15px;line-height:1;color:var(--ink-3);
+  cursor:pointer;padding:0 4px;}
+.fw-sz:hover{color:var(--accent);}
+.fw-x{background:none;border:0;font-size:17px;line-height:1;color:var(--ink-3);cursor:pointer;padding:0 2px;}
 .fw-x:hover{color:var(--ink);}
+/* 大きさ切替（標準→大→特大） */
+.fwin.fw-lg{width:min(420px,92vw);font-size:13.5px;}
+.fwin.fw-lg .fw-list{max-height:64vh;}
+.fwin.fw-xl{width:min(620px,94vw);font-size:15px;}
+.fwin.fw-xl .fw-list{max-height:76vh;}
+.fwin.fw-xl .fw-list li{padding:9px 12px;}
 .fw-list{list-style:none;margin:0;padding:4px 4px;max-height:46vh;overflow:auto;
   font-variant-numeric:tabular-nums;}
 .fw-list li{display:flex;justify-content:space-between;gap:10px;padding:6px 8px;border-bottom:1px solid var(--line);}
