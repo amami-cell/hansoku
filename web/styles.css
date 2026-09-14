@@ -978,6 +978,32 @@ tbody tr:last-child td{border-bottom:0;}
 .ymxt tr.ymxcompo-row th{font-weight:600;color:var(--ink-2);}
 .ymxt tr.ymxcompo-row td.ymxcompo-c{color:var(--ink-2);}
 .ymxcdot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:middle;}
+/* 構成比セルは押せる（商品内訳の小窓） */
+.ymxt td.ymxcompo-click{cursor:pointer;}
+.ymxt td.ymxcompo-click:hover{background:var(--accent-soft);color:var(--accent);}
+/* 商品内訳の小ウインドウ（複数・ドラッグ移動可） */
+#fwins{position:fixed;inset:0;pointer-events:none;z-index:1000;}
+.fwin{position:absolute;pointer-events:auto;width:250px;max-width:84vw;background:var(--surface);
+  border:1px solid var(--line-strong);border-radius:12px;box-shadow:0 10px 34px rgba(0,0,0,.30);
+  font-size:12.5px;overflow:hidden;}
+.fw-head{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--surface-2);
+  cursor:move;border-bottom:1px solid var(--line);user-select:none;}
+.fw-dot{width:9px;height:9px;border-radius:2px;flex:0 0 auto;}
+.fw-ti{font-weight:700;color:var(--ink);}
+.fw-sub{color:var(--ink-3);font-size:11px;}
+.fw-x{margin-left:auto;background:none;border:0;font-size:17px;line-height:1;color:var(--ink-3);
+  cursor:pointer;padding:0 2px;}
+.fw-x:hover{color:var(--ink);}
+.fw-list{list-style:none;margin:0;padding:4px 4px;max-height:46vh;overflow:auto;
+  font-variant-numeric:tabular-nums;}
+.fw-list li{display:flex;justify-content:space-between;gap:10px;padding:6px 8px;border-bottom:1px solid var(--line);}
+.fw-list li:last-child{border-bottom:0;}
+.fw-pn{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.fw-rk{color:var(--ink-3);font-size:10px;}
+.fw-pv{color:var(--ink);font-weight:700;white-space:nowrap;}
+.fw-pp{color:var(--ink-3);font-weight:600;margin-left:6px;}
+.fwin.fw-flash{animation:fwflash .6s ease;}
+@keyframes fwflash{0%,100%{box-shadow:0 10px 34px rgba(0,0,0,.30);}50%{box-shadow:0 0 0 3px var(--accent);}}
 .ymxcompo-lg{margin-top:10px;}
 .ymxcl-t{font-size:12px;font-weight:600;color:var(--ink-2);}
 /* 前年差の内訳（なぜ増えた/減った：区分ごとの差を大きい順に） */

@@ -872,6 +872,7 @@ test("storeYearMatrix：品目構成比を『区分×月』の行で一覧に出
   assert.ok(html.includes("ymxsec") && /品目構成比/.test(html), "品目構成比のセクション見出しがある");
   assert.ok(html.includes("ymxcompo-row") && html.includes("パフェ"), "区分ごとの行（例：パフェ）が月別で並ぶ");
   assert.ok(html.includes("ymxcdot"), "区分は色ドット付きで示す（チャートと同色）");
+  assert.ok(html.includes("data-compocell"), "構成比の金額セルは押せる（商品内訳の小窓）");
 });
 
 test("storeAnnualChart：販促は年間チャート（帯）として見出し付きで出す", () => {

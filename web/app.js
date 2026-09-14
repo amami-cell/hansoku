@@ -951,6 +951,13 @@ function render() {
     }));
   app.querySelectorAll("[data-mpick]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); MONTH_PICK_OPEN = !MONTH_PICK_OPEN; render(); }));
+  // 構成比（金額）セル → 商品内訳の小ウインドウを開く（複数可）。render しない＝既存の窓は残る。
+  app.querySelectorAll("[data-compocell]").forEach(el =>
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const parts = el.dataset.compocell.split(":");
+      openCompoWindow(parts[0], parts[1], decodeURIComponent(parts.slice(2).join(":")));
+    }));
   app.querySelectorAll("[data-scat]").forEach(el =>
     el.addEventListener("click", e => {
       e.stopPropagation();
@@ -1994,6 +2001,74 @@ function catsAtM(code, m) {
 }
 const catAtM = (code, m, cat) => catsAtM(code, m).find(c => c.name === cat) || null;
 const prodsInCat = (code, m, cat) => prodsAtM(code, m).filter(p => classifyCat(p.name, code) === cat);
+
+// ── 構成比セルを押すと出る「小ウインドウ」（複数可・ドラッグ移動・×で閉じる）──────
+// 中身＝その区分×月の商品内訳（各商品の売上＝税抜 と、区分内の売上構成比%）。
+let FWIN_SEQ = 0;
+function fwinLayer() {
+  let el = document.getElementById("fwins");
+  if (!el) { el = document.createElement("div"); el.id = "fwins"; document.body.appendChild(el); }
+  return el;
+}
+function fwinFront(win) { win.style.zIndex = String(1000 + (++FWIN_SEQ)); }
+function fwinDrag(win, handle) {
+  let sx = 0, sy = 0, ox = 0, oy = 0, on = false;
+  const move = e => {
+    if (!on) return;
+    const p = e.touches ? e.touches[0] : e;
+    win.style.left = (ox + p.clientX - sx) + "px";
+    win.style.top = Math.max(0, oy + p.clientY - sy) + "px";
+    e.preventDefault();
+  };
+  const up = () => {
+    on = false;
+    document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up);
+    document.removeEventListener("touchmove", move); document.removeEventListener("touchend", up);
+  };
+  const down = e => {
+    if (e.target.closest(".fw-x")) return;
+    on = true; const p = e.touches ? e.touches[0] : e;
+    sx = p.clientX; sy = p.clientY; ox = win.offsetLeft; oy = win.offsetTop; fwinFront(win);
+    document.addEventListener("mousemove", move); document.addEventListener("mouseup", up);
+    document.addEventListener("touchmove", move, { passive: false }); document.addEventListener("touchend", up);
+    e.preventDefault();
+  };
+  handle.addEventListener("mousedown", down);
+  handle.addEventListener("touchstart", down, { passive: false });
+}
+function openCompoWindow(code, m, cat) {
+  const layer = fwinLayer();
+  const key = `${code}:${m}:${cat}`;
+  const exist = [...layer.children].find(w => w.dataset.fkey === key);
+  if (exist) {   // 同じセルは重複させず、前面に出して知らせる
+    fwinFront(exist); exist.classList.remove("fw-flash"); void exist.offsetWidth; exist.classList.add("fw-flash");
+    return;
+  }
+  const prods = prodsInCat(code, m, cat).slice().sort((a, b) => b.sales - a.sales);
+  const tot = prods.reduce((a, p) => a + (p.sales || 0), 0);
+  const mo = +m.slice(5, 7);
+  const list = prods.length
+    ? prods.map(p => {
+        const pct = tot ? Math.round((p.sales || 0) / tot * 100) : 0;
+        return `<li><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}</span><span class="fw-pv">${man(p.sales)}<span class="fw-pp">${pct}%</span></span></li>`;
+      }).join("")
+    : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
+  const win = document.createElement("div");
+  win.className = "fwin";
+  win.dataset.fkey = key;
+  const off = layer.children.length * 20;
+  win.style.left = (56 + off) + "px";
+  win.style.top = (84 + off) + "px";
+  win.innerHTML = `<div class="fw-head"><span class="fw-dot" style="background:${catColor(cat)}"></span>` +
+    `<span class="fw-ti">${esc(cat)}｜${mo}月</span><span class="fw-sub">${man(tot)}・${prods.length}品</span>` +
+    `<button class="fw-x" aria-label="閉じる">×</button></div>` +
+    `<ul class="fw-list">${list}</ul>`;
+  layer.appendChild(win);
+  fwinFront(win);
+  win.querySelector(".fw-x").addEventListener("click", () => win.remove());
+  win.addEventListener("mousedown", () => fwinFront(win));
+  fwinDrag(win, win.querySelector(".fw-head"));
+}
 // 品目区分の固定色（構成比バーと区分行を同色でつなぐ）
 const CAT_COLORS = {
   "パフェ": "#c06a9e", "ケーキ": "#b5651d", "ジェラート": "#4a7fb5",
@@ -3633,9 +3708,9 @@ function storeYearMatrix(code, year) {
       const c = r.cats.find(x => x.name === n);
       if (!(r.has && c && c.sales)) return `<td class="${cellCls(r.i)} ymxcompo-c">―</td>`;
       const pct = tot ? Math.round(c.sales / tot * 100) : 0;
-      // カーソルを合わせると 構成比(%)・出品数・金額 が出る。
-      const tip = `${n}｜構成比 ${pct}%｜${c.count || 0}品｜${man(c.sales)}円`;
-      return `<td class="${cellCls(r.i)} ymxcompo-c" data-tip="${esc(tip)}">${man(c.sales)}</td>`;
+      // カーソルを合わせると 構成比(%)・出品数・金額。押すと商品内訳の小窓が開く。
+      const tip = `${n}｜構成比 ${pct}%｜${c.count || 0}品｜${man(c.sales)}円（押すと商品内訳）`;
+      return `<td class="${cellCls(r.i)} ymxcompo-c ymxcompo-click" data-compocell="${code}:${r.m}:${encodeURIComponent(n)}" data-tip="${esc(tip)}">${man(c.sales)}</td>`;
     }).join("");
     const yAmt = yearAgg.get(n) || 0;
     const yPct = yTot ? Math.round(yAmt / yTot * 100) : null;
@@ -3650,7 +3725,7 @@ function storeYearMatrix(code, year) {
     : "";
 
   return `<div class="ymx">
-    <div class="mmhd">${year}年 一覧（縦＝指標／横＝月）<span class="mmhint">金額はすべて税抜。1画面で年間を管理。月(列見出し)を押すとその月の詳細へ。緑=前年超/赤=前年割れ・薄い列＝暫定/未取込・右端＝年計</span></div>
+    <div class="mmhd">${year}年 一覧（縦＝指標／横＝月）<span class="mmhint">金額はすべて税抜。月(列見出し)を押すとその月の詳細へ。品目構成比の金額を押すと商品内訳の小窓が開く（複数可）。緑=前年超/赤=前年割れ・薄い列＝暫定/未取込・右端＝年計</span></div>
     <div class="ymxwrap"><table class="ymxt"><thead><tr>${th}</tr></thead>
       <tbody>${rowSales}${rowYoY}${rowBud}${rowCov}${rowKt}${compoSec}${compoRows}</tbody></table></div>
     ${budHint}</div>`;
