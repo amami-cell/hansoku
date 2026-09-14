@@ -18,6 +18,8 @@ not_found_handling = "single-page-application"
 binding = "CREATIVES"
 bucket_name = "hansoku-creatives"
 
-# 開放モード（ログイン無し）。合言葉もAccessも無しで誰でも入れる。
+# 開放モード（閲覧は誰でも）。編集は個人ログイン（/join＝名前＋参加コード8888＋自分の
+# パスワード）でテストできる。OWNER_NAME はオーナー（管理権限）の表示名。
 [vars]
 OPEN_ACCESS = "1"
+OWNER_NAME = "天見 真悟"

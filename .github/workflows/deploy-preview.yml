@@ -46,6 +46,7 @@ jobs:
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
           COOKIE_SECRET: ${{ secrets.HANSOKU_COOKIE_SECRET }}
+          APP_PASSWORD: ${{ secrets.HANSOKU_APP_PASSWORD }}
         run: |
           set -o pipefail
           TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]\"'"'")"
@@ -61,5 +62,11 @@ jobs:
           fi
           if [ -n "$COOKIE_SECRET" ]; then
             printf '%s' "$COOKIE_SECRET" | npx wrangler secret put COOKIE_SECRET --config wrangler-preview.toml 2>&1 | tail -2 || true
+          fi
+          # 参加コード（8888）。個人ログイン/初回登録のテストを公開プレビューで行うため。
+          if [ -n "$APP_PASSWORD" ]; then
+            printf '%s' "$APP_PASSWORD" | npx wrangler secret put APP_PASSWORD --config wrangler-preview.toml 2>&1 | tail -2 || true
+          else
+            echo "::warning::HANSOKU_APP_PASSWORD 未設定。プレビューの個人ログイン（/join）は無効です。"
           fi
           [ -n "$url" ] && { echo "## 公開URL（認証なし）" >> "$GITHUB_STEP_SUMMARY"; echo "**$url**" >> "$GITHUB_STEP_SUMMARY"; }
