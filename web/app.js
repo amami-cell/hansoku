@@ -3654,6 +3654,24 @@ function storeMonthNav(code, m) {
     ${pick}</div>`;
 }
 
+// Steppy風の予算比ピル。rate=100 で予算どおり。↑良い(緑)／↓悪い(赤)／◆ほぼ予算(黄)。
+// deltaTxt は「+531,895円」のような差額（任意）。higherWorse は原価率など高いほど悪い指標用。
+function budgetPill(rate, deltaTxt, higherWorse) {
+  if (rate == null) return "";
+  const d = rate - 100;
+  let tone = Math.abs(d) < 0.5 ? "flat" : (d > 0 ? "up" : "down");
+  if (higherWorse && tone !== "flat") tone = tone === "up" ? "down" : "up";
+  const mark = tone === "up" ? "▲" : tone === "down" ? "▼" : "◆";
+  return `<span class="kpill ${tone}">${mark} 予算比 ${rate.toFixed(1)}%${deltaTxt ? `<span class="kpd">（${deltaTxt}）</span>` : ""}</span>`;
+}
+// 前年比／前月比などのピル（0以上=緑・未満=赤・≒0=黄）。
+function pctPill(label, pct) {
+  if (pct == null) return "";
+  const tone = Math.abs(pct) < 0.05 ? "flat" : (pct >= 0 ? "up" : "down");
+  const mark = tone === "up" ? "▲" : tone === "down" ? "▼" : "◆";
+  return `<span class="kpill ${tone}">${mark} ${label} ${signed(pct)}%</span>`;
+}
+
 // 月の詳細（構成比・客単価・集客＋その月の販促）
 function renderStoreMonth(code, m) {
   const s = store(code);
@@ -3682,19 +3700,23 @@ function renderStoreMonth(code, m) {
     ? `<div class="budnote">予算未入力 — FWに <b>${jpMonth(m)}</b> の月別予算を入れると、ここに予算達成率が自動で出ます。</div>`
     : "";
 
-  const kpi = (lbl, big, sub, tone) => `<div class="kpi"><div class="lbl">${lbl}</div>
-    <div class="big ${tone || ""}">${big}</div>${sub ? `<div class="delta">${sub}</div>` : ""}</div>`;
-  const budKpi = (typeof bud === "number" && bud)
-    ? kpi("予算達成率", budRate != null ? budRate + "%" : "―", `予算 ${man(bud)}円`, budRate != null ? (budRate >= 100 ? "up" : "down") : "")
-    : "";
+  // Steppy風カード：見出し・大きな数字・薄い予算/前年サブ・色付きの予算比ピル。
+  const card = (lbl, big, sub, pill, extra) => `<div class="kpi">
+    <div class="lbl">${lbl}</div>
+    <div class="big">${big}</div>
+    ${sub ? `<div class="ksub">${sub}</div>` : ""}
+    ${pill || ""}
+    ${extra ? `<div class="kextra">${extra}</div>` : ""}</div>`;
+  // 売上カード：予算があれば「予算◯円」＋予算比ピル、無ければ前年比ピル。前年/前月は補足行。
+  const budDelta = (budRate != null) ? `${sales - bud >= 0 ? "+" : "−"}${man(Math.abs(sales - bud))}円` : "";
+  const salesPill = (budRate != null) ? budgetPill(budRate, budDelta) : pctPill("前年", yoy);
+  const salesExtra = [yoy != null ? `前年 <span class="${yoy >= 0 ? "up" : "down"}">${signed(yoy)}%</span>` : "",
+    mom != null ? `前月 <span class="${mom >= 0 ? "up" : "down"}">${signed(mom)}%</span>` : ""].filter(Boolean).join("　");
   const kpis = `<div class="kpis">
-    ${kpi("売上" + (prov ? "（暫定）" : ""), sales != null ? man(sales) + "円" : "―",
-      yoy != null ? `前年 <span class="${yoy >= 0 ? "up" : "down"}">${signed(yoy)}%</span>` : "前年 ―")}
-    ${budKpi}
-    ${kpi("集客（客数）", cov != null ? nin(cov) : "―",
-      covYoy != null ? `前年 <span class="${covYoy >= 0 ? "up" : "down"}">${signed(covYoy)}%</span>` : "前年 ―")}
-    ${kpi("客単価", spp != null ? yen(spp) : "―", cov != null ? `${nin(cov)}で割った値` : "")}
-    ${kpi("前月比", mom != null ? signed(mom) + "%" : "―", pv != null ? `前月 ${man(pv)}円` : "前月 ―", mom != null ? (mom >= 0 ? "up" : "down") : "")}
+    ${card("売上" + (prov ? "（暫定）" : ""), sales != null ? man(sales) + "円" : "―",
+      (typeof bud === "number" && bud) ? `予算 ${man(bud)}円` : "", salesPill, salesExtra)}
+    ${card("集客（客数）", cov != null ? nin(cov) : "―", covY != null ? `前年 ${nin(covY)}` : "", pctPill("前年", covYoy))}
+    ${card("客単価", spp != null ? yen(spp) : "―", cov != null ? `客数 ${nin(cov)}で算出` : "", "")}
   </div>${crRow ? `<div class="mcr">${crRow}</div>` : ""}`;
 
   // 品目区分の構成比（区分を押すと、その場で下に商品が開く。モバイルでもページ移動なし）

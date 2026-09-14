@@ -882,12 +882,12 @@ test("storeAnnualChart：販促は年間チャート（帯）として見出し�
   assert.ok(/class="gbar[^"]*"[^>]*data-tip="[^"]*｜/.test(html), "帯に構造化ツールチップ(data-tip)");
 });
 
-test("renderStoreMonth：予算があれば月詳細に予算達成率KPIが出る", () => {
+test("renderStoreMonth：予算があれば売上カードに予算比ピル＋予算サブが出る（Steppy風）", () => {
   const withBud = { ...annualData, budget: { 1160: { "2025-08": 8000000 } } };
   const ctx = loadApp(withBud);
   const html = call(ctx, `renderStoreMonth("1160","2025-08")`);
-  assert.ok(html.includes("予算達成率"), "月詳細に予算達成率KPI");
-  assert.ok(/予算 [\d,]+/.test(html), "予算金額のサブ表示");
+  assert.ok(html.includes("kpill") && html.includes("予算比"), "予算比ピル");
+  assert.ok(/予算 [\d,]+万?円/.test(html), "予算金額のサブ表示");
 });
 
 test("renderStoreMonth：予算が無ければ予算KPIカードは出さない（代わりに入力ナビ）", () => {

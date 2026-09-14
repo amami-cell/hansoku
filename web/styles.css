@@ -154,13 +154,26 @@ section{margin-bottom:42px;}
 h2{font-family:var(--display);font-size:19px;font-weight:600;margin:0;letter-spacing:.03em;}
 .snote{font-size:12.5px;color:var(--ink-3);}
 
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:13px;}
-.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
-  padding:15px 17px;box-shadow:var(--shadow);}
-.kpi .lbl{font-size:12px;color:var(--ink-3);margin-bottom:6px;}
-.kpi .big{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1.15;}
-.kpi .unit{font-size:13px;font-weight:500;color:var(--ink-2);margin-left:2px;}
-.kpi .delta{font-size:12px;font-weight:500;margin-top:5px;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:5px;}
+/* KPIカード（Steppy参考）：中央寄せ・大きな数字・予算の薄いサブ・色付きの予算比ピル */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:16px 14px;box-shadow:var(--shadow);text-align:center;
+  display:flex;flex-direction:column;align-items:center;gap:4px;}
+.kpi .lbl{font-size:12.5px;color:var(--ink-2);font-weight:600;}
+.kpi .big{font-size:28px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1.1;color:var(--ink);}
+.kpi .big.up{color:var(--good-ink);} .kpi .big.down{color:var(--critical-ink);}
+.kpi .unit{font-size:13px;font-weight:600;color:var(--ink-2);margin-left:2px;}
+.kpi .ksub{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+.kpi .kextra{font-size:11.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;margin-top:2px;}
+.kpi .kextra .up{color:var(--good-ink);font-weight:600;} .kpi .kextra .down{color:var(--critical-ink);font-weight:600;}
+/* 予算比／前年比などのピル。↑緑=良い ↓赤=悪い ◆黄=ほぼ予算どおり */
+.kpill{display:inline-flex;align-items:center;gap:4px;margin-top:3px;font-size:12px;font-weight:700;
+  border-radius:999px;padding:4px 11px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.kpill .kpd{font-weight:600;font-size:11px;opacity:.85;}
+.kpill.up{color:var(--good-ink);background:var(--good-soft);}
+.kpill.down{color:var(--critical-ink);background:color-mix(in srgb,var(--critical-ink) 14%,var(--surface));}
+.kpill.flat{color:var(--warning-ink);background:var(--warn-soft);}
+.delta{font-size:12px;font-weight:500;margin-top:5px;font-variant-numeric:tabular-nums;}
 .delta.up{color:var(--good-ink);} .delta.down{color:var(--critical-ink);} .delta.flat{color:var(--ink-3);}
 
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
