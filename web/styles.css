@@ -917,8 +917,9 @@ tbody tr:last-child td{border-bottom:0;}
 .annualbar .ytabs{display:flex;flex-wrap:wrap;gap:4px;}
 /* チャート（帯・ガント）。狭い画面では横スクロールで月幅を確保する */
 .gantt{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-.grow{display:grid;grid-template-columns:48px 1fr;align-items:center;gap:8px;padding:3px 0;min-width:540px;}
-.glabel.gspace{cursor:default;}
+.grow{display:grid;grid-template-columns:84px 1fr;align-items:center;gap:8px;padding:3px 0;min-width:560px;}
+.glabel.gspace,.glabel.gcat{cursor:default;}
+.glabel.gcat .kdot{flex:0 0 auto;}
 .grow.ghead{border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:4px;position:sticky;top:0;background:var(--surface);}
 .glabel{font-size:12px;font-weight:600;color:var(--ink);text-align:left;background:none;border:none;cursor:pointer;
   display:flex;align-items:center;gap:6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:0;}

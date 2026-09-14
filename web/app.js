@@ -3469,9 +3469,12 @@ function storeAnnualChart(code, year) {
   const head = Array.from({ length: 12 }, (_, i) =>
     `<button class="gmh" data-smonth="${code}:${year}-${String(i + 1).padStart(2, "0")}">${i + 1}</button>`).join("");
 
-  // 各販促を1本の帯にする（名前は帯の中に入れる）。
-  const bars = camps.map(c => {
-    const k = kindOf(c.kind), st = campStatus(c);
+  // 販促を「対象区分」（パフェ/ケーキ/コラボ…）でまとめ、区分ごとに1レーン＝1行にする。
+  // 帯の色も区分色でそろえる。同じ区分で期間が被る販促があれば、その区分に2レーン目
+  // （例: パフェ2）を作る。
+  const catOf = c => c.bucket || campKindBucket(c.kind) || "その他";
+  const makeBar = c => {
+    const cat = catOf(c), col = catColor(cat), st = campStatus(c);
     const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
     const sM = s < ys ? 1 : +s.slice(5, 7);
     const eM = e > ye ? 12 : +e.slice(5, 7);
@@ -3486,27 +3489,37 @@ function storeAnnualChart(code, year) {
       const prevOcc = campPrevOccurrence(c);
       if (prevOcc) { const pb = campTargeted(prevOcc, code); if (pb && pb.cur) tip += `・前回${signed((ef.cur / pb.cur - 1) * 100)}%`; }
     } else if (ef.state) { tip += `｜${ef.state}`; }
-    const html = `<button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${k.color}"
+    const html = `<button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${col}"
       data-tip="${esc(tip)}">${mark ? `<span class="gvm ${tone}">${mark}</span>` : ""}<span class="gbt">${esc(c.title)}</span></button>`;
     return { sM, eM, html };
-  });
-  // レーン詰め：期間が重ならない販促は同じ行にまとめ、バラバラに分かれないようにする
-  // （帯は開始月順。空いている最初のレーンへ入れる＝行数を最小化）。
-  const lanes = [];
-  for (const b of bars) {
-    let lane = lanes.find(L => L.lastM < b.sM);
-    if (!lane) { lane = { lastM: 0, bars: [] }; lanes.push(lane); }
-    lane.bars.push(b.html); lane.lastM = b.eM;
+  };
+  // 区分ごとにまとめる。並びは販促件数が多い区分を上に（同数は開始が早い順）。
+  const byCat = new Map();
+  for (const c of camps) { const k = catOf(c); (byCat.get(k) || byCat.set(k, []).get(k)).push(c); }
+  const catOrder = [...byCat.keys()].sort((a, b) =>
+    (byCat.get(b).length - byCat.get(a).length) || (byCat.get(a)[0].start < byCat.get(b)[0].start ? -1 : 1));
+  const laneHtml = [];
+  for (const cat of catOrder) {
+    const list = byCat.get(cat).slice().sort((a, b) => a.start < b.start ? -1 : 1);
+    const sub = []; // この区分の中のサブレーン（被ったら増える）
+    for (const c of list) {
+      const b = makeBar(c);
+      let lane = sub.find(L => L.lastM < b.sM);
+      if (!lane) { lane = { lastM: 0, bars: [] }; sub.push(lane); }
+      lane.bars.push(b.html); lane.lastM = b.eM;
+    }
+    sub.forEach((L, idx) => {
+      const label = idx === 0 ? cat : `${cat}${idx + 1}`;
+      laneHtml.push(`<div class="grow"><div class="glabel gcat"><span class="kdot" style="background:${catColor(cat)}"></span>${esc(label)}</div><div class="gtrack">${L.bars.join("")}</div></div>`);
+    });
   }
-  const rows = lanes.map(L =>
-    `<div class="grow"><div class="glabel gspace"></div><div class="gtrack">${L.bars.join("")}</div></div>`).join("");
+  const rows = laneHtml.join("");
 
   // 凡例（その年に出ている種類）＋見方（誰が見ても操作が分かるように）
-  const kinds = [...new Set(camps.map(c => c.kind))];
-  const legend = kinds.length
-    ? `<div class="glegend">${kinds.map(kk => `<span class="glg"><i style="background:${kindOf(kk).color}"></i>${kindOf(kk).label}</span>`).join("")}
+  const legend = catOrder.length
+    ? `<div class="glegend">${catOrder.map(cc => `<span class="glg"><i style="background:${catColor(cc)}"></i>${esc(cc)}</span>`).join("")}
         <span class="glg"><i class="gvm good">◎</i>効果あり</span><span class="glg"><i class="gvm warn">△</i>要改善</span></div>
-       <div class="ghelp">帯＝販促の期間（左＝開始月・長さ＝実施期間）。<b>帯や販促名</b>を押すと販促の詳細、<b>上の月番号</b>を押すとその月の詳細（構成比・POP）へ。◎/△は対象区分の前年比で自動判定。</div>`
+       <div class="ghelp">区分ごとに帯をまとめています（色＝品目区分）。同じ区分で期間が重なる販促は「パフェ2」のように行を分けます。<b>帯や販促名</b>を押すと詳細、<b>上の月番号</b>を押すとその月の詳細（構成比・POP）へ。◎/△は対象区分の前年比で自動判定。</div>`
     : "";
 
   // 年サマリ（確定分の売上合計・前年比・予算達成の平均・販促◎/△）。チャートの頭に置いて、
@@ -3533,7 +3546,7 @@ function storeAnnualChart(code, year) {
   return `${yearSummary}${storeYearMatrix(code, year)}
     <div class="mmhd" style="margin-top:16px">販促 年間チャート<span class="mmhint">帯＝実施期間（横軸＝月）。◎効いた/△要改善。帯や販促名を押すと詳細、月番号を押すと月の詳細へ</span></div>
     <div class="panel gantt">
-    <div class="grow ghead"><div class="glabel gh">販促</div><div class="gmonths">${head}</div></div>
+    <div class="grow ghead"><div class="glabel gh">区分</div><div class="gmonths">${head}</div></div>
     ${camps.length ? rows : `<div class="empty">${year}年に走った販促はありません。</div>`}
   </div>${legend}`;
 }
