@@ -1011,6 +1011,17 @@ tbody tr:last-child td{border-bottom:0;}
 .fw-pv{color:var(--ink);font-weight:700;white-space:nowrap;}
 .fw-pq{color:var(--ink-2);font-weight:600;margin-left:6px;}
 .fw-pp{color:var(--ink-3);font-weight:600;margin-left:6px;}
+/* 販促に関わる部門・商品を色付け */
+.fw-list li.promo,.fw-list li.fw-catrow.promo{background:color-mix(in srgb, var(--accent) 12%, transparent);}
+.fw-pbadge{font-size:10px;font-weight:700;color:#fff;background:var(--accent);border-radius:4px;padding:1px 5px;margin-left:6px;}
+.fw-catrow{cursor:pointer;}
+.fw-catrow:hover{background:var(--accent-soft);}
+/* F/D比セル（押すと部門別小窓） */
+.ymxt td.fdcell{cursor:pointer;font-weight:600;}
+.ymxt td.fdcell:hover{background:var(--accent-soft);color:var(--accent);}
+.ymxt tr.ymxfd th{color:var(--ink-2);}
+/* 品目構成比セルで販促がある月は色付け */
+.ymxt td.ymxcompo-c.promo{background:color-mix(in srgb, var(--accent) 14%, transparent);color:var(--accent);font-weight:700;}
 .fwin.fw-flash{animation:fwflash .6s ease;}
 @keyframes fwflash{0%,100%{box-shadow:0 10px 34px rgba(0,0,0,.30);}50%{box-shadow:0 0 0 3px var(--accent);}}
 /* 携帯：下から出るシート＋タブ（複数はタブで切替・重ならない） */

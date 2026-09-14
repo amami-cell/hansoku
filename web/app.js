@@ -958,6 +958,13 @@ function render() {
       const parts = el.dataset.compocell.split(":");
       openCompo(parts[0], parts[1], decodeURIComponent(parts.slice(2).join(":")));
     }));
+  // F/D比セル → その月の「部門別」小窓（販促の部門・商品は色付き）。
+  app.querySelectorAll("[data-fdcell]").forEach(el =>
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const [c, m] = el.dataset.fdcell.split(":");
+      openMonth(c, m);
+    }));
   app.querySelectorAll("[data-scat]").forEach(el =>
     el.addEventListener("click", e => {
       e.stopPropagation();
@@ -2036,105 +2043,117 @@ function fwinDrag(win, handle) {
   handle.addEventListener("mousedown", down);
   handle.addEventListener("touchstart", down, { passive: false });
 }
-// 中身（その区分×月の商品内訳）を組み立てる。小窓（PC）と下シート（携帯）で共用。
-function compoContent(code, m, cat) {
-  const prods = prodsInCat(code, m, cat).slice().sort((a, b) => b.sales - a.sales);
-  const tot = prods.reduce((a, p) => a + (p.sales || 0), 0);
-  const list = prods.length
-    ? prods.map(p => {
-        const pct = tot ? Math.round((p.sales || 0) / tot * 100) : 0;
-        const qty = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
-        return `<li><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`;
-      }).join("")
-    : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
-  return { tot, n: prods.length, list };
-}
+// ── 商品内訳／部門別の小パネル（PC=浮く小窓・複数/自由リサイズ／携帯=下シート＋タブ）──
+// kind:"cat"=区分の商品内訳（点数・構成比）／"month"=その月の部門別一覧（区分ごと）。
+// 販促に関わる区分・商品は色付け（promo クラス）。desc={kind,code,m,cat}
 const isMobile = () => !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches);
-// クリックの出し分け：PC=浮く小窓（複数・自由リサイズ）／携帯=下シート＋タブ。
-function openCompo(code, m, cat) {
-  if (isMobile()) openCompoSheet(code, m, cat); else openCompoWindow(code, m, cat);
+const panelKey = d => d.kind === "month" ? `M:${d.code}:${d.m}` : `${d.code}:${d.m}:${d.cat}`;
+function panelContent(d) {
+  const mo = +d.m.slice(5, 7);
+  const hits = promoHitsForMonth(d.code, d.m);
+  if (d.kind === "month") {
+    const cats = catsAtM(d.code, d.m).slice().sort((a, b) => (b.sales - a.sales) || ((b.count || 0) - (a.count || 0)));
+    const tot = cats.reduce((a, c) => a + (c.sales || 0), 0);
+    const list = cats.length ? cats.map(c => {
+      const pct = tot ? Math.round((c.sales || 0) / tot * 100) : 0;
+      const on = hits.cats.has(c.name) ? " promo" : "";
+      const q = (c.count != null) ? ` <span class="fw-pq">${c.count}品</span>` : "";
+      return `<li class="fw-catrow${on}" data-compocell="${d.code}:${d.m}:${encodeURIComponent(c.name)}"><span class="fw-pn"><span class="ymxcdot" style="background:${catColor(c.name)}"></span>${esc(c.name)}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv">${man(c.sales)}${q}<span class="fw-pp">${pct}%</span></span></li>`;
+    }).join("") : `<li class="muted">この月のデータがありません</li>`;
+    return { key: panelKey(d), color: "var(--accent)", title: `${mo}月 部門別`, tab: `${mo}月 部門別`, sub: `${man(tot)}・${cats.length}区分`, list };
+  }
+  const prods = prodsInCat(d.code, d.m, d.cat).slice().sort((a, b) => (b.sales - a.sales) || ((b.qty || 0) - (a.qty || 0)));
+  const tot = prods.reduce((a, p) => a + (p.sales || 0), 0);
+  const catOn = hits.cats.has(d.cat);
+  const list = prods.length ? prods.map(p => {
+    const pct = tot ? Math.round((p.sales || 0) / tot * 100) : 0;
+    const qty = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
+    const on = (catOn || hits.items.has(p.name)) ? " promo" : "";
+    return `<li class="${on ? "promo" : ""}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`;
+  }).join("") : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
+  return { key: panelKey(d), color: catColor(d.cat), title: `${d.cat}｜${mo}月`, tab: `${d.cat} ${mo}月`, sub: `${man(tot)}・${prods.length}品`, list };
+}
+// クリックの出し分け：PC=浮く小窓／携帯=下シート＋タブ。
+function openPanel(desc) { if (isMobile()) openSheet(desc); else openWindow(desc); }
+function openCompo(code, m, cat) { openPanel({ kind: "cat", code, m, cat }); }
+function openMonth(code, m) { openPanel({ kind: "month", code, m }); }
+// パネル内の区分行クリック → その区分の商品内訳を開く（部門別 → 商品ドリル）。
+function wirePanelRows(root) {
+  root.querySelectorAll("[data-compocell]").forEach(el => el.addEventListener("click", e => {
+    e.stopPropagation();
+    const p = el.dataset.compocell.split(":");
+    openCompo(p[0], p[1], decodeURIComponent(p.slice(2).join(":")));
+  }));
 }
 
 // ── PC：浮く小ウインドウ（複数・ドラッグ移動・角で自由リサイズ・⤢で既定サイズ）──────
-function openCompoWindow(code, m, cat) {
+function openWindow(desc) {
   const layer = fwinLayer();
-  const key = `${code}:${m}:${cat}`;
-  const exist = [...layer.children].find(w => w.dataset.fkey === key);
-  if (exist) {   // 同じセルは重複させず、前面に出して知らせる
-    fwinFront(exist); exist.classList.remove("fw-flash"); void exist.offsetWidth; exist.classList.add("fw-flash");
-    return;
-  }
-  const c = compoContent(code, m, cat);
-  const mo = +m.slice(5, 7);
+  const c = panelContent(desc);
+  const exist = [...layer.children].find(w => w.dataset.fkey === c.key);
+  if (exist) { fwinFront(exist); exist.classList.remove("fw-flash"); void exist.offsetWidth; exist.classList.add("fw-flash"); return; }
   const win = document.createElement("div");
-  win.className = "fwin";
-  win.dataset.fkey = key;
+  win.className = "fwin"; win.dataset.fkey = c.key;
   const off = layer.children.length * 20;
-  win.style.left = (56 + off) + "px";
-  win.style.top = (84 + off) + "px";
-  win.innerHTML = `<div class="fw-head"><span class="fw-dot" style="background:${catColor(cat)}"></span>` +
-    `<span class="fw-ti">${esc(cat)}｜${mo}月</span><span class="fw-sub">${man(c.tot)}・${c.n}品</span>` +
+  win.style.left = (56 + off) + "px"; win.style.top = (84 + off) + "px";
+  win.innerHTML = `<div class="fw-head"><span class="fw-dot" style="background:${c.color}"></span>` +
+    `<span class="fw-ti">${esc(c.title)}</span><span class="fw-sub">${c.sub}</span>` +
     `<button class="fw-sz" aria-label="大きさを切替">⤢</button>` +
     `<button class="fw-x" aria-label="閉じる">×</button></div>` +
     `<ul class="fw-list">${c.list}</ul>`;
-  layer.appendChild(win);
-  fwinFront(win);
+  layer.appendChild(win); fwinFront(win);
   win.querySelector(".fw-x").addEventListener("click", () => win.remove());
-  // ⤢ は既定サイズの早送り（標準→大→特大）。角ドラッグの手動リサイズは一旦リセットする。
   const SIZES = ["", "fw-lg", "fw-xl"];
   win.querySelector(".fw-sz").addEventListener("click", e => {
     e.stopPropagation();
     const cur = SIZES.findIndex(s => s && win.classList.contains(s));
     win.style.width = ""; win.style.height = "";
     win.classList.remove("fw-lg", "fw-xl");
-    const next = SIZES[(cur + 1 + 1) % SIZES.length];
-    if (next) win.classList.add(next);
+    const next = SIZES[(cur + 1 + 1) % SIZES.length]; if (next) win.classList.add(next);
     fwinFront(win);
   });
   win.addEventListener("mousedown", () => fwinFront(win));
   fwinDrag(win, win.querySelector(".fw-head"));
+  wirePanelRows(win);
 }
 
-// ── 携帯：下から出るシート＋タブ（複数セルはタブで切替。重ならない）───────────────
-let SHEET_TABS = [];   // {key, code, m, cat}
+// ── 携帯：下から出るシート＋タブ（複数はタブで切替。重ならない）───────────────
+let SHEET_TABS = [];   // desc[]
 let SHEET_ACTIVE = "";
-function renderCompoSheet() {
+function renderSheet() {
   let sheet = document.getElementById("fsheet");
   if (!SHEET_TABS.length) { if (sheet) sheet.remove(); return; }
   if (!sheet) { sheet = document.createElement("div"); sheet.id = "fsheet"; document.body.appendChild(sheet); }
-  if (!SHEET_TABS.find(t => t.key === SHEET_ACTIVE)) SHEET_ACTIVE = SHEET_TABS[SHEET_TABS.length - 1].key;
-  const act = SHEET_TABS.find(t => t.key === SHEET_ACTIVE);
-  const tabs = SHEET_TABS.map(t => {
-    const mo = +t.m.slice(5, 7);
-    return `<button class="fs-tab${t.key === SHEET_ACTIVE ? " on" : ""}" data-fstab="${esc(t.key)}">` +
-      `<span class="fs-dot" style="background:${catColor(t.cat)}"></span>${esc(t.cat)} ${mo}月` +
-      `<span class="fs-tx" data-fsclose="${esc(t.key)}">×</span></button>`;
+  if (!SHEET_TABS.find(d => panelKey(d) === SHEET_ACTIVE)) SHEET_ACTIVE = panelKey(SHEET_TABS[SHEET_TABS.length - 1]);
+  const tabs = SHEET_TABS.map(d => {
+    const c = panelContent(d);
+    const col = d.kind === "month" ? "var(--accent)" : catColor(d.cat);
+    return `<button class="fs-tab${c.key === SHEET_ACTIVE ? " on" : ""}" data-fstab="${esc(c.key)}">` +
+      `<span class="fs-dot" style="background:${col}"></span>${esc(c.tab)}` +
+      `<span class="fs-tx" data-fsclose="${esc(c.key)}">×</span></button>`;
   }).join("");
-  const c = compoContent(act.code, act.m, act.cat);
-  const mo = +act.m.slice(5, 7);
+  const act = SHEET_TABS.find(d => panelKey(d) === SHEET_ACTIVE);
+  const c = panelContent(act);
   sheet.innerHTML = `<div class="fs-grab" data-fsdismiss="1"></div>` +
     `<div class="fs-tabs">${tabs}</div>` +
-    `<div class="fs-sub"><span class="fw-dot" style="background:${catColor(act.cat)}"></span><b>${esc(act.cat)}｜${mo}月</b>　${man(c.tot)}・${c.n}品` +
+    `<div class="fs-sub"><span class="fw-dot" style="background:${c.color}"></span><b>${esc(c.title)}</b>　${c.sub}` +
     `<button class="fs-close" data-fsdismiss="1">閉じる</button></div>` +
     `<ul class="fw-list fs-list">${c.list}</ul>`;
   sheet.querySelectorAll("[data-fstab]").forEach(el => el.addEventListener("click", e => {
     if (e.target.closest("[data-fsclose]")) return;
-    SHEET_ACTIVE = el.dataset.fstab; renderCompoSheet();
+    SHEET_ACTIVE = el.dataset.fstab; renderSheet();
   }));
   sheet.querySelectorAll("[data-fsclose]").forEach(el => el.addEventListener("click", e => {
     e.stopPropagation();
-    SHEET_TABS = SHEET_TABS.filter(t => t.key !== el.dataset.fsclose);
-    renderCompoSheet();
+    SHEET_TABS = SHEET_TABS.filter(d => panelKey(d) !== el.dataset.fsclose); renderSheet();
   }));
-  sheet.querySelectorAll("[data-fsdismiss]").forEach(el => el.addEventListener("click", () => {
-    SHEET_TABS = []; renderCompoSheet();
-  }));
+  sheet.querySelectorAll("[data-fsdismiss]").forEach(el => el.addEventListener("click", () => { SHEET_TABS = []; renderSheet(); }));
+  wirePanelRows(sheet);
 }
-function openCompoSheet(code, m, cat) {
-  const key = `${code}:${m}:${cat}`;
-  if (!SHEET_TABS.find(t => t.key === key)) SHEET_TABS.push({ key, code, m, cat });
-  SHEET_ACTIVE = key;
-  renderCompoSheet();
+function openSheet(desc) {
+  const k = panelKey(desc);
+  if (!SHEET_TABS.find(d => panelKey(d) === k)) SHEET_TABS.push(desc);
+  SHEET_ACTIVE = k; renderSheet();
 }
 // 品目区分の固定色（構成比バーと区分行を同色でつなぐ）
 const CAT_COLORS = {
@@ -3350,6 +3369,17 @@ function campsInMonth(code, m) {
       && c.start.slice(0, 7) <= m && campEndM(c) >= m)
     .sort((a, b) => a.start < b.start ? -1 : 1);
 }
+// 販促が対象にしている区分（bucket）と商品（items）を、その月ぶんだけ集める。
+// 小パネルで「販促に関わる部門・商品」を色付けするのに使う。
+const campCat = c => c.bucket || campKindBucket(c.kind) || "その他";
+function promoHitsForMonth(code, m) {
+  const cats = new Set(), items = new Set();
+  for (const c of campsInMonth(code, m)) {
+    cats.add(campCat(c));
+    for (const it of (c.items || [])) if (it) items.add(it);
+  }
+  return { cats, items };
+}
 // 同じ店・同じ区分（bucket）の“前回の回”。前回比（直近比較）に使う。
 function campPrevOccurrence(c) {
   const mine = new Set(c.stores || []);
@@ -3766,6 +3796,8 @@ function storeYearMatrix(code, year) {
   for (const r of conf) for (const c of r.cats) yearAgg.set(c.name, (yearAgg.get(c.name) || 0) + c.sales);
   const yTot = [...yearAgg.values()].reduce((a, b) => a + b, 0);
   const catNames = [...yearAgg.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
+  // その月に販促がある区分（色付けに使う）。
+  const monthHits = rows.map(r => promoHitsForMonth(code, r.m));
   const compoSec = catNames.length
     ? `<tr class="ymxsec"><th>品目構成比（金額）</th>${months.map((m, i) => `<td class="${cellCls(i)}"></td>`).join("")}<td class="ymxsum"></td></tr>`
     : "";
@@ -3775,15 +3807,30 @@ function storeYearMatrix(code, year) {
       const c = r.cats.find(x => x.name === n);
       if (!(r.has && c && c.sales)) return `<td class="${cellCls(r.i)} ymxcompo-c">―</td>`;
       const pct = tot ? Math.round(c.sales / tot * 100) : 0;
+      const promo = monthHits[r.i].cats.has(n);   // その月に販促がある区分 → 色付け
       // カーソルを合わせると 構成比(%)・出品数・金額。押すと商品内訳の小窓が開く。
-      const tip = `${n}｜構成比 ${pct}%｜${c.count || 0}品｜${man(c.sales)}円（押すと商品内訳）`;
-      return `<td class="${cellCls(r.i)} ymxcompo-c ymxcompo-click" data-compocell="${code}:${r.m}:${encodeURIComponent(n)}" data-tip="${esc(tip)}">${man(c.sales)}</td>`;
+      const tip = `${n}｜構成比 ${pct}%｜${c.count || 0}品｜${man(c.sales)}円${promo ? "｜販促あり" : ""}（押すと商品内訳）`;
+      return `<td class="${cellCls(r.i)} ymxcompo-c ymxcompo-click${promo ? " promo" : ""}" data-compocell="${code}:${r.m}:${encodeURIComponent(n)}" data-tip="${esc(tip)}">${man(c.sales)}</td>`;
     }).join("");
     const yAmt = yearAgg.get(n) || 0;
     const yPct = yTot ? Math.round(yAmt / yTot * 100) : null;
     const yTip = yPct != null ? `${n}｜年間シェア ${yPct}%｜${man(yAmt)}円` : "";
     return `<tr class="ymxcompo-row"><th><span class="ymxcdot" style="background:${catColor(n)}"></span>${esc(n)}</th>${cells}<td class="ymxsum"${yTip ? ` data-tip="${esc(yTip)}"` : ""}>${yAmt ? man(yAmt) : "―"}</td></tr>`;
   }).join("");
+
+  // フード/ドリンク比（店長会シート・税抜）。押すとその月の「部門別」小窓が開く。
+  const fdCell = r => {
+    const mm = (DATA.monthly[code] || {})[r.m] || {};
+    const f = mm.food_sales, d = mm.drink_sales;
+    if (!(typeof f === "number" && typeof d === "number" && (f + d) > 0)) return `<td class="${cellCls(r.i)}">―</td>`;
+    const fp = Math.round(f / (f + d) * 100);
+    const tip = `${+r.m.slice(5, 7)}月 フード${fp}% / ドリンク${100 - fp}%（押すと部門別）`;
+    return `<td class="${cellCls(r.i)} fdcell" data-fdcell="${code}:${r.m}" data-tip="${esc(tip)}">${fp}/${100 - fp}</td>`;
+  };
+  let sumF = 0, sumD = 0;
+  for (const r of rows) { const mm = (DATA.monthly[code] || {})[r.m] || {}; if (typeof mm.food_sales === "number") sumF += mm.food_sales; if (typeof mm.drink_sales === "number") sumD += mm.drink_sales; }
+  const fdYsum = (sumF + sumD) > 0 ? `${Math.round(sumF / (sumF + sumD) * 100)}/${100 - Math.round(sumF / (sumF + sumD) * 100)}` : "―";
+  const fdRow = `<tr class="ymxfd"><th>F/D比</th>${rows.map(fdCell).join("")}<td class="ymxsum">${fdYsum}</td></tr>`;
 
   // 予算未入力の月（売上はあるが予算が無い確定月）を明示。FW入力を促す。
   const budMissing = rows.filter(r => r.has && r.m < CURRENT_MONTH && !(typeof r.bud === "number" && r.bud));
@@ -3794,7 +3841,7 @@ function storeYearMatrix(code, year) {
   return `<div class="ymx">
     <div class="mmhd">${year}年 一覧（縦＝指標／横＝月）<span class="mmhint">金額はすべて税抜。月(列見出し)を押すとその月の詳細へ。品目構成比の金額を押すと商品内訳の小窓が開く（複数可）。緑=前年超/赤=前年割れ・薄い列＝暫定/未取込・右端＝年計</span></div>
     <div class="ymxwrap"><table class="ymxt"><thead><tr>${th}</tr></thead>
-      <tbody>${rowSales}${rowYoY}${rowBud}${rowCov}${rowKt}${compoSec}${compoRows}</tbody></table></div>
+      <tbody>${rowSales}${rowYoY}${rowBud}${rowCov}${rowKt}${fdRow}${compoSec}${compoRows}</tbody></table></div>
     ${budHint}</div>`;
 }
 
