@@ -2335,7 +2335,18 @@ def ingest_abc_store(
             try:
                 if _abc_click_radio(session.page, "メニュー"):
                     _abc_search_and_rows(session)
-                    menu_rows = _extract_product_grid_grouped(session)
+                    # メニューは全商品より行数が多く、初回抽出時にまだ描き切れていない
+                    # ことがある（1160で 60/98 しか採れない事象）。行数が伸び止まるまで
+                    # 数回粘り、最大件数の抽出を採る。
+                    prev = -1
+                    for _ in range(8):
+                        cur = _extract_product_grid_grouped(session)
+                        if len(cur) >= len(menu_rows):
+                            menu_rows = cur
+                        if len(cur) == prev:
+                            break
+                        prev = len(cur)
+                        time.sleep(1.5)
             except Exception as e:  # noqa: BLE001
                 print(f"[ABC店] {code} {month} メニュー内訳の取得に失敗（無害）: {e}")
                 menu_rows = []
