@@ -878,6 +878,8 @@ test("storeAnnualChart：販促は年間チャート（帯）として見出し�
   assert.ok(html.includes("販促 年間チャート"), "販促の年間チャート見出し");
   assert.ok(html.includes('class="panel gantt"'), "帯（ガント）で表示");
   assert.ok(html.includes('data-camp="snow"'), "販促の帯");
+  // 帯はネイティブ title ではなく、暗色ツールチップ用の data-tip（｜区切り）を持つ
+  assert.ok(/class="gbar[^"]*"[^>]*data-tip="[^"]*｜/.test(html), "帯に構造化ツールチップ(data-tip)");
 });
 
 test("renderStoreMonth：予算があれば月詳細に予算達成率KPIが出る", () => {

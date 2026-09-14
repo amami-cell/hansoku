@@ -1049,6 +1049,7 @@ function render() {
       t.scrollIntoView({ behavior: "smooth", block: "start" });
     }));
   wireEmphasis(app);
+  wireTips(app);
   markNav();
 }
 function go(v, scroll) {
@@ -3217,7 +3218,7 @@ function storeEngines(code) {
       const cls = yoy == null ? "" : (yoy >= 0 ? " up" : " down");
       const h = Math.max(6, Math.round(s.sales / maxS * 100));
       return `<button class="ebcell" data-scat="${code}:${s.m}:${encodeURIComponent(cat)}"
-        title="${s.m} ${cat} ${man(s.sales)}円${yoy != null ? `・前年${signed(yoy)}%` : ""}">
+        data-tip="${+s.m.slice(5, 7)}月 ${esc(cat)}｜売上 ${man(s.sales)}円${yoy != null ? `｜前年比 ${signed(yoy)}%` : ""}">
         <span class="ebbar${cls}" style="height:${h}%"></span><span class="eblab">${+s.m.slice(5, 7)}</span></button>`;
     }).join("");
     // 回ごと（この店・この区分の販促）を新しい順に、昨対・前回比つき
@@ -3453,7 +3454,7 @@ function storeAnnualChart(code, year) {
       <button class="glabel" data-camp="${c.id}"><span class="kdot" style="background:${k.color}"></span>${mark ? `<span class="gvm ${tone}">${mark}</span>` : ""}${esc(c.title)}</button>
       <div class="gtrack">
         <button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${k.color}"
-          title="${esc(tip)}"><span class="gbt">${esc(c.title)}</span></button>
+          data-tip="${esc(tip)}"><span class="gbt">${esc(c.title)}</span></button>
       </div></div>`;
   }).join("");
 
@@ -3596,7 +3597,7 @@ function storeAnnualCalendar(code, year) {
       // 部門別売上比を一目で：100%積み上げバー（色は区分ごと固定）
       const compBar = cats.length
         ? `<div class="mcompbar">${cats.map(c =>
-            `<span class="mseg" style="width:${(c.share * 100).toFixed(2)}%;background:${catColor(c.name)}" title="${esc(c.name)} ${Math.round(c.share * 100)}%・${yen(c.sales)}"></span>`).join("")}</div>` : "";
+            `<span class="mseg" style="width:${(c.share * 100).toFixed(2)}%;background:${catColor(c.name)}" data-tip="${esc(c.name)}｜構成比 ${Math.round(c.share * 100)}%｜${yen(c.sales)}"></span>`).join("")}</div>` : "";
       const catList = cats.length ? `<ul class="mcats">${cats.map(c => {
         const pctv = Math.round(c.share * 100);
         const co = !!ANNUAL_OPEN[`${code}:${m}:${c.name}`];
@@ -3700,7 +3701,7 @@ function renderStoreMonth(code, m) {
   const cats = catsAtM(code, m);
   const catTotal = cats.reduce((a, c) => a + c.sales, 0) || 1;
   const catBar = cats.slice().sort((a, b) => b.sales - a.sales).map(c =>
-    `<span class="mseg" style="width:${(c.sales / catTotal * 100).toFixed(2)}%;background:${catColor(c.name)}" title="${esc(c.name)} ${Math.round(c.sales / catTotal * 100)}%・${yen(c.sales)}"></span>`).join("");
+    `<span class="mseg" style="width:${(c.sales / catTotal * 100).toFixed(2)}%;background:${catColor(c.name)}" data-tip="${esc(c.name)}｜構成比 ${Math.round(c.sales / catTotal * 100)}%｜${yen(c.sales)}"></span>`).join("");
   const catBlock = cats.length ? `<section class="block">
     <div class="bhead"><h2>品目区分の構成比</h2><span class="bnote">区分を押すと下に商品が開く　合計 ${yen(catTotal)}</span></div>
     <div class="panel"><div class="mcompbar lg">${catBar}</div><ul class="dlist">${cats.map(c => {
@@ -4900,6 +4901,69 @@ function legend(codes, region, focusCode) {
     return `<span class="lgi${isFocus ? " own" : ""}" data-si="${i}"><i style="background:${col}"></i>${storeName(c)}${isFocus ? "（自店）" : ""}</span>`;
   }).join("");
 }
+
+// チャートのツールチップ（PCはホバー追従／スマホはタップで表示）。data-tip の文字を
+// 「｜」で区切り、先頭を見出し・以降を各行にした暗色の小窓で出す。参考: Steppy のUI。
+// スマホでは「1度目タップ＝ツールチップ表示（遷移は抑止）／同じ所を2度目タップ＝遷移」。
+let TIP_POINTER = "mouse";
+let TIP_TAP_EL = null;
+function tipEl() {
+  let t = document.getElementById("charttip");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "charttip"; t.className = "charttip"; t.hidden = true;
+    document.body.appendChild(t);
+  }
+  return t;
+}
+function tipShow(el, x, y) {
+  const raw = el.getAttribute("data-tip"); if (!raw) return;
+  const parts = raw.split("｜").filter(s => s !== "");
+  if (!parts.length) return;
+  const t = tipEl();
+  t.innerHTML = `<div class="ct-h">${esc(parts[0])}</div>` +
+    parts.slice(1).map(p => `<div class="ct-r">${esc(p)}</div>`).join("");
+  t.hidden = false;
+  tipMove(x, y);
+}
+function tipMove(x, y) {
+  const t = document.getElementById("charttip"); if (!t || t.hidden) return;
+  const w = t.offsetWidth, h = t.offsetHeight, pad = 10;
+  let left = x + 14, top = y - h - 14;
+  if (left + w + pad > window.innerWidth) left = x - w - 14;
+  if (left < pad) left = pad;
+  if (top < pad) top = y + 20;
+  if (top + h + pad > window.innerHeight) top = Math.max(pad, window.innerHeight - h - pad);
+  t.style.left = left + "px"; t.style.top = top + "px";
+}
+function tipHide() { const t = document.getElementById("charttip"); if (t) t.hidden = true; TIP_TAP_EL = null; }
+function wireTips(app) {
+  // ポインタ種別を覚える（click では pointerType が取れないため）。
+  app.addEventListener("pointerdown", e => { TIP_POINTER = e.pointerType || "mouse"; }, true);
+  // PC：ホバーで表示・追従
+  app.addEventListener("pointermove", e => {
+    if (TIP_POINTER !== "mouse") return;
+    const el = e.target.closest && e.target.closest("[data-tip]");
+    if (el) { tipShow(el, e.clientX, e.clientY); } else { tipHide(); }
+  });
+  app.addEventListener("pointerleave", () => { if (TIP_POINTER === "mouse") tipHide(); });
+  // スマホ：1度目タップで表示（遷移を止める）、同じ所の2度目で遷移させる
+  app.addEventListener("click", e => {
+    if (TIP_POINTER === "mouse") return;   // マウスのクリックは通常どおり遷移
+    const el = e.target.closest && e.target.closest("[data-tip]");
+    if (!el) { tipHide(); return; }
+    if (TIP_TAP_EL === el) { tipHide(); return; }  // 2度目：ツールチップを消して遷移させる
+    e.preventDefault(); e.stopPropagation();       // 1度目：遷移を止めてツールチップだけ
+    TIP_TAP_EL = el;
+    const r = el.getBoundingClientRect();
+    tipShow(el, r.left + r.width / 2, r.top + Math.min(10, r.height / 2));
+  }, true);   // capture＝要素自身の遷移ハンドラより先に走らせて止める
+}
+// スクロールや別の場所をタップしたらツールチップを消す。
+document.addEventListener("scroll", () => tipHide(), true);
+document.addEventListener("pointerdown", e => {
+  if (TIP_TAP_EL && (!e.target.closest || !e.target.closest("[data-tip]"))) tipHide();
+}, true);
 
 function wireEmphasis(root) {
   const svg = root.querySelector(".mlsvg");

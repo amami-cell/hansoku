@@ -196,6 +196,13 @@ tbody tr:last-child td{border-bottom:0;}
 .tip.on{opacity:1;}
 .tip .tname{font-weight:700;margin-bottom:3px;}
 .tip .trow{color:var(--ink-2);display:flex;justify-content:space-between;gap:14px;}
+/* チャートの暗色ツールチップ（PCホバー／スマホタップ共通・Steppy参考） */
+.charttip{position:fixed;left:0;top:0;pointer-events:none;z-index:70;
+  background:#20242e;color:#fff;border-radius:9px;padding:8px 12px;font-size:12.5px;line-height:1.5;
+  box-shadow:0 6px 22px rgba(0,0,0,.28);max-width:70vw;font-variant-numeric:tabular-nums;
+  border:1px solid rgba(255,255,255,.08);}
+.charttip .ct-h{font-weight:800;font-size:13px;margin-bottom:2px;}
+.charttip .ct-r{color:#d5d9e2;white-space:nowrap;}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
 @media (max-width:620px){.wrap{padding:18px 13px 56px;}.top{align-items:flex-start;}.gen{margin-left:0;width:100%;}}
