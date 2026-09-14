@@ -3590,17 +3590,22 @@ function storeYearMatrix(code, year) {
   const yTot = [...yearAgg.values()].reduce((a, b) => a + b, 0);
   const catNames = [...yearAgg.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
   const compoSec = catNames.length
-    ? `<tr class="ymxsec"><th>品目構成比</th>${months.map((m, i) => `<td class="${cellCls(i)}"></td>`).join("")}<td class="ymxsum"></td></tr>`
+    ? `<tr class="ymxsec"><th>品目構成比（金額）</th>${months.map((m, i) => `<td class="${cellCls(i)}"></td>`).join("")}<td class="ymxsum"></td></tr>`
     : "";
   const compoRows = catNames.map(n => {
     const cells = rows.map(r => {
       const tot = r.cats.reduce((a, x) => a + (x.sales || 0), 0);
       const c = r.cats.find(x => x.name === n);
-      const pct = (r.has && c && tot) ? Math.round((c.sales || 0) / tot * 100) : null;
-      return numCell(r.i, pct != null ? pct + "%" : "―", "ymxcompo-c");
+      if (!(r.has && c && c.sales)) return `<td class="${cellCls(r.i)} ymxcompo-c">―</td>`;
+      const pct = tot ? Math.round(c.sales / tot * 100) : 0;
+      // カーソルを合わせると 構成比(%)・出品数・金額 が出る。
+      const tip = `${n}｜構成比 ${pct}%｜${c.count || 0}品｜${man(c.sales)}円`;
+      return `<td class="${cellCls(r.i)} ymxcompo-c" data-tip="${esc(tip)}">${man(c.sales)}</td>`;
     }).join("");
-    const yPct = yTot ? Math.round((yearAgg.get(n) || 0) / yTot * 100) : null;
-    return `<tr class="ymxcompo-row"><th><span class="ymxcdot" style="background:${catColor(n)}"></span>${esc(n)}</th>${cells}<td class="ymxsum">${yPct != null ? yPct + "%" : "―"}</td></tr>`;
+    const yAmt = yearAgg.get(n) || 0;
+    const yPct = yTot ? Math.round(yAmt / yTot * 100) : null;
+    const yTip = yPct != null ? `${n}｜年間シェア ${yPct}%｜${man(yAmt)}円` : "";
+    return `<tr class="ymxcompo-row"><th><span class="ymxcdot" style="background:${catColor(n)}"></span>${esc(n)}</th>${cells}<td class="ymxsum"${yTip ? ` data-tip="${esc(yTip)}"` : ""}>${yAmt ? man(yAmt) : "―"}</td></tr>`;
   }).join("");
 
   // 予算未入力の月（売上はあるが予算が無い確定月）を明示。FW入力を促す。
@@ -3653,7 +3658,7 @@ function storeAnnualCalendar(code, year) {
       // 部門別売上比を一目で：100%積み上げバー（色は区分ごと固定）
       const compBar = cats.length
         ? `<div class="mcompbar">${cats.map(c =>
-            `<span class="mseg" style="width:${(c.share * 100).toFixed(2)}%;background:${catColor(c.name)}" data-tip="${esc(c.name)}｜構成比 ${Math.round(c.share * 100)}%｜${yen(c.sales)}"></span>`).join("")}</div>` : "";
+            `<span class="mseg" style="width:${(c.share * 100).toFixed(2)}%;background:${catColor(c.name)}" data-tip="${esc(c.name)}｜構成比 ${Math.round(c.share * 100)}%｜${c.count || 0}品｜${yen(c.sales)}"></span>`).join("")}</div>` : "";
       const catList = cats.length ? `<ul class="mcats">${cats.map(c => {
         const pctv = Math.round(c.share * 100);
         const co = !!ANNUAL_OPEN[`${code}:${m}:${c.name}`];
@@ -3779,7 +3784,7 @@ function renderStoreMonth(code, m) {
   const cats = catsAtM(code, m);
   const catTotal = cats.reduce((a, c) => a + c.sales, 0) || 1;
   const catBar = cats.slice().sort((a, b) => b.sales - a.sales).map(c =>
-    `<span class="mseg" style="width:${(c.sales / catTotal * 100).toFixed(2)}%;background:${catColor(c.name)}" data-tip="${esc(c.name)}｜構成比 ${Math.round(c.sales / catTotal * 100)}%｜${yen(c.sales)}"></span>`).join("");
+    `<span class="mseg" style="width:${(c.sales / catTotal * 100).toFixed(2)}%;background:${catColor(c.name)}" data-tip="${esc(c.name)}｜構成比 ${Math.round(c.sales / catTotal * 100)}%｜${c.count || 0}品｜${yen(c.sales)}"></span>`).join("");
   const catBlock = cats.length ? `<section class="block">
     <div class="bhead"><h2>品目区分の構成比</h2><span class="bnote">区分を押すと下に商品が開く　合計 ${yen(catTotal)}</span></div>
     <div class="panel"><div class="mcompbar lg">${catBar}</div><ul class="dlist">${cats.map(c => {
