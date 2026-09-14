@@ -5259,6 +5259,9 @@ function wireTips(app) {
     if (TIP_POINTER === "mouse") return;   // マウスのクリックは通常どおり遷移
     const el = e.target.closest && e.target.closest("[data-tip]");
     if (!el) { tipHide(); return; }
+    // 小窓/シートを開くセル（構成比の金額・F/D比）は、タップ1回で直接開く。
+    // ツールチップの「2度タップ」を挟まない（携帯で開かない不具合の対策）。
+    if (e.target.closest("[data-compocell],[data-fdcell]")) { tipHide(); return; }
     if (TIP_TAP_EL === el) { tipHide(); return; }  // 2度目：ツールチップを消して遷移させる
     e.preventDefault(); e.stopPropagation();       // 1度目：遷移を止めてツールチップだけ
     TIP_TAP_EL = el;
