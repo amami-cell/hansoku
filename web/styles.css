@@ -1009,6 +1009,7 @@ tbody tr:last-child td{border-bottom:0;}
 .fw-pn{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .fw-rk{color:var(--ink-3);font-size:10px;}
 .fw-pv{color:var(--ink);font-weight:700;white-space:nowrap;}
+.fw-pq{color:var(--ink-2);font-weight:600;margin-left:6px;}
 .fw-pp{color:var(--ink-3);font-weight:600;margin-left:6px;}
 .fwin.fw-flash{animation:fwflash .6s ease;}
 @keyframes fwflash{0%,100%{box-shadow:0 10px 34px rgba(0,0,0,.30);}50%{box-shadow:0 0 0 3px var(--accent);}}

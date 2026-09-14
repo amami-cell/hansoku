@@ -2050,7 +2050,8 @@ function openCompoWindow(code, m, cat) {
   const list = prods.length
     ? prods.map(p => {
         const pct = tot ? Math.round((p.sales || 0) / tot * 100) : 0;
-        return `<li><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}</span><span class="fw-pv">${man(p.sales)}<span class="fw-pp">${pct}%</span></span></li>`;
+        const qty = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
+        return `<li><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`;
       }).join("")
     : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
   const win = document.createElement("div");

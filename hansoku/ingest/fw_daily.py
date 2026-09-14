@@ -1278,6 +1278,7 @@ def ingest_abc(
     from ..model import (
         GRAIN_MONTH,
         KIND_FINAL,
+        METRIC_PRODUCT_QTY,
         METRIC_PRODUCT_SALES,
         ActualRow,
     )
@@ -1383,6 +1384,22 @@ def ingest_abc(
                         ingested_at=ingested_at,
                     )
                 )
+                # 販売点数（何個売れたか）。売上と並べて出すため同じ商品名で持つ。
+                if len(ints) > _ABC_QTY and ints[_ABC_QTY] > 0:
+                    collected.append(
+                        ActualRow(
+                            store_code=ABC_GROUP_CODE,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_QTY,
+                            value=float(ints[_ABC_QTY]),
+                            product_name=prod["name"][:80],
+                            product_category=prod["rank"],
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
+                    )
             top = products[0]
             print(
                 f"[ABC] 稼働{len(picked_codes)}店 {len(products)}品 "
@@ -2100,6 +2117,7 @@ def ingest_abc_store(
         KIND_FINAL,
         METRIC_DEPT_QTY,
         METRIC_DEPT_SALES,
+        METRIC_PRODUCT_QTY,
         METRIC_PRODUCT_SALES,
         ActualRow,
         dept_bucket,
@@ -2238,6 +2256,22 @@ def ingest_abc_store(
                         ingested_at=ingested_at,
                     )
                 )
+                # 販売点数（何個売れたか）も同じ商品名で保存する。
+                if len(ints) > _ABC_QTY and ints[_ABC_QTY] > 0:
+                    collected.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_QTY,
+                            value=float(ints[_ABC_QTY]),
+                            product_name=prod["name"][:80],
+                            product_category=prod["rank"],
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
+                    )
                 n_prod += 1
             top = products[0]["name"][:16] if products else "-"
 

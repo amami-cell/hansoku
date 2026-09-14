@@ -26,6 +26,7 @@ from ..model import (
     METRIC_DRINK_THEORY_COST,
     METRIC_FOOD_SALES,
     METRIC_FOOD_THEORY_COST,
+    METRIC_PRODUCT_QTY,
     METRIC_PRODUCT_SALES,
     METRIC_SALES,
     METRIC_SALES_BUDGET,
@@ -486,6 +487,27 @@ def _build_abc_by_month(
                 "rank": row["product_category"],
             }
         )
+    # 商品別の販売点数（数量）。税抜換算しない。同じ (店,月,商品名) の売上行に qty を足す。
+    qty_map: dict[tuple, float] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_PRODUCT_QTY],
+            store_codes=codes,
+            group_by=("store_code", "date", "product_name"),
+        )
+    ):
+        m = row["date"].strftime("%Y-%m")
+        qty_map[(row["store_code"], m, row["product_name"])] = row["value"]
+    for code, months in prod_tmp.items():
+        for m, items in months.items():
+            for it in items:
+                q = qty_map.get((code, m, it["name"]))
+                if q:
+                    it["qty"] = round(q)
+
     products_monthly: dict[str, dict[str, list]] = {}
     categories_monthly: dict[str, dict[str, list]] = {}
     for code, months in prod_tmp.items():
