@@ -149,10 +149,30 @@ export default {
         return serverError(e);
       }
     }
-    // それ以外は静的アセット（web/）を返す
-    return env.ASSETS.fetch(request);
+    // それ以外は静的アセット（web/）を返す。
+    // ★重要：アプリ本体（HTML/app.js/styles.css/データ）は毎回サーバに確認させる
+    // （Cache-Control: no-cache）。これをしないとブラウザ/エッジが古い index.html・app.js を
+    // 握り続け、修正が届かず古いエラー表示が出続ける（今回の再発原因）。ETagで304になるので
+    // 実データ転送は変更時だけ＝軽い。POP等（/creatives/*・R2）は従来どおりキャッシュ可。
+    const res = await env.ASSETS.fetch(request);
+    return withFreshShell(url, res);
   },
 };
+
+// アプリの土台ファイルだけ「毎回再検証（no-cache）」に上書きする。
+function withFreshShell(url, res) {
+  const p = url.pathname;
+  const isShell = p === "/" || p === "" || p.endsWith(".html")
+    || p === "/app.js" || p === "/styles.css"
+    || p === "/data/dashboard.js" || p === "/data/dashboard.json"
+    || url.searchParams.has("__spa");   // SPAフォールバックのHTML
+  // 拡張子の無いパス（SPAフォールバックで index.html が返る）もHTMLとして扱う
+  const looksHtml = (res.headers.get("content-type") || "").includes("text/html");
+  if (!isShell && !looksHtml) return res;
+  const h = new Headers(res.headers);
+  h.set("Cache-Control", "no-cache, must-revalidate");
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
 
 // 販促プラン（アプリ内で起票・複製する計画）。GET=一覧 / POST=作成・更新 / DELETE=削除。
 // テーブルはマイグレーション（008）で作るが、初回でも動くよう冪等DDLで担保する。
