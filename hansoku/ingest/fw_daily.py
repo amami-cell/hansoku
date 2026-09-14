@@ -2594,13 +2594,12 @@ def probe_abc_store(
             return [...new Set(out)].slice(0,30); }"""
         )
         print(f"[ABCprobe] 条件ラジオ: {radios}")
-        # ランチ部門・沼パスタが下位（行60以降）に埋もれるため、全行を出しつつ
-        # ランチ関連キーワード一致行を別途ハイライトする。
-        KW = ("スープ", "沼", "ランチ", "パスタ", "完熟", "ペペロン", "こくうま", "クリーム", "禁断")
+        # TOジェラート内訳（0円の選択商品）が各分類でどう並ぶか掴むための診断。
+        # 商品名にこれらを含む行は全行ダンプ（切り詰めない）。売価0×点数>0の
+        # 「内訳（選択商品）」行も分類ごとに全件出し、取込元(全商品)に含まれるかを見る。
+        KW = ("ジェラート", "TO", "サンデー", "シングル", "ダブル", "トリプル",
+              "スクープ", "フレーバー", "選択")
         # グリッドが「部門」に切り替わったのか、全商品のままなのかを1行で判る形にする。
-        # 200行ダンプの中から目視で読むのは毎回つらく、取り違えのもとになる。
-        # 行のダンプは40行まで。以前は200行×4分類でログが千行を超え、肝心の判定が
-        # 埋もれて読めなかった。商品名を一覧したいだけなら abc-detail（DB照会）で足りる。
         dump_n = 40
         summary: list[str] = []
         for level in levels:
@@ -2617,9 +2616,28 @@ def probe_abc_store(
             print(f"[ABCprobe] === 分類={level} 視覚行（先頭{dump_n}/計{len(rows)}） ===")
             for cells in rows[:dump_n]:
                 print("   ", " | ".join(cells[:14]))
+            # 0円内訳（選択商品）: 商品行のうち 売価0 かつ 点数>0 を全件。
+            # ints=[単価,数量,売上,...] を前提に、単価==0 & 数量>0 を拾う。
+            zero_break: list[tuple[str, int]] = []
+            for cells in rows:
+                ni = _abc_product_name_index(cells)
+                if ni is None:
+                    continue
+                nm = cells[ni].strip()
+                ints = _row_ints(cells[ni + 1:])
+                if len(ints) < 3:
+                    continue
+                unit, q, sales = ints[0], ints[1], ints[2]
+                if unit == 0 and sales == 0 and q > 0:
+                    zero_break.append((nm, q))
+            if zero_break:
+                tot = sum(q for _, q in zero_break)
+                print(f"[ABCprobe] --- {level}: 0円内訳(選択商品) {len(zero_break)}件 / 点数合計 {tot} ---")
+                for nm, q in zero_break:
+                    print(f"    0円| {nm} | 点数 {q}")
             hits = [c for c in rows if any(k in " ".join(c) for k in KW)]
             if hits:
-                print(f"[ABCprobe] --- {level}: ランチ関連キーワード一致 {len(hits)}行 ---")
+                print(f"[ABCprobe] --- {level}: ジェラート/サンデー関連 {len(hits)}行（全件） ---")
                 for cells in hits:
                     print("   *", " | ".join(cells[:14]))
         # 判定はまとめて最後にもう一度出す。ログの末尾だけ見れば結論が分かるように。
