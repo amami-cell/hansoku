@@ -26,10 +26,7 @@ const json = (body, status = 200) =>
 // 調べるための情報はログにだけ出す。
 const serverError = (e) => {
   console.error("[hansoku]", e && e.stack ? e.stack : String(e));
-  // 一時診断：DSN（パスワード入り接続文字列）を伏せた上で原因を返す。調査後に戻す。
-  const raw = String((e && (e.stack || e.message)) || e);
-  const detail = raw.replace(/postgres(ql)?:\/\/[^\s"']+/gi, "postgres://REDACTED").slice(0, 300);
-  return json({ error: "server-error", detail }, 500);
+  return json({ error: "server-error" }, 500);
 };
 
 // ── 個人アカウント（app_users）・監査ログ（audit_log）の土台 ────────────────
