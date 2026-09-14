@@ -983,9 +983,10 @@ tbody tr:last-child td{border-bottom:0;}
 .ymxt td.ymxcompo-click:hover{background:var(--accent-soft);color:var(--accent);}
 /* 商品内訳の小ウインドウ（複数・ドラッグ移動可） */
 #fwins{position:fixed;inset:0;pointer-events:none;z-index:1000;}
-.fwin{position:absolute;pointer-events:auto;width:250px;max-width:84vw;background:var(--surface);
+.fwin{position:absolute;pointer-events:auto;width:260px;height:min(52vh,380px);max-width:96vw;max-height:92vh;
+  min-width:200px;min-height:150px;background:var(--surface);
   border:1px solid var(--line-strong);border-radius:12px;box-shadow:0 10px 34px rgba(0,0,0,.30);
-  font-size:12.5px;overflow:hidden;}
+  font-size:12.5px;overflow:hidden;display:flex;flex-direction:column;resize:both;}
 .fw-head{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--surface-2);
   cursor:move;border-bottom:1px solid var(--line);user-select:none;}
 .fw-dot{width:9px;height:9px;border-radius:2px;flex:0 0 auto;}
@@ -996,14 +997,13 @@ tbody tr:last-child td{border-bottom:0;}
 .fw-sz:hover{color:var(--accent);}
 .fw-x{background:none;border:0;font-size:17px;line-height:1;color:var(--ink-3);cursor:pointer;padding:0 2px;}
 .fw-x:hover{color:var(--ink);}
-/* 大きさ切替（標準→大→特大） */
-.fwin.fw-lg{width:min(420px,92vw);font-size:13.5px;}
-.fwin.fw-lg .fw-list{max-height:64vh;}
-.fwin.fw-xl{width:min(620px,94vw);font-size:15px;}
-.fwin.fw-xl .fw-list{max-height:76vh;}
+/* ⤢ の既定サイズ（標準→大→特大）。角ドラッグでさらに自由リサイズできる。 */
+.fwin.fw-lg{width:min(440px,94vw);height:min(66vh,560px);font-size:13.5px;}
+.fwin.fw-xl{width:min(640px,96vw);height:min(82vh,760px);font-size:15px;}
 .fwin.fw-xl .fw-list li{padding:9px 12px;}
-.fw-list{list-style:none;margin:0;padding:4px 4px;max-height:46vh;overflow:auto;
+.fw-list{list-style:none;margin:0;padding:4px 4px;flex:1 1 auto;overflow:auto;
   font-variant-numeric:tabular-nums;}
+.fw-head{flex:0 0 auto;}
 .fw-list li{display:flex;justify-content:space-between;gap:10px;padding:6px 8px;border-bottom:1px solid var(--line);}
 .fw-list li:last-child{border-bottom:0;}
 .fw-pn{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -1013,6 +1013,23 @@ tbody tr:last-child td{border-bottom:0;}
 .fw-pp{color:var(--ink-3);font-weight:600;margin-left:6px;}
 .fwin.fw-flash{animation:fwflash .6s ease;}
 @keyframes fwflash{0%,100%{box-shadow:0 10px 34px rgba(0,0,0,.30);}50%{box-shadow:0 0 0 3px var(--accent);}}
+/* 携帯：下から出るシート＋タブ（複数はタブで切替・重ならない） */
+#fsheet{position:fixed;left:0;right:0;bottom:0;z-index:1100;background:var(--surface);
+  border-top:1px solid var(--line-strong);border-radius:16px 16px 0 0;box-shadow:0 -10px 34px rgba(0,0,0,.30);
+  max-height:82vh;display:flex;flex-direction:column;animation:fsUp .18s ease;}
+@keyframes fsUp{from{transform:translateY(100%);}to{transform:translateY(0);}}
+.fs-grab{height:5px;width:44px;background:var(--line-strong);border-radius:3px;margin:8px auto 4px;flex:0 0 auto;cursor:pointer;}
+.fs-tabs{display:flex;gap:6px;overflow-x:auto;padding:4px 12px;flex:0 0 auto;-webkit-overflow-scrolling:touch;}
+.fs-tab{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:12.5px;font-weight:600;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--ink-2);border-radius:999px;padding:7px 11px;cursor:pointer;}
+.fs-tab.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);}
+.fs-dot{width:8px;height:8px;border-radius:2px;flex:0 0 auto;}
+.fs-tx{margin-left:3px;color:var(--ink-3);font-weight:800;padding:0 2px;}
+.fs-sub{display:flex;align-items:center;gap:6px;padding:9px 14px;font-size:13px;color:var(--ink-2);
+  border-bottom:1px solid var(--line);flex:0 0 auto;}
+.fs-close{margin-left:auto;background:none;border:1px solid var(--line);border-radius:8px;padding:5px 12px;
+  font-size:12.5px;color:var(--ink-2);cursor:pointer;}
+.fs-list{flex:1 1 auto;overflow:auto;padding-bottom:16px;}
 .ymxcompo-lg{margin-top:10px;}
 .ymxcl-t{font-size:12px;font-weight:600;color:var(--ink-2);}
 /* 前年差の内訳（なぜ増えた/減った：区分ごとの差を大きい順に） */

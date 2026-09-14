@@ -956,7 +956,7 @@ function render() {
     el.addEventListener("click", e => {
       e.stopPropagation();
       const parts = el.dataset.compocell.split(":");
-      openCompoWindow(parts[0], parts[1], decodeURIComponent(parts.slice(2).join(":")));
+      openCompo(parts[0], parts[1], decodeURIComponent(parts.slice(2).join(":")));
     }));
   app.querySelectorAll("[data-scat]").forEach(el =>
     el.addEventListener("click", e => {
@@ -2036,6 +2036,26 @@ function fwinDrag(win, handle) {
   handle.addEventListener("mousedown", down);
   handle.addEventListener("touchstart", down, { passive: false });
 }
+// 中身（その区分×月の商品内訳）を組み立てる。小窓（PC）と下シート（携帯）で共用。
+function compoContent(code, m, cat) {
+  const prods = prodsInCat(code, m, cat).slice().sort((a, b) => b.sales - a.sales);
+  const tot = prods.reduce((a, p) => a + (p.sales || 0), 0);
+  const list = prods.length
+    ? prods.map(p => {
+        const pct = tot ? Math.round((p.sales || 0) / tot * 100) : 0;
+        const qty = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
+        return `<li><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`;
+      }).join("")
+    : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
+  return { tot, n: prods.length, list };
+}
+const isMobile = () => !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches);
+// クリックの出し分け：PC=浮く小窓（複数・自由リサイズ）／携帯=下シート＋タブ。
+function openCompo(code, m, cat) {
+  if (isMobile()) openCompoSheet(code, m, cat); else openCompoWindow(code, m, cat);
+}
+
+// ── PC：浮く小ウインドウ（複数・ドラッグ移動・角で自由リサイズ・⤢で既定サイズ）──────
 function openCompoWindow(code, m, cat) {
   const layer = fwinLayer();
   const key = `${code}:${m}:${cat}`;
@@ -2044,16 +2064,8 @@ function openCompoWindow(code, m, cat) {
     fwinFront(exist); exist.classList.remove("fw-flash"); void exist.offsetWidth; exist.classList.add("fw-flash");
     return;
   }
-  const prods = prodsInCat(code, m, cat).slice().sort((a, b) => b.sales - a.sales);
-  const tot = prods.reduce((a, p) => a + (p.sales || 0), 0);
+  const c = compoContent(code, m, cat);
   const mo = +m.slice(5, 7);
-  const list = prods.length
-    ? prods.map(p => {
-        const pct = tot ? Math.round((p.sales || 0) / tot * 100) : 0;
-        const qty = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
-        return `<li><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`;
-      }).join("")
-    : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
   const win = document.createElement("div");
   win.className = "fwin";
   win.dataset.fkey = key;
@@ -2061,25 +2073,68 @@ function openCompoWindow(code, m, cat) {
   win.style.left = (56 + off) + "px";
   win.style.top = (84 + off) + "px";
   win.innerHTML = `<div class="fw-head"><span class="fw-dot" style="background:${catColor(cat)}"></span>` +
-    `<span class="fw-ti">${esc(cat)}｜${mo}月</span><span class="fw-sub">${man(tot)}・${prods.length}品</span>` +
+    `<span class="fw-ti">${esc(cat)}｜${mo}月</span><span class="fw-sub">${man(c.tot)}・${c.n}品</span>` +
     `<button class="fw-sz" aria-label="大きさを切替">⤢</button>` +
     `<button class="fw-x" aria-label="閉じる">×</button></div>` +
-    `<ul class="fw-list">${list}</ul>`;
+    `<ul class="fw-list">${c.list}</ul>`;
   layer.appendChild(win);
   fwinFront(win);
   win.querySelector(".fw-x").addEventListener("click", () => win.remove());
-  // 大きく／小さく（標準→大→特大→標準…と切替）。中身が長くても読みやすく。
+  // ⤢ は既定サイズの早送り（標準→大→特大）。角ドラッグの手動リサイズは一旦リセットする。
   const SIZES = ["", "fw-lg", "fw-xl"];
   win.querySelector(".fw-sz").addEventListener("click", e => {
     e.stopPropagation();
     const cur = SIZES.findIndex(s => s && win.classList.contains(s));
+    win.style.width = ""; win.style.height = "";
     win.classList.remove("fw-lg", "fw-xl");
-    const next = SIZES[(cur + 1 + 1) % SIZES.length];  // 見つからない(-1)なら fw-lg から
+    const next = SIZES[(cur + 1 + 1) % SIZES.length];
     if (next) win.classList.add(next);
     fwinFront(win);
   });
   win.addEventListener("mousedown", () => fwinFront(win));
   fwinDrag(win, win.querySelector(".fw-head"));
+}
+
+// ── 携帯：下から出るシート＋タブ（複数セルはタブで切替。重ならない）───────────────
+let SHEET_TABS = [];   // {key, code, m, cat}
+let SHEET_ACTIVE = "";
+function renderCompoSheet() {
+  let sheet = document.getElementById("fsheet");
+  if (!SHEET_TABS.length) { if (sheet) sheet.remove(); return; }
+  if (!sheet) { sheet = document.createElement("div"); sheet.id = "fsheet"; document.body.appendChild(sheet); }
+  if (!SHEET_TABS.find(t => t.key === SHEET_ACTIVE)) SHEET_ACTIVE = SHEET_TABS[SHEET_TABS.length - 1].key;
+  const act = SHEET_TABS.find(t => t.key === SHEET_ACTIVE);
+  const tabs = SHEET_TABS.map(t => {
+    const mo = +t.m.slice(5, 7);
+    return `<button class="fs-tab${t.key === SHEET_ACTIVE ? " on" : ""}" data-fstab="${esc(t.key)}">` +
+      `<span class="fs-dot" style="background:${catColor(t.cat)}"></span>${esc(t.cat)} ${mo}月` +
+      `<span class="fs-tx" data-fsclose="${esc(t.key)}">×</span></button>`;
+  }).join("");
+  const c = compoContent(act.code, act.m, act.cat);
+  const mo = +act.m.slice(5, 7);
+  sheet.innerHTML = `<div class="fs-grab" data-fsdismiss="1"></div>` +
+    `<div class="fs-tabs">${tabs}</div>` +
+    `<div class="fs-sub"><span class="fw-dot" style="background:${catColor(act.cat)}"></span><b>${esc(act.cat)}｜${mo}月</b>　${man(c.tot)}・${c.n}品` +
+    `<button class="fs-close" data-fsdismiss="1">閉じる</button></div>` +
+    `<ul class="fw-list fs-list">${c.list}</ul>`;
+  sheet.querySelectorAll("[data-fstab]").forEach(el => el.addEventListener("click", e => {
+    if (e.target.closest("[data-fsclose]")) return;
+    SHEET_ACTIVE = el.dataset.fstab; renderCompoSheet();
+  }));
+  sheet.querySelectorAll("[data-fsclose]").forEach(el => el.addEventListener("click", e => {
+    e.stopPropagation();
+    SHEET_TABS = SHEET_TABS.filter(t => t.key !== el.dataset.fsclose);
+    renderCompoSheet();
+  }));
+  sheet.querySelectorAll("[data-fsdismiss]").forEach(el => el.addEventListener("click", () => {
+    SHEET_TABS = []; renderCompoSheet();
+  }));
+}
+function openCompoSheet(code, m, cat) {
+  const key = `${code}:${m}:${cat}`;
+  if (!SHEET_TABS.find(t => t.key === key)) SHEET_TABS.push({ key, code, m, cat });
+  SHEET_ACTIVE = key;
+  renderCompoSheet();
 }
 // 品目区分の固定色（構成比バーと区分行を同色でつなぐ）
 const CAT_COLORS = {
