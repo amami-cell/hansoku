@@ -2088,6 +2088,7 @@ function panelContent(d) {
   }
   const prods = prodsInCat(d.code, d.m, d.cat).slice().sort((a, b) => (b.sales - a.sales) || ((b.qty || 0) - (a.qty || 0)));
   const tot = prods.reduce((a, p) => a + (p.sales || 0), 0);
+  const totQty = prods.reduce((a, p) => a + (p.qty || 0), 0);
   const catOn = hits.cats.has(d.cat);
   const list = prods.length ? prods.map(p => {
     const pct = tot ? Math.round((p.sales || 0) / tot * 100) : 0;
@@ -2096,7 +2097,8 @@ function panelContent(d) {
     const on = hits.items.has(p.name) || (catOn && isLimitedProduct(d.code, d.m, p.name));
     return `<li class="${on ? "promo" : ""}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`;
   }).join("") : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
-  return { key: panelKey(d), color: catColor(d.cat), title: `${d.cat}｜${mo}月`, tab: `${d.cat} ${mo}月`, sub: `${man(tot)}・${prods.length}品`, list };
+  const qsub = totQty ? `・計${nin(totQty)}点` : "";
+  return { key: panelKey(d), color: catColor(d.cat), title: `${d.cat}｜${mo}月`, tab: `${d.cat} ${mo}月`, sub: `${man(tot)}・${prods.length}品${qsub}`, list };
 }
 // クリックの出し分け：PC=浮く小窓／携帯=下シート＋タブ。
 function openPanel(desc) { if (isMobile()) openSheet(desc); else openWindow(desc); }
