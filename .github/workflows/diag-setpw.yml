@@ -1,0 +1,24 @@
+name: diag-setpw
+# 一時診断：/setpw の書き込み経路（PBKDF2 + ensureUsers + INSERT）を実Neonで再現する。
+# 済んだら削除する。NEON_DATABASE_URL は Actions 上でマスクされ、DSN は出力しない。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 依存（@neondatabase/serverless）
+        run: npm install
+      - name: 書き込み経路を再現
+        env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: node scripts/diag_setpw.mjs
