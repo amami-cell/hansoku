@@ -99,6 +99,8 @@
   </div>
 </div>
 
+<!-- データは <script> で先読み（Access越しでも fetch と違い確実に読める）。無くても app.js が fetch で補う。 -->
+<script src="data/dashboard.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

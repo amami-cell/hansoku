@@ -751,8 +751,13 @@ def build(
 def write(payload: dict, out_dir: Path) -> Path:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     path = out_dir / "dashboard.json"
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
+    path.write_text(text, encoding="utf-8")
+    # Cloudflare Access(SSO)越しでも確実に読めるよう、fetch ではなく <script> で読む版も出す。
+    # app.js が読めている＝Accessセッションは有効なので、同じ経路の <script> ならデータも
+    # 必ず読める（従来「Failed to fetch」は fetch だけが Access の302リダイレクトで落ちていた）。
+    (out_dir / "dashboard.js").write_text(
+        "window.__DASHBOARD__=" + text + ";\n", encoding="utf-8"
     )
     return path

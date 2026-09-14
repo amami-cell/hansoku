@@ -681,6 +681,13 @@ function wireSearch() {
 //  - その他HTTPエラー ＝サーバ側。→ 時間をおいて再読み込み。
 // 一時的な瞬断のために、通信エラー時だけ短く数回リトライする。
 async function loadDashboard() {
+  // まず <script src="data/dashboard.js"> で先読みしたデータを使う。app.js が動いている＝
+  // Accessセッションは有効なので、同じ <script> 経路のこれは必ず読めている。これにより
+  // 「Failed to fetch」（fetch だけが Access の302リダイレクトで落ちる）を根絶する。
+  if (window.__DASHBOARD__ && typeof window.__DASHBOARD__ === "object") {
+    return window.__DASHBOARD__;
+  }
+  // 保険：先読みが無い環境（ローカルの直開き・古いデプロイ）は従来どおり fetch で補う。
   let last = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
