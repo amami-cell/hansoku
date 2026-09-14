@@ -1257,6 +1257,47 @@ def _extract_product_grid(session) -> list[dict]:
     return result
 
 
+# 「NN:区分名」形式のグループ見出し行（例 "20:テイクアウトジェラート"）。分類=グループ／
+# メニューで各商品の上に出る小計行。商品ではないので取り込まず、直後の商品行に
+# その所属グループとして貼る。全角コロンも許す。
+_ABC_GROUP_RE = re.compile(r"^\s*\d+\s*[:：]\s*\S")
+
+
+def _extract_product_grid_grouped(session) -> list[dict]:
+    """分類=グループ／メニューのグリッドを、各商品に所属グループを付けて返す。
+
+    各要素は {"name", "rank", "ints", "group"}。group は直前に現れた「NN:区分名」見出し
+    （例 "20:テイクアウトジェラート"）。全商品グリッドには内訳（0円の選択商品）が出ないため、
+    サンデー/テイクアウトジェラート等の“素の風味名”を正しい区分へ束ねるのに使う。"""
+    result: list[dict] = []
+    seen: set[tuple[str | None, str]] = set()
+    group: str | None = None
+    for cells in _visual_rows(session):
+        name_idx = _abc_product_name_index(cells)
+        if name_idx is None:
+            continue
+        name = cells[name_idx].strip()
+        if _ABC_GROUP_RE.match(name):  # 区分見出し行。商品ではない。
+            group = name
+            continue
+        if name in ("商品名",) or name in _ABC_TOTAL_NAMES:
+            continue
+        ints = _row_ints(cells[name_idx + 1:])
+        if len(ints) < 3:  # [単価,数量,売上] は要る
+            continue
+        key = (group, name)
+        if key in seen:
+            continue
+        rank = None
+        for c in reversed(cells):
+            if _ABC_RANK_RE.match(c.strip()):
+                rank = c.strip()
+                break
+        seen.add(key)
+        result.append({"name": name, "rank": rank, "ints": ints, "group": group})
+    return result
+
+
 def ingest_abc(
     warehouse,
     master,
@@ -2616,25 +2657,19 @@ def probe_abc_store(
             print(f"[ABCprobe] === 分類={level} 視覚行（先頭{dump_n}/計{len(rows)}） ===")
             for cells in rows[:dump_n]:
                 print("   ", " | ".join(cells[:14]))
-            # 0円内訳（選択商品）: 商品行のうち 売価0 かつ 点数>0 を全件。
-            # ints=[単価,数量,売上,...] を前提に、単価==0 & 数量>0 を拾う。
-            zero_break: list[tuple[str, int]] = []
-            for cells in rows:
-                ni = _abc_product_name_index(cells)
-                if ni is None:
-                    continue
-                nm = cells[ni].strip()
-                ints = _row_ints(cells[ni + 1:])
-                if len(ints) < 3:
-                    continue
-                unit, q, sales = ints[0], ints[1], ints[2]
-                if unit == 0 and sales == 0 and q > 0:
-                    zero_break.append((nm, q))
+            # 0円内訳（選択商品）: グループ付きで抽出し、売価0×点数>0 を所属グループ付きで全件。
+            # 素の風味名（ベリーマニア等）がどの区分見出しにぶら下がるかをここで確定する。
+            gp = _extract_product_grid_grouped(session)
+            zero_break = [
+                (p["group"], p["name"], p["ints"][1])
+                for p in gp
+                if len(p["ints"]) >= 3 and p["ints"][0] == 0 and p["ints"][2] == 0 and p["ints"][1] > 0
+            ]
             if zero_break:
-                tot = sum(q for _, q in zero_break)
+                tot = sum(q for _, _, q in zero_break)
                 print(f"[ABCprobe] --- {level}: 0円内訳(選択商品) {len(zero_break)}件 / 点数合計 {tot} ---")
-                for nm, q in zero_break:
-                    print(f"    0円| {nm} | 点数 {q}")
+                for grp, nm, q in zero_break:
+                    print(f"    0円| [{grp}] {nm} | 点数 {q}")
             hits = [c for c in rows if any(k in " ".join(c) for k in KW)]
             if hits:
                 print(f"[ABCprobe] --- {level}: ジェラート/サンデー関連 {len(hits)}行（全件） ---")
