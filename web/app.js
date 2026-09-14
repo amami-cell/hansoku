@@ -2052,14 +2052,30 @@ function panelContent(d) {
   const mo = +d.m.slice(5, 7);
   const hits = promoHitsForMonth(d.code, d.m);
   if (d.kind === "month") {
+    // その月の全部門を、各部門の商品明細まで展開して見せる。部門ごとに色分け、
+    // 部門の合計は太字。商品は「出品数・売上・（部門内）売上構成比」。
     const cats = catsAtM(d.code, d.m).slice().sort((a, b) => (b.sales - a.sales) || ((b.count || 0) - (a.count || 0)));
     const tot = cats.reduce((a, c) => a + (c.sales || 0), 0);
-    const list = cats.length ? cats.map(c => {
-      const pct = tot ? Math.round((c.sales || 0) / tot * 100) : 0;
-      const on = hits.cats.has(c.name) ? " promo" : "";
-      const q = (c.count != null) ? ` <span class="fw-pq">${c.count}品</span>` : "";
-      return `<li class="fw-catrow${on}" data-compocell="${d.code}:${d.m}:${encodeURIComponent(c.name)}"><span class="fw-pn"><span class="ymxcdot" style="background:${catColor(c.name)}"></span>${esc(c.name)}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv">${man(c.sales)}${q}<span class="fw-pp">${pct}%</span></span></li>`;
-    }).join("") : `<li class="muted">この月のデータがありません</li>`;
+    let html = "";
+    for (const c of cats) {
+      const col = catColor(c.name);
+      const on = hits.cats.has(c.name);
+      const catPct = tot ? Math.round((c.sales || 0) / tot * 100) : 0;
+      const prods = prodsInCat(d.code, d.m, c.name).slice().sort((a, b) => (b.sales - a.sales) || ((b.qty || 0) - (a.qty || 0)));
+      const catQty = prods.reduce((a, p) => a + (p.qty || 0), 0);
+      html += `<li class="fw-sec${on ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn"><span class="ymxcdot" style="background:${col}"></span><b>${esc(c.name)}</b>${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv"><b>${man(c.sales)}</b>${catQty ? ` <span class="fw-pq">${nin(catQty)}点</span>` : ""}<span class="fw-pp">${catPct}%</span></span></li>`;
+      if (prods.length) {
+        for (const p of prods) {
+          const ppct = c.sales ? Math.round((p.sales || 0) / c.sales * 100) : 0;
+          const pOn = hits.items.has(p.name);
+          const q = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
+          html += `<li class="fw-subrow${on || pOn ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${ppct}%</span></span></li>`;
+        }
+      } else {
+        html += `<li class="fw-subrow" style="--cc:${col}"><span class="muted">商品明細なし</span></li>`;
+      }
+    }
+    const list = cats.length ? html : `<li class="muted">この月のデータがありません</li>`;
     return { key: panelKey(d), color: "var(--accent)", title: `${mo}月 部門別`, tab: `${mo}月 部門別`, sub: `${man(tot)}・${cats.length}区分`, list };
   }
   const prods = prodsInCat(d.code, d.m, d.cat).slice().sort((a, b) => (b.sales - a.sales) || ((b.qty || 0) - (a.qty || 0)));
@@ -2120,6 +2136,17 @@ function openWindow(desc) {
 // ── 携帯：下から出るシート＋タブ（複数はタブで切替。重ならない）───────────────
 let SHEET_TABS = [];   // desc[]
 let SHEET_ACTIVE = "";
+let SHEET_H = null;   // ユーザーが決めた高さ(px)。次の部門でも同じ高さに固定される。
+// 上部ハンドルを上下ドラッグしてシートの高さを変える（決めた高さは記憶して固定）。
+function fsheetResize(grab, sheet) {
+  let sy = 0, sh = 0, on = false;
+  const clamp = h => Math.max(200, Math.min(Math.round(window.innerHeight * 0.92), h));
+  const move = e => { if (!on) return; const p = e.touches ? e.touches[0] : e; SHEET_H = clamp(sh - (p.clientY - sy)); sheet.style.height = SHEET_H + "px"; e.preventDefault(); };
+  const up = () => { on = false; document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); document.removeEventListener("touchmove", move); document.removeEventListener("touchend", up); };
+  const down = e => { on = true; const p = e.touches ? e.touches[0] : e; sy = p.clientY; sh = sheet.offsetHeight; document.addEventListener("mousemove", move); document.addEventListener("mouseup", up); document.addEventListener("touchmove", move, { passive: false }); document.addEventListener("touchend", up); e.preventDefault(); };
+  grab.addEventListener("mousedown", down);
+  grab.addEventListener("touchstart", down, { passive: false });
+}
 function renderSheet() {
   let sheet = document.getElementById("fsheet");
   if (!SHEET_TABS.length) { if (sheet) sheet.remove(); return; }
@@ -2134,11 +2161,14 @@ function renderSheet() {
   }).join("");
   const act = SHEET_TABS.find(d => panelKey(d) === SHEET_ACTIVE);
   const c = panelContent(act);
-  sheet.innerHTML = `<div class="fs-grab" data-fsdismiss="1"></div>` +
+  sheet.innerHTML = `<div class="fs-grab" aria-label="高さ調整"></div>` +
     `<div class="fs-tabs">${tabs}</div>` +
     `<div class="fs-sub"><span class="fw-dot" style="background:${c.color}"></span><b>${esc(c.title)}</b>　${c.sub}` +
     `<button class="fs-close" data-fsdismiss="1">閉じる</button></div>` +
     `<ul class="fw-list fs-list">${c.list}</ul>`;
+  // 高さは一定（既定56vh）。ユーザーが決めた高さがあればそれを固定（部門を変えても同じ）。
+  sheet.style.height = (SHEET_H || Math.round(window.innerHeight * 0.56)) + "px";
+  fsheetResize(sheet.querySelector(".fs-grab"), sheet);
   sheet.querySelectorAll("[data-fstab]").forEach(el => el.addEventListener("click", e => {
     if (e.target.closest("[data-fsclose]")) return;
     SHEET_ACTIVE = el.dataset.fstab; renderSheet();
