@@ -160,7 +160,7 @@ campaigns:
   - { id: c1160-parfait-shortcake, stores: ["1160"], title: ショートケーキパフェ, kind: dev, bucket: パフェ, items: [ショートケーキ], start: "2026-02-02", end: "2026-05-07" }
   # コラボ枠（bucket=コラボ で区分に束ね、items で該当商品を切り出す）
   - { id: c1160-collab-hakuto, stores: ["1160"], title: 白桃パフェDaysコラボ, kind: dev, bucket: パフェ, items: [アンシャンター], start: "2025-07-25", end: "2025-07-27", note: "3日限定コラボ。実体は仏名『パルフェ・ドゥ・アンシャンター・ピーチ』（岡山白桃・通常の白桃パフェとは別SKU）" }
-  - { id: c1160-collab-kumamon, stores: ["1160"], title: くまもとモンコラボ, kind: dev, bucket: コラボ, items: [くまモン, くまもと, クマモン], start: "2025-11-01", end: "2025-11-30", note: 期間限定コラボ }
+  - { id: c1160-collab-kumamon, stores: ["1160"], title: くまもとモンコラボ, kind: dev, bucket: コラボ, items: [くまもと, くまモン, クマモン, パタット, 晩白柚], start: "2025-11-01", end: "2025-11-30", note: "POS実名は『くまもとモンパフェ』（くまもとで一致・取込済）。POPの仏名『パルフェ・ア・ラ・パタット・ドゥース』も保険で追加" }
 
   # ── 門真Largo（1713）───────────────────────────────
   - { id: r1713-osusume, stores: ["1713"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-11-20" }
