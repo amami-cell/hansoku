@@ -21,6 +21,9 @@ on:
           - dept_sales
           - dept_qty
           - product_sales
+          - product_qty
+          - product_cost
+          - product_gross
         default: sales
       date_from:
         description: '開始日 YYYY-MM-DD'
