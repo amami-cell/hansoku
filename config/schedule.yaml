@@ -152,9 +152,9 @@ campaigns:
   # パフェ枠（ショートケーキパフェ→ライチ→パフェスノー→ハロウィン→いちじく→ノエル→みかん）
   #   items は商品名キーワード。該当商品の売上だけを切り出して昨対比・前回比を出す。
   - { id: c1160-parfait-lychee, stores: ["1160"], title: 5月パフェ ライチ, kind: dev, bucket: パフェ, items: [ペルル・デ・リッシ, ペルル], start: "2025-05-08", end: "2025-05-31", note: "実体は仏名『パルフェ・オゥ・ペルル・デ・リッシ』（ライチ）" }
-  - { id: c1160-parfait-snow, stores: ["1160"], title: パフェスノー（夏限定・4種）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー], start: "2025-06-01", end: "2025-09-30" }
+  - { id: c1160-parfait-snow, stores: ["1160"], title: パフェスノー（夏限定・4種）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー, スパークリング], start: "2025-06-01", end: "2025-09-30", note: "スノー系＋『丸ごと白桃/夏いちご…スパークリングジュレのパフェ』も対象" }
   - { id: c1160-parfait-halloween, stores: ["1160"], title: ハロウィンパフェ, kind: dev, bucket: パフェ, items: [ポイズン], start: "2025-09-30", end: "2025-10-31", note: "実体は仏名『パルフェ・オ・ポイズン・シュクレ・エトランゼ』（毒りんご風パフェ）" }
-  - { id: c1160-parfait-ichijiku, stores: ["1160"], title: いちじくパフェ, kind: dev, bucket: パフェ, items: [いちじく, イチジク, 無花果], start: "2025-10-31", end: "2025-12-01" }
+  - { id: c1160-parfait-ichijiku, stores: ["1160"], title: いちじくパフェ, kind: dev, bucket: パフェ, items: [オトンヌ, アペティ, いちじく, イチジク, 無花果], start: "2025-10-31", end: "2025-12-01", note: "実体は仏名『パルフェ・アペティ・ドゥ・オトンヌ』（Fig&Caramel）" }
   - { id: c1160-parfait-noel, stores: ["1160"], title: ノエル（クリスマスパフェ）, kind: dev, bucket: パフェ, items: [ノエル, クリスマス, サンタ], start: "2025-12-02", end: "2025-12-25" }
   - { id: c1160-parfait-mikan, stores: ["1160"], title: みかんパフェ, kind: dev, bucket: パフェ, items: [マンダリン, みかん, 蜜柑], start: "2026-01-02", end: "2026-02-01", note: "実体は仏名『パルフェ・ア・ラ・マンダリン…』" }
   - { id: c1160-parfait-shortcake, stores: ["1160"], title: ショートケーキパフェ, kind: dev, bucket: パフェ, items: [ショートケーキ], start: "2026-02-02", end: "2026-05-07" }
@@ -248,7 +248,7 @@ campaigns:
   # 兄弟枠に合わせて測り方を補完（bucket/items 未設定だと効果が出ない）。
   #   パフェ（スノー）=夏のスノーパフェ → c1160-parfait-snow と同じ items で昨対・前回比。
   #   ケーキ=夏のケーキ枠 → c1160-cake-* と同じく bucket=ケーキ。
-  - { id: s1160-parfait, stores: ["1160"], title: パフェ（スノー）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー], start: "2026-07-01", end: "2026-09-23" }
+  - { id: s1160-parfait, stores: ["1160"], title: パフェ（スノー）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー, スパークリング], start: "2026-07-01", end: "2026-09-23", note: "スノー系＋スパークリングジュレのパフェも対象" }
   - { id: s1160-cake, stores: ["1160"], title: ケーキ, kind: dev, bucket: ケーキ, start: "2026-07-01", end: "2026-08-31" }
   - { id: s1713-kakigori, stores: ["1713"], title: かき氷フェア, kind: dev, start: "2026-07-13", end: "2026-09-04" }
   - { id: s1162-natsu, stores: ["1162"], title: 夏おすすめ（1品新規）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
