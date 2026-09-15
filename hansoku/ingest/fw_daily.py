@@ -2731,6 +2731,15 @@ def ingest_abc_campaigns(
             continue
         if not (c.get("bucket") or c.get("items")):
             continue
+        # 通年枠（例 ジェラートの常設枠 2024-2027）は discrete な“回”ではないので対象外。
+        # 販売時期実績は個別の回（〜数ヶ月）に限る。
+        try:
+            _sd = _date(int(start[:4]), int(start[5:7]), int(start[8:10]))
+            _ed = _date(int(end[:4]), int(end[5:7]), int(end[8:10]))
+            if (_ed - _sd).days > 200:
+                continue
+        except Exception:  # noqa: BLE001
+            pass
         for s in c.get("stores") or []:
             st = _resolve(str(s))
             if not st or not st.active:
@@ -2782,7 +2791,12 @@ def ingest_abc_campaigns(
                 d_to = c["end"].replace("-", "/")
                 rep = _date(int(c["start"][:4]), int(c["start"][5:7]), int(c["start"][8:10]))
                 _set_date_range(session, d_from, d_to)
-                rows = _abc_grouped_rows_stable(session)
+                # 分類=全商品だけを引く（対象のパフェ/ケーキ/コラボは売れ筋＝全商品に出る）。
+                # ingest_abc_store と同じ堅い手順。グループ/メニューまで毎回切り替えると
+                # 2施策目以降でグリッドが空になる事象があったため、cycleはしない。
+                _abc_click_radio(session.page, "全商品")
+                _abc_search_and_rows(session)
+                rows = _extract_product_grid(session)
                 bucket = c.get("bucket")
                 kws = [k for k in (c.get("items") or []) if k]
                 n = 0
