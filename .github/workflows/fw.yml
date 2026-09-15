@@ -42,6 +42,17 @@ on:
           - manager-dl-probe
           - abc-campaign
         default: explore
+      runner:
+        description: '実行環境: hosted=GitHub提供(無料枠を消費) / self-hosted=自前ランナー(枠を消費しない)'
+        type: choice
+        options:
+          - hosted
+          - self-hosted
+        default: hosted
+      abc_refresh:
+        description: 'abc-campaign: 取込済みの過去回も取り直す (true/false)'
+        required: false
+        default: 'false'
       path:
         description: '探索するメニュー名（カンマ区切り）'
         required: false
@@ -116,7 +127,8 @@ env:
 
 jobs:
   fw:
-    runs-on: ubuntu-latest
+    # hosted=GitHub提供(無料枠を消費) / self-hosted=自前ランナー(枠を消費しない)。
+    runs-on: ${{ inputs.runner == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     timeout-minutes: 30
 
     steps:
@@ -127,10 +139,23 @@ jobs:
           python-version: '3.12'
           cache: pip
 
+      # Chromium本体をキャッシュ（毎回の数分DLを無くして無料枠を節約）。
+      # self-hostedでは常設のブラウザが残るので実質DLゼロになる。
+      - name: Playwrightブラウザをキャッシュ
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-chromium-v1
+
       - name: 依存パッケージをインストール
         run: |
           pip install -r requirements.txt
-          python -m playwright install --with-deps chromium
+          # ブラウザ本体はキャッシュ/自前ランナーに在れば no-op（再DLしない）。
+          python -m playwright install chromium
+          # apt のシステム依存は hosted のときだけ（self-hostedは事前準備済み前提）。
+          if [ "${{ inputs.runner }}" != "self-hosted" ]; then
+            sudo python -m playwright install-deps chromium || python -m playwright install-deps chromium || true
+          fi
 
       - name: Secrets の確認
         env:
@@ -242,6 +267,7 @@ jobs:
               xvfb-run -a python -m hansoku.cli fw-daily --mode abc-campaign \
                 --abc-store "${{ inputs.abc_store }}" \
                 --abc-ids "${{ inputs.abc_item }}" \
+                ${{ inputs.abc_refresh == 'true' && '--abc-refresh' || '' }} \
                 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "uriage-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode uriage-probe \

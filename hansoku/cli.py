@@ -373,6 +373,7 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 store=args.abc_store or None,
                 only_ids=getattr(args, "abc_ids", None),
                 dry_run=args.dry_run,
+                skip_existing=not getattr(args, "abc_refresh", False),
             )
     if args.mode == "lunch-analyze":
         from .ingest.fw_daily import analyze_lunch
@@ -776,6 +777,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="abc-totals-probe の期間 'ラベル:from:to,...'（YYYY-MM-DD）")
     fwdaily.add_argument("--abc-ids", default=None, dest="abc_ids",
                          help="abc-campaign: 対象施策id（カンマ区切り。既定=schedule全件のうち条件を満たすもの）")
+    fwdaily.add_argument("--abc-refresh", action="store_true", dest="abc_refresh",
+                         help="abc-campaign: 取込済みの過去回も含めて全部取り直す（既定は終了済みの回はスキップ）")
     fwdaily.add_argument(
         "--metric",
         default=None,

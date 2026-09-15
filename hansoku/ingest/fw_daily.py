@@ -2672,6 +2672,7 @@ def ingest_abc_campaigns(
     only_ids: str | None = None,
     dry_run: bool = False,
     budget_minutes: float = 25.0,
+    skip_existing: bool = True,
 ) -> int:
     """登録済み販促の [start,end] レンジでABCを引き、その施策の“販売時期”実績（商品別 売上/点数）を
     施策id 紐づけで焼く。丸ごとの月ではなく、実際の販売期間の数字を施策詳細に出すための土台。
@@ -2686,6 +2687,7 @@ def ingest_abc_campaigns(
 
     import yaml as _yaml
 
+    from ..db.warehouse import AggregateQuery
     from ..model import (
         GRAIN_DAY,
         KIND_FINAL,
@@ -2759,7 +2761,60 @@ def ingest_abc_campaigns(
     ingested_at = datetime.now(timezone.utc)
     t0 = time.time()
     total = 0
-    print(f"[施策ABC] 対象 {sum(len(v) for v in jobs.values())}施策 / {len(jobs)}店")
+    today = _date.today()
+
+    # 施策を (店, 施策) の平坦リストにする。店ごとにまとめ、その中は開始日順。
+    flat: list[tuple[str, str, object, dict]] = []
+    for code, camps in jobs.items():
+        for c in sorted(camps, key=lambda x: str(x.get("start"))):
+            flat.append((code, store_name[code], allrules.get(code), c))
+
+    # すでに取込済みの施策id（過去の“回”は数字が確定するので二度取りしない）。
+    # end が未来（進行中）の回は毎回取り直す。best-effort: 読めなければ全件取る。
+    have_ids: set[str] = set()
+    if skip_existing and flat:
+        try:
+            starts = [c["start"] for (_, _, _, c) in flat]
+            dfrom = min(starts)
+            dto = max(starts)
+            q = AggregateQuery(
+                date_from=_date(int(dfrom[:4]), int(dfrom[5:7]), int(dfrom[8:10])),
+                date_to=_date(int(dto[:4]), int(dto[5:7]), int(dto[8:10])),
+                grain=GRAIN_DAY,
+                metrics=[METRIC_PRODUCT_SALES],
+                sources=[source],
+                store_codes=list(jobs.keys()),
+                group_by=["product_category"],
+            )
+            for r in warehouse.aggregate(q):
+                pc = r.get("product_category")
+                if pc:
+                    have_ids.add(str(pc))
+        except Exception as e:  # noqa: BLE001
+            print(f"[施策ABC] 既取込チェックは省略（{e}）。全件取り直す。")
+
+    def _is_done(cid: str, end: str) -> bool:
+        if cid not in have_ids:
+            return False
+        try:
+            ed = _date(int(end[:4]), int(end[5:7]), int(end[8:10]))
+        except Exception:  # noqa: BLE001
+            return False
+        return ed < today  # 終了済み（過去の回）だけスキップ。進行中は取り直す。
+
+    todo = [(code, name, rules, c) for (code, name, rules, c) in flat
+            if not _is_done(c["id"], c["end"])]
+    skipped = len(flat) - len(todo)
+    print(
+        f"[施策ABC] 対象 {len(flat)}施策 / {len(jobs)}店"
+        + (f"（うち取込済みで省略 {skipped}件、今回 {len(todo)}件）" if skipped else "")
+    )
+    if not todo:
+        print("[施策ABC] 取込対象なし（すべて取込済み）。終了。")
+        return 0
+
+    if not dry_run:
+        warehouse.ensure_schema()
 
     with fw_session(artifacts) as session:
         try:
@@ -2767,85 +2822,82 @@ def ingest_abc_campaigns(
             session.page.set_default_navigation_timeout(15000)
         except Exception:  # noqa: BLE001
             pass
-        _open_abc(session)
-        _select_date_preset(session, _ABC_PRESET_LASTMONTH)
-        if not dry_run:
-            warehouse.ensure_schema()
         deadline = t0 + budget_minutes * 60
-        for code, camps in jobs.items():
-            name = store_name[code]
-            # 店を選ぶ前に日付を出す（新しめの店対策。ingest_abc_store と同じ順）。
-            first = camps[0]
-            _set_date_range(session, first["start"].replace("-", "/"), first["end"].replace("-", "/"))
-            hit = _abc_open_store_modal_and_select_one(session, name)
-            if hit is None:
-                print(f"[施策ABC] 店舗選択に失敗（{name}）。飛ばす。")
-                continue
-            rules = allrules.get(code)
-            for c in camps:
-                if time.time() > deadline:
-                    print(f"[施策ABC] 時間切れ（{budget_minutes:.0f}分）。残りは次回。")
-                    break
-                cid = c["id"]
-                d_from = c["start"].replace("-", "/")
-                d_to = c["end"].replace("-", "/")
-                rep = _date(int(c["start"][:4]), int(c["start"][5:7]), int(c["start"][8:10]))
+        for code, name, rules, c in todo:
+            if time.time() > deadline:
+                print(f"[施策ABC] 時間切れ（{budget_minutes:.0f}分）。残りは次回。")
+                break
+            cid = c["id"]
+            d_from = c["start"].replace("-", "/")
+            d_to = c["end"].replace("-", "/")
+            rep = _date(int(c["start"][:4]), int(c["start"][5:7]), int(c["start"][8:10]))
+            # ── 施策ごとに ABC 画面を開き直す（＝毎回まっさらな状態から）。──
+            # 同じ画面を使い回して日付+検索だけ変えると2施策目以降でグリッドが空になる
+            # 事象があったため、1施策=1ログイン相当の“フレッシュ導線”で確実に引く。
+            # （店選択も毎回やり直すので、単店・複数店どちらでも状態が混ざらない。）
+            try:
+                _open_abc(session)
+                _select_date_preset(session, _ABC_PRESET_LASTMONTH)
                 _set_date_range(session, d_from, d_to)
-                # 分類=全商品だけを引く（対象のパフェ/ケーキ/コラボは売れ筋＝全商品に出る）。
-                # ingest_abc_store と同じ堅い手順。グループ/メニューまで毎回切り替えると
-                # 2施策目以降でグリッドが空になる事象があったため、cycleはしない。
+                hit = _abc_open_store_modal_and_select_one(session, name)
+                if hit is None:
+                    print(f"[施策ABC] 店舗選択に失敗（{name} / {cid}）。飛ばす。")
+                    continue
                 _abc_click_radio(session.page, "全商品")
                 _abc_search_and_rows(session)
                 rows = _extract_product_grid(session)
-                bucket = c.get("bucket")
-                kws = [k for k in (c.get("items") or []) if k]
-                n = 0
-                crows: list[ActualRow] = []
-                for prod in rows:
-                    nm = prod["name"]
-                    ints = prod["ints"]
-                    sales = ints[_ABC_SALES] if len(ints) > _ABC_SALES else 0
-                    qty = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
-                    if sales <= 0 and qty <= 0:
+            except Exception as e:  # noqa: BLE001
+                print(f"[施策ABC] {code} {cid} 取得中に例外: {e}。飛ばす。")
+                continue
+            bucket = c.get("bucket")
+            kws = [k for k in (c.get("items") or []) if k]
+            n = 0
+            crows: list[ActualRow] = []
+            for prod in rows:
+                nm = prod["name"]
+                ints = prod["ints"]
+                sales = ints[_ABC_SALES] if len(ints) > _ABC_SALES else 0
+                qty = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
+                if sales <= 0 and qty <= 0:
+                    continue
+                # 対象商品だけ残す: items があれば商品名一致、無ければ bucket(区分)一致。
+                if kws:
+                    if not any(k in nm for k in kws):
                         continue
-                    # 対象商品だけ残す: items があれば商品名一致、無ければ bucket(区分)一致。
-                    if kws:
-                        if not any(k in nm for k in kws):
-                            continue
-                    elif bucket:
-                        if not rules or _classify(nm, rules, prod.get("group")) != bucket:
-                            continue
-                    for metric, val in ((METRIC_PRODUCT_SALES, sales), (METRIC_PRODUCT_QTY, qty)):
-                        if val <= 0:
-                            continue
-                        crows.append(
-                            ActualRow(
-                                store_code=code,
-                                date=rep,
-                                grain=GRAIN_DAY,
-                                metric=metric,
-                                value=float(val),
-                                product_name=nm[:80],
-                                product_category=cid,  # 施策idで紐づける
-                                kind=KIND_FINAL,
-                                source=source,
-                                ingested_at=ingested_at,
-                            )
+                elif bucket:
+                    if not rules or _classify(nm, rules, prod.get("group")) != bucket:
+                        continue
+                for metric, val in ((METRIC_PRODUCT_SALES, sales), (METRIC_PRODUCT_QTY, qty)):
+                    if val <= 0:
+                        continue
+                    crows.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep,
+                            grain=GRAIN_DAY,
+                            metric=metric,
+                            value=float(val),
+                            product_name=nm[:80],
+                            product_category=cid,  # 施策idで紐づける
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
                         )
-                    n += 1
-                print(f"[施策ABC] {code} {cid} {c['start']}〜{c['end']} 対象{n}品 抽出{len(rows)}行")
-                # 施策ごとにその場で書く。長時間スクレイプ中に Neon 接続が idle で切れて
-                # 最後にまとめて書くと失敗するため（SSL closed）。切れていたら張り直して1回再試行。
-                if not dry_run and crows:
+                    )
+                n += 1
+            print(f"[施策ABC] {code} {cid} {c['start']}〜{c['end']} 対象{n}品 抽出{len(rows)}行")
+            # 施策ごとにその場で書く。長時間スクレイプ中に Neon 接続が idle で切れて
+            # 最後にまとめて書くと失敗するため（SSL closed）。切れていたら張り直して1回再試行。
+            if not dry_run and crows:
+                try:
+                    total += warehouse.replace_actuals(crows, scope_stores=True, scope_metrics=True)
+                except Exception as e:  # noqa: BLE001
+                    print(f"[施策ABC] 書込リトライ（接続張り直し）: {e}")
                     try:
-                        total += warehouse.replace_actuals(crows, scope_stores=True, scope_metrics=True)
-                    except Exception as e:  # noqa: BLE001
-                        print(f"[施策ABC] 書込リトライ（接続張り直し）: {e}")
-                        try:
-                            warehouse.close()
-                        except Exception:  # noqa: BLE001
-                            pass
-                        total += warehouse.replace_actuals(crows, scope_stores=True, scope_metrics=True)
+                        warehouse.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    total += warehouse.replace_actuals(crows, scope_stores=True, scope_metrics=True)
     print(f"[施策ABC] warehouse へ {total} 件 書き込みました（source={source}）")
     return 0
 
