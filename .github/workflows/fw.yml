@@ -41,6 +41,7 @@ on:
           - abc-dom-probe
           - manager-dl-probe
           - abc-campaign
+          - gelato-switch
         default: explore
       runner:
         description: '実行環境: hosted=GitHub提供(無料枠を消費) / self-hosted=自前ランナー(枠を消費しない)'
@@ -268,6 +269,14 @@ jobs:
                 --abc-store "${{ inputs.abc_store }}" \
                 --abc-ids "${{ inputs.abc_item }}" \
                 ${{ inputs.abc_refresh == 'true' && '--abc-refresh' || '' }} \
+                --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "gelato-switch" ]; then
+              # TOジェラート ローテ各回の初売日を0円メニュー内訳の日別プローブで確定（DB書込なし・印字のみ）
+              # abc_from/abc_to（YYYY-MM）で対象回を絞れる＝年ごと等に分割実行可能
+              xvfb-run -a python -m hansoku.cli fw-daily --mode gelato-switch \
+                --abc-store "${{ inputs.abc_store }}" \
+                --abc-from "${{ inputs.abc_from }}" \
+                --abc-to "${{ inputs.abc_to }}" \
                 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "uriage-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode uriage-probe \

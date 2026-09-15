@@ -375,6 +375,20 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 dry_run=args.dry_run,
                 skip_existing=not getattr(args, "abc_refresh", False),
             )
+    if args.mode == "gelato-switch":
+        from .ingest.fw_daily import find_gelato_switches
+
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return find_gelato_switches(
+                warehouse,
+                master,
+                artifacts=Path(args.artifacts),
+                store=args.abc_store or "1160",
+                from_month=(args.abc_from[:7] if args.abc_from else None),
+                to_month=(args.abc_to[:7] if args.abc_to else None),
+            )
     if args.mode == "lunch-analyze":
         from .ingest.fw_daily import analyze_lunch
 
@@ -746,7 +760,8 @@ def build_parser() -> argparse.ArgumentParser:
                  "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
                  "abc-dom-probe", "uriage-probe", "monthly-coverage",
-                 "abc-detail", "data-audit", "source-audit", "abc-campaign"],
+                 "abc-detail", "data-audit", "source-audit", "abc-campaign",
+                 "gelato-switch"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument(

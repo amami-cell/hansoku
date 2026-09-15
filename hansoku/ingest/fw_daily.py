@@ -2970,6 +2970,142 @@ def ingest_abc_campaigns(
     return 0
 
 
+def find_gelato_switches(
+    warehouse,
+    master,
+    *,
+    artifacts: Path,
+    store: str = "1160",
+    from_month: str | None = None,
+    to_month: str | None = None,
+) -> int:
+    """schedule.yaml の c<店>-gelato-* 各回について、販促フレーバーが最初に売れた日を
+    FWのメニュー内訳(0円/日別)を当てて確定する。TOジェラート風味は0円で全商品に出ないため
+    メニュー内訳を日レンジで引いて判定。まず「前月末に無い＆当月初旬に有る＝月初切替」を
+    2プローブで確認し、月初でなければ二分探索で初売日を特定。結果を印字（scheduleは手で更新）。
+    from_month/to_month（YYYY-MM）で対象回を絞れる＝実行を年ごと等に分割できる。
+    """
+    import calendar as _cal
+    import sys as _sys
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    import yaml as _yaml
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    data = _yaml.safe_load(SCHEDULE_PATH.read_text(encoding="utf-8")) or {}
+    pre = f"c{store}-gelato-"
+    ents = [
+        c for c in (data.get("campaigns") or [])
+        if str(c.get("id", "")).startswith(pre) and c.get("items")
+    ]
+    mkey = lambda c: str(c["start"])[:7]  # noqa: E731
+    if from_month:
+        ents = [c for c in ents if mkey(c) >= from_month]
+    if to_month:
+        ents = [c for c in ents if mkey(c) <= to_month]
+    ents.sort(key=lambda c: str(c["start"]))
+    if not ents:
+        print("[ジェラート切替] 対象なし。終了。")
+        return 0
+
+    try:
+        st = master.by_code(store)
+        store_name = st.store_name
+    except Exception:  # noqa: BLE001
+        store_name = store
+
+    def D(s: str) -> "_date":
+        return _date(int(s[:4]), int(s[5:7]), int(s[8:10]))
+
+    def S(d) -> str:
+        return d.strftime("%Y/%m/%d")
+
+    def monthend(y: int, m: int):
+        return _date(y, m, _cal.monthrange(y, m)[1])
+
+    print(f"[ジェラート切替] 対象 {len(ents)}回 / 店 {store_name}")
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+
+        def present(d0, d1, kws):
+            """[d0,d1] のメニュー内訳に kws のどれかが数量>0 で出るか（フレッシュ導線）。"""
+            try:
+                _open_abc(session)
+                _select_date_preset(session, _ABC_PRESET_LASTMONTH)
+                _set_date_range(session, S(d0), S(d1))
+                if _abc_open_store_modal_and_select_one(session, store_name) is None:
+                    print("  [警告] 店舗選択失敗")
+                    return None
+                rows = _abc_grouped_rows_stable(session)
+            except Exception as e:  # noqa: BLE001
+                print(f"  [警告] 取得例外: {e}")
+                return None
+            for r in rows:
+                nm = r.get("name", "")
+                ints = r.get("ints", [])
+                q = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
+                if q > 0 and any(k in nm for k in kws):
+                    return True
+            return False
+
+        for c in ents:
+            cid = c["id"]
+            kws = [k for k in (c.get("items") or []) if k]
+            sd = D(c["start"])
+            y, m = sd.year, sd.month
+            m01 = _date(y, m, 1)
+            mend = monthend(y, m)
+            py, pm = (y - 1, 12) if m == 1 else (y, m - 1)
+            p20 = _date(py, pm, 20)
+            pend = monthend(py, pm)
+
+            pa = present(p20, pend, kws)
+            if pa is None:
+                print(f"[ジェラート切替] {cid} 判定不能（プローブ失敗）")
+                continue
+            prev_absent = not pa
+            early = present(m01, _date(y, m, 3), kws)
+            if early is None:
+                print(f"[ジェラート切替] {cid} 判定不能（プローブ失敗）")
+                continue
+            if prev_absent and early:
+                print(f"[ジェラート切替] {cid} 切替日 = {y:04d}-{m:02d}-01 ✅月初確定（前月末なし・初旬あり）")
+                continue
+
+            # 二分探索: base から [lo..hi] で present([base..D]) が True になる最小 D＝初売日。
+            # base は探索の起点（固定）、[lo,hi] は初売日の候補域。
+            # present(m01..m03)=False が確定しているので、月初なしケースは lo を m04 から始めて
+            # プローブを節約する（base は m01 のまま＝窓の起点はずらさない）。
+            if prev_absent:
+                base, hi = m01, mend
+                lo = _date(y, m, 4) if early is False else m01
+            else:
+                base, lo, hi = _date(py, pm, 1), _date(py, pm, 1), mend
+            probes = 0
+            while lo < hi and probes < 8:
+                mid = lo + (hi - lo) // 2
+                r = present(base, mid, kws)
+                probes += 1
+                if r is None:
+                    break
+                if r:
+                    hi = mid
+                else:
+                    lo = mid + _td(days=1)
+            note = "前月内" if not prev_absent else ("月途中" if lo > m01 else "月初")
+            print(f"[ジェラート切替] {cid} 初売日 = {lo.isoformat()} 🔎探索（{note}・{probes}プローブ）")
+    return 0
+
+
 def _abc_click_radio(page, label: str) -> bool:
     """条件パネルのラジオ/ラベル（全商品・部門・グループ・メニュー等）を実クリックする。
 
