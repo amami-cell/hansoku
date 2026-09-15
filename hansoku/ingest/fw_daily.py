@@ -2636,6 +2636,190 @@ def ingest_abc_store(
     return 0
 
 
+def _abc_grouped_rows_stable(session) -> list[dict]:
+    """今の日付レンジで、グループ→メニューの順に踏んでから内訳を全件（グループ付き）で採る。
+    行数が3回連続で伸び止まるまで粘る（メニューは全商品より行数が多く描画が遅れるため）。"""
+    if _abc_click_radio(session.page, "全商品"):
+        _abc_search_and_rows(session)
+    if _abc_click_radio(session.page, "グループ"):
+        _abc_search_and_rows(session)
+    rows: list[dict] = []
+    if _abc_click_radio(session.page, "メニュー"):
+        _abc_search_and_rows(session)
+        stable = 0
+        for _ in range(12):
+            cur = _extract_product_grid_grouped(session)
+            if len(cur) > len(rows):
+                rows = cur
+                stable = 0
+            else:
+                stable += 1
+                if stable >= 3:
+                    break
+            time.sleep(1.2)
+    return rows
+
+
+SCHEDULE_PATH = Path(__file__).resolve().parents[2] / "config" / "schedule.yaml"
+
+
+def ingest_abc_campaigns(
+    warehouse,
+    master,
+    *,
+    artifacts: Path,
+    store: str | None = None,
+    only_ids: str | None = None,
+    dry_run: bool = False,
+    budget_minutes: float = 25.0,
+) -> int:
+    """登録済み販促の [start,end] レンジでABCを引き、その施策の“販売時期”実績（商品別 売上/点数）を
+    施策id 紐づけで焼く。丸ごとの月ではなく、実際の販売期間の数字を施策詳細に出すための土台。
+
+    保存: source=fw_abc_camp / grain=day / date=開始日 / product_category=施策id。
+    月次(grain=month)とは分離されるので既存集計に影響しない。export が施策idごとに読み直す。
+    対象は schedule.yaml のうち start と end があり bucket か items を持つ施策（店は解決できるもの）。
+    """
+    import sys as _sys
+    from datetime import date as _date
+    from datetime import datetime, timezone
+
+    import yaml as _yaml
+
+    from ..model import (
+        GRAIN_DAY,
+        KIND_FINAL,
+        METRIC_PRODUCT_QTY,
+        METRIC_PRODUCT_SALES,
+        ActualRow,
+    )
+    from ..web.export import classify_category as _classify
+    from ..web.export import load_store_categories as _loadcats
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    data = _yaml.safe_load(SCHEDULE_PATH.read_text(encoding="utf-8")) or {}
+    allrules = _loadcats()
+    want_ids = {s.strip() for s in (only_ids or "").split(",") if s.strip()}
+
+    def _resolve(code_or_name: str):
+        try:
+            return master.by_code(code_or_name)
+        except Exception:  # noqa: BLE001
+            return master.find_by_name(code_or_name) or next(
+                (s for s in master.active if code_or_name in s.store_name), None
+            )
+
+    # 施策→対象店（単店に絞る。複数店の施策はそれぞれ別レンジ取込になるが、ルクア系は単店）。
+    jobs: dict[str, list[dict]] = {}  # store_code -> [campaign,...]
+    store_name: dict[str, str] = {}
+    for c in data.get("campaigns") or []:
+        cid = c.get("id")
+        if want_ids and cid not in want_ids:
+            continue
+        start, end = c.get("start"), c.get("end")
+        if not start or not end:
+            continue
+        if not (c.get("bucket") or c.get("items")):
+            continue
+        for s in c.get("stores") or []:
+            st = _resolve(str(s))
+            if not st or not st.active:
+                continue
+            if store:
+                sel = _resolve(store)
+                if not sel or sel.store_code != st.store_code:
+                    continue
+            jobs.setdefault(st.store_code, []).append(c)
+            store_name[st.store_code] = st.store_name
+
+    if not jobs:
+        print("[施策ABC] 対象施策がありません（start/end と bucket/items が要る）。終了。")
+        return 0
+
+    source = "fw_abc_camp"
+    ingested_at = datetime.now(timezone.utc)
+    t0 = time.time()
+    total = 0
+    print(f"[施策ABC] 対象 {sum(len(v) for v in jobs.values())}施策 / {len(jobs)}店")
+
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+        _open_abc(session)
+        _select_date_preset(session, _ABC_PRESET_LASTMONTH)
+        if not dry_run:
+            warehouse.ensure_schema()
+        deadline = t0 + budget_minutes * 60
+        for code, camps in jobs.items():
+            name = store_name[code]
+            # 店を選ぶ前に日付を出す（新しめの店対策。ingest_abc_store と同じ順）。
+            first = camps[0]
+            _set_date_range(session, first["start"].replace("-", "/"), first["end"].replace("-", "/"))
+            hit = _abc_open_store_modal_and_select_one(session, name)
+            if hit is None:
+                print(f"[施策ABC] 店舗選択に失敗（{name}）。飛ばす。")
+                continue
+            rules = allrules.get(code)
+            collected: list[ActualRow] = []
+            for c in camps:
+                if time.time() > deadline:
+                    print(f"[施策ABC] 時間切れ（{budget_minutes:.0f}分）。残りは次回。")
+                    break
+                cid = c["id"]
+                d_from = c["start"].replace("-", "/")
+                d_to = c["end"].replace("-", "/")
+                rep = _date(int(c["start"][:4]), int(c["start"][5:7]), int(c["start"][8:10]))
+                _set_date_range(session, d_from, d_to)
+                rows = _abc_grouped_rows_stable(session)
+                bucket = c.get("bucket")
+                kws = [k for k in (c.get("items") or []) if k]
+                n = 0
+                for prod in rows:
+                    nm = prod["name"]
+                    ints = prod["ints"]
+                    sales = ints[_ABC_SALES] if len(ints) > _ABC_SALES else 0
+                    qty = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
+                    if sales <= 0 and qty <= 0:
+                        continue
+                    # 対象商品だけ残す: items があれば商品名一致、無ければ bucket(区分)一致。
+                    if kws:
+                        if not any(k in nm for k in kws):
+                            continue
+                    elif bucket:
+                        if not rules or _classify(nm, rules, prod.get("group")) != bucket:
+                            continue
+                    for metric, val in ((METRIC_PRODUCT_SALES, sales), (METRIC_PRODUCT_QTY, qty)):
+                        if val <= 0:
+                            continue
+                        collected.append(
+                            ActualRow(
+                                store_code=code,
+                                date=rep,
+                                grain=GRAIN_DAY,
+                                metric=metric,
+                                value=float(val),
+                                product_name=nm[:80],
+                                product_category=cid,  # 施策idで紐づける
+                                kind=KIND_FINAL,
+                                source=source,
+                                ingested_at=ingested_at,
+                            )
+                        )
+                    n += 1
+                print(f"[施策ABC] {code} {cid} {c['start']}〜{c['end']} 対象{n}品 抽出{len(rows)}行")
+            if not dry_run and collected:
+                total += warehouse.replace_actuals(collected, scope_stores=True, scope_metrics=True)
+    print(f"[施策ABC] warehouse へ {total} 件 書き込みました（source={source}）")
+    return 0
+
+
 def _abc_click_radio(page, label: str) -> bool:
     """条件パネルのラジオ/ラベル（全商品・部門・グループ・メニュー等）を実クリックする。
 

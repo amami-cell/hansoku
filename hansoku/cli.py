@@ -360,6 +360,20 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 month=args.month,
                 dry_run=args.dry_run,
             )
+    if args.mode == "abc-campaign":
+        from .ingest.fw_daily import ingest_abc_campaigns
+
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return ingest_abc_campaigns(
+                warehouse,
+                master,
+                artifacts=Path(args.artifacts),
+                store=args.abc_store or None,
+                only_ids=getattr(args, "abc_ids", None),
+                dry_run=args.dry_run,
+            )
     if args.mode == "lunch-analyze":
         from .ingest.fw_daily import analyze_lunch
 
@@ -731,7 +745,7 @@ def build_parser() -> argparse.ArgumentParser:
                  "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
                  "abc-dom-probe", "uriage-probe", "monthly-coverage",
-                 "abc-detail", "data-audit", "source-audit"],
+                 "abc-detail", "data-audit", "source-audit", "abc-campaign"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument(
@@ -760,6 +774,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="hourly-store-probe の期間 'ラベル:from:to,...'（YYYY-MM-DD）")
     fwdaily.add_argument("--abc-ranges", default=None, dest="abc_ranges",
                          help="abc-totals-probe の期間 'ラベル:from:to,...'（YYYY-MM-DD）")
+    fwdaily.add_argument("--abc-ids", default=None, dest="abc_ids",
+                         help="abc-campaign: 対象施策id（カンマ区切り。既定=schedule全件のうち条件を満たすもの）")
     fwdaily.add_argument(
         "--metric",
         default=None,
