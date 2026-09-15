@@ -2915,6 +2915,7 @@ def ingest_abc_campaigns(
             fallback = 0
             if kws and not picked and bucket and rules:
                 is_lim = _limited_checker(code, c["start"][:7])
+                cands: list[tuple[str, int, int]] = []
                 for prod in rows:
                     nm = prod["name"]
                     sales, qty = _val_of(prod)
@@ -2923,8 +2924,12 @@ def ingest_abc_campaigns(
                     if _classify(nm, rules, prod.get("group")) != bucket:
                         continue
                     if is_lim(nm):
-                        picked.append((nm, sales, qty))
-                        fallback += 1
+                        cands.append((nm, sales, qty))
+                # 拾いすぎ防止：売上上位5品までに絞る（その回の主役だけ残す）。
+                cands.sort(key=lambda x: x[1], reverse=True)
+                for nm, sales, qty in cands[:5]:
+                    picked.append((nm, sales, qty))
+                    fallback += 1
 
             n = 0
             crows: list[ActualRow] = []

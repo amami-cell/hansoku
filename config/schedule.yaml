@@ -151,15 +151,15 @@ campaigns:
   - { id: c1160-cake-2602, stores: ["1160"], title: 2月ケーキ, kind: dev, bucket: ケーキ, start: "2026-02-15", end: "2026-03-18" }
   # パフェ枠（ショートケーキパフェ→ライチ→パフェスノー→ハロウィン→いちじく→ノエル→みかん）
   #   items は商品名キーワード。該当商品の売上だけを切り出して昨対比・前回比を出す。
-  - { id: c1160-parfait-lychee, stores: ["1160"], title: 5月パフェ ライチ, kind: dev, bucket: パフェ, items: [ライチ], start: "2025-05-08", end: "2025-05-31" }
+  - { id: c1160-parfait-lychee, stores: ["1160"], title: 5月パフェ ライチ, kind: dev, bucket: パフェ, items: [ペルル・デ・リッシ, ペルル], start: "2025-05-08", end: "2025-05-31", note: "実体は仏名『パルフェ・オゥ・ペルル・デ・リッシ』（ライチ）" }
   - { id: c1160-parfait-snow, stores: ["1160"], title: パフェスノー（夏限定・4種）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー], start: "2025-06-01", end: "2025-09-30" }
-  - { id: c1160-parfait-halloween, stores: ["1160"], title: ハロウィンパフェ, kind: dev, bucket: パフェ, items: [ハロウィン, かぼちゃ, パンプキン, モンブラン, マロン], start: "2025-09-30", end: "2025-10-31" }
+  - { id: c1160-parfait-halloween, stores: ["1160"], title: ハロウィンパフェ, kind: dev, bucket: パフェ, items: [ポイズン], start: "2025-09-30", end: "2025-10-31", note: "実体は仏名『パルフェ・オ・ポイズン・シュクレ・エトランゼ』（毒りんご風パフェ）" }
   - { id: c1160-parfait-ichijiku, stores: ["1160"], title: いちじくパフェ, kind: dev, bucket: パフェ, items: [いちじく, イチジク, 無花果], start: "2025-10-31", end: "2025-12-01" }
   - { id: c1160-parfait-noel, stores: ["1160"], title: ノエル（クリスマスパフェ）, kind: dev, bucket: パフェ, items: [ノエル, クリスマス, サンタ], start: "2025-12-02", end: "2025-12-25" }
-  - { id: c1160-parfait-mikan, stores: ["1160"], title: みかんパフェ, kind: dev, bucket: パフェ, items: [みかん, 蜜柑, オレンジ], start: "2026-01-02", end: "2026-02-01" }
+  - { id: c1160-parfait-mikan, stores: ["1160"], title: みかんパフェ, kind: dev, bucket: パフェ, items: [マンダリン, みかん, 蜜柑], start: "2026-01-02", end: "2026-02-01", note: "実体は仏名『パルフェ・ア・ラ・マンダリン…』" }
   - { id: c1160-parfait-shortcake, stores: ["1160"], title: ショートケーキパフェ, kind: dev, bucket: パフェ, items: [ショートケーキ], start: "2026-02-02", end: "2026-05-07" }
   # コラボ枠（bucket=コラボ で区分に束ね、items で該当商品を切り出す）
-  - { id: c1160-collab-hakuto, stores: ["1160"], title: 白桃パフェDaysコラボ, kind: dev, bucket: パフェ, items: [白桃, 桃], start: "2025-07-25", end: "2025-07-27", note: 期間限定コラボ（実体は「丸ごと白桃とスパークリングジュレのパフェ」＝パフェ部門） }
+  - { id: c1160-collab-hakuto, stores: ["1160"], title: 白桃パフェDaysコラボ, kind: dev, bucket: パフェ, items: [アンシャンター], start: "2025-07-25", end: "2025-07-27", note: "3日限定コラボ。実体は仏名『パルフェ・ドゥ・アンシャンター・ピーチ』（岡山白桃・通常の白桃パフェとは別SKU）" }
   - { id: c1160-collab-kumamon, stores: ["1160"], title: くまもとモンコラボ, kind: dev, bucket: コラボ, items: [くまモン, くまもと, クマモン], start: "2025-11-01", end: "2025-11-30", note: 期間限定コラボ }
 
   # ── 門真Largo（1713）───────────────────────────────
