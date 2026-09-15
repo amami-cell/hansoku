@@ -2509,6 +2509,48 @@ function campPeriodActual(c) {
       <ul class="fw-list">${rows}</ul>
     </div></section>`;
 }
+// TOジェラートは0円だが「出品数(点数)」で見る。総スクープ = シングル×1＋ダブル×2＋トリプル×3。
+// 各フレーバーの点数の構成比を出す（この回の販促2品は★で強調）。
+// 二重計上を避けるため、容器行(TOジェラート単/双/三)・サイズ内訳(TOシングル〜)・店内(ジェラート）〜)・
+// サンデーは分子(フレーバー)から除外。分母は容器数からの総スクープ。
+function campGelatoCompo(c) {
+  if (c.bucket !== "ジェラート") return "";
+  const code = (c.stores || [])[0]; if (!code) return "";
+  const months = monthRange(String(c.start).slice(0, 7), String(c.end).slice(0, 7));
+  const flav = {}; let single = 0, dbl = 0, tri = 0;
+  const excluded = n =>
+    /^TOジェラート/.test(n) || /^TO(シングル|ダブル|トリプル)/.test(n) ||
+    /^サンデー/.test(n) || /^ジェラート[）)]/.test(n) ||
+    /^ジェラート(ダブル|シングル|トリプル|チケット)/.test(n);
+  for (const m of months) {
+    for (const p of prodsInCat(code, m, "ジェラート")) {
+      const n = p.name || "", q = p.qty || 0;
+      if (/^TOジェラートシングル/.test(n)) single += q;
+      else if (/^TOジェラートダブル/.test(n)) dbl += q;
+      else if (/^TOジェラートトリプル/.test(n)) tri += q;
+      if (excluded(n)) continue;
+      flav[n] = (flav[n] || 0) + q;
+    }
+  }
+  const scoops = single * 1 + dbl * 2 + tri * 3;
+  const list = Object.entries(flav).filter(([, q]) => q > 0).sort((a, b) => b[1] - a[1]);
+  if (!scoops && !list.length) return "";
+  const denom = scoops || list.reduce((a, [, q]) => a + q, 0) || 1;
+  const promo = (c.items || []);
+  const rows = list.map(([n, q]) => {
+    const pct = Math.round(q / denom * 1000) / 10;
+    const hot = promo.some(k => k && n.includes(k));
+    return `<li><span class="fw-pn">${hot ? "★ " : ""}${esc(n)}</span>` +
+      `<span class="fw-pv"><span class="fw-pq">${nin(q)}点</span><span class="fw-pp">${pct}%</span></span></li>`;
+  }).join("");
+  return `<section class="block">
+    <div class="bhead"><h2>TOジェラート 出品数構成比</h2>
+      <span class="bnote">${esc(c.start)}〜${esc(c.end)}／ジェラートは0円のため出品数(点数)で見る。総スクープ＝シングル×1＋ダブル×2＋トリプル×3。★＝この回の販促2品</span></div>
+    <div class="panel">
+      <div class="cactual-sum">総出品数(スクープ) <b>${nin(scoops)}</b>　容器内訳: 単${nin(single)}／双${nin(dbl)}／三${nin(tri)}</div>
+      <ul class="fw-list">${rows}</ul>
+    </div></section>`;
+}
 function renderCampaign(id) {
   const c = campById(id);
   if (!c) return `<div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
@@ -2646,6 +2688,7 @@ function renderCampaign(id) {
 
     ${renderReview(c)}
     ${campPeriodActual(c)}
+    ${campGelatoCompo(c)}
     ${campDeptCard(c)}
 
     <section class="block">
