@@ -2488,6 +2488,27 @@ function campDeptCardSnapshot(c) {
   return sections.join("");
 }
 
+// 施策の“販売時期”実績（abc-campaign 由来）。丸ごとの月ではなく登録期間レンジで取った実データ。
+const campActual = c => (DATA.campaign_actuals || {})[c.id] || null;
+function campPeriodActual(c) {
+  const a = campActual(c);
+  if (!a || !a.items || !a.items.length) return "";
+  const tot = a.sales || 0;
+  const rows = a.items.slice()
+    .sort((x, y) => (y.sales - x.sales) || ((y.qty || 0) - (x.qty || 0)))
+    .map(p => {
+      const pct = tot ? Math.round((p.sales || 0) / tot * 100) : 0;
+      const q = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
+      return `<li><span class="fw-pn">${esc(p.name)}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${pct}%</span></span></li>`;
+    }).join("");
+  return `<section class="block">
+    <div class="bhead"><h2>販売時期の実績</h2>
+      <span class="bnote">${esc(c.start)}〜${esc(c.end)} の実データ（丸ごとの月ではなく販売期間ぶん）・税抜／構成比は施策内</span></div>
+    <div class="panel">
+      <div class="cactual-sum">売上 <b>${man(tot)}</b>・${a.items.length}品・計${nin(a.qty || 0)}点</div>
+      <ul class="fw-list">${rows}</ul>
+    </div></section>`;
+}
 function renderCampaign(id) {
   const c = campById(id);
   if (!c) return `<div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
@@ -2624,6 +2645,7 @@ function renderCampaign(id) {
     </section>
 
     ${renderReview(c)}
+    ${campPeriodActual(c)}
     ${campDeptCard(c)}
 
     <section class="block">

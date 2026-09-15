@@ -18,6 +18,7 @@ from ..analytics import RATIO_METRICS, ratio
 from ..db.warehouse import AggregateQuery, Warehouse
 from ..model import (
     DEPT_BUCKETS,
+    GRAIN_DAY,
     GRAIN_HOUR,
     GRAIN_MONTH,
     METRIC_COVERS,
@@ -426,6 +427,45 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
     }
 
 
+def _build_campaign_actuals(
+    warehouse: Warehouse, master: StoreMaster, date_from: date, date_to: date
+) -> dict:
+    """施策の“販売時期”実績。abc-campaign が焼いた source=fw_abc_camp / grain=day /
+    product_category=施策id の行を、施策idごとに {items:[{name,sales(税抜),qty}], sales, qty}
+    に束ねる。丸ごとの月ではなく登録期間レンジで取った実績なので、施策詳細はこれを優先表示する。"""
+    tmp: dict[str, dict[str, dict]] = {}
+    for metric, key in ((METRIC_PRODUCT_SALES, "sales"), (METRIC_PRODUCT_QTY, "qty")):
+        for row in warehouse.aggregate(
+            AggregateQuery(
+                date_from=date_from,
+                date_to=date_to,
+                grain=GRAIN_DAY,
+                metrics=[metric],
+                store_codes=list(master.active_codes),
+                group_by=("product_category", "product_name"),
+                sources=["fw_abc_camp"],
+            )
+        ):
+            cid = row["product_category"]
+            nm = row["product_name"]
+            if not cid or not nm:
+                continue
+            d = tmp.setdefault(cid, {}).setdefault(nm, {"name": nm, "sales": 0, "qty": 0})
+            if key == "sales":
+                d["sales"] = round(row["value"] / NET_DIVISOR)  # 税込→税抜
+            else:
+                d["qty"] = round(row["value"])
+    out: dict[str, dict] = {}
+    for cid, items in tmp.items():
+        arr = sorted(items.values(), key=lambda p: (-(p["sales"] or 0), -(p["qty"] or 0)))
+        out[cid] = {
+            "items": arr,
+            "sales": sum(p["sales"] for p in arr),
+            "qty": sum(p["qty"] for p in arr),
+        }
+    return out
+
+
 def _build_abc_by_month(
     warehouse: Warehouse,
     master: StoreMaster,
@@ -720,6 +760,8 @@ def build(
     departments_monthly, products_monthly, categories_monthly = _build_abc_by_month(
         warehouse, master, date_from, date_to, store_categories
     )
+    # 施策の販売時期実績（abc-campaign 由来）。登録期間レンジで取った施策別の実績。
+    campaign_actuals = _build_campaign_actuals(warehouse, master, date_from, date_to)
 
     # 店舗詳細の「部門構成」「売れ筋商品」は “直近1ヶ月” を名乗る表なので、月次
     # シリーズの最新月をそのまま使う。以前は date_from〜date_to を丸ごと SUM した
@@ -817,6 +859,9 @@ def build(
         "store_categories": store_categories,
         # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
         "campaigns": campaigns or [],
+        # 施策の“販売時期”実績（abc-campaign 由来）。施策id→{items,sales,qty}。登録期間レンジで
+        # 取った実績で、施策詳細は丸ごとの月ではなくこれを優先表示する。空でも画面は成立する。
+        "campaign_actuals": campaign_actuals,
         # 制作物ギャラリー（config/creatives.yaml 由来）。空でも画面は成立する。
         "creatives": creatives or [],
         # ランチ効果分析（config/lunch_analysis.json 由来・店舗別）。空でも画面は成立する。
