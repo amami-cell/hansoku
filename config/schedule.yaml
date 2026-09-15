@@ -228,21 +228,21 @@ campaigns:
   #   復元。切替は奇数月の月初（POPの『◯月1日〜』とも一致）。r1160-gelato(通年)は
   #   部門ビュー用、この c1160-gelato-* は回ごとの切替日を持つタイムライン用。
   #   ジェラートは0円商品のため販売時期実績(売上)は付かず、点数は月次内訳で表示。
-  - { id: c1160-gelato-2401, stores: ["1160"], title: ジェラート 1-2月, kind: dev, bucket: ジェラート, items: [大人の苺ミルク, 柚子茶ジンジャー], start: "2024-01-01", end: "2024-02-29" }
-  - { id: c1160-gelato-2403, stores: ["1160"], title: ジェラート 3-4月, kind: dev, bucket: ジェラート, items: [苺練乳ソルベ, キウイ×バナナ], start: "2024-03-01", end: "2024-04-30" }
-  - { id: c1160-gelato-2405, stores: ["1160"], title: ジェラート 5-6月, kind: dev, bucket: ジェラート, items: [ブルーベリーソルベ, サマーメロンソルベ], start: "2024-05-01", end: "2024-06-30" }
-  - { id: c1160-gelato-2407, stores: ["1160"], title: ジェラート 7-8月, kind: dev, bucket: ジェラート, items: [ココナッツミルク, チョコミント・ディスコ], start: "2024-07-01", end: "2024-08-31" }
-  - { id: c1160-gelato-2409, stores: ["1160"], title: ジェラート 9-10月, kind: dev, bucket: ジェラート, items: [巨峰ブルーベリースペシャル, ピーナッツバター], start: "2024-09-01", end: "2024-10-31" }
-  - { id: c1160-gelato-2411, stores: ["1160"], title: ジェラート 11-12月, kind: dev, bucket: ジェラート, items: [大人のベイリーズストロベリー, 黒糖ジンジャーミルク], start: "2024-11-01", end: "2024-12-31" }
-  - { id: c1160-gelato-2501, stores: ["1160"], title: ジェラート 1-2月, kind: dev, bucket: ジェラート, items: [リンゴブランデー, ビロードショコラ], start: "2025-01-01", end: "2025-02-28" }
-  - { id: c1160-gelato-2503, stores: ["1160"], title: ジェラート 3-4月, kind: dev, bucket: ジェラート, items: [苺ヨーグルト, 桜ブラン], start: "2025-03-01", end: "2025-04-30" }
-  - { id: c1160-gelato-2505, stores: ["1160"], title: ジェラート 5-6月, kind: dev, bucket: ジェラート, items: [ブルーベリーチーズケーキ, ミルキーメロン], start: "2025-05-01", end: "2025-06-30" }
-  - { id: c1160-gelato-2507, stores: ["1160"], title: ジェラート 7-8月, kind: dev, bucket: ジェラート, items: [蜜香ウーロン, パイナップルケーキ], start: "2025-07-01", end: "2025-08-31" }
-  - { id: c1160-gelato-2509, stores: ["1160"], title: ジェラート 9-10月, kind: dev, bucket: ジェラート, items: [かぼちゃプリンクラッシュ, 黒ごま豆乳もち], start: "2025-09-01", end: "2025-10-31" }
-  - { id: c1160-gelato-2511, stores: ["1160"], title: ジェラート 11-12月, kind: dev, bucket: ジェラート, items: [苺ティラミス, サングリア], start: "2025-11-01", end: "2025-12-31" }
-  - { id: c1160-gelato-2601, stores: ["1160"], title: ジェラート 1-2月, kind: dev, bucket: ジェラート, items: [リッチ苺ミルク, ショコラノワゼット], start: "2026-01-01", end: "2026-02-28" }
-  - { id: c1160-gelato-2603, stores: ["1160"], title: ジェラート 3-4月, kind: dev, bucket: ジェラート, items: [ドバイ・ピスタチオショコラ, 苺ブラン], start: "2026-03-01", end: "2026-04-30" }
-  - { id: c1160-gelato-2605, stores: ["1160"], title: ジェラート 5-6月, kind: dev, bucket: ジェラート, items: [リッチマンゴー・ミルク, ソルティアナナ], start: "2026-05-01", end: "2026-06-30" }
+  - { id: c1160-gelato-2401, stores: ["1160"], title: ジェラート 1-2月, kind: dev, bucket: ジェラート, items: [大人の苺ミルク, 柚子茶ジンジャー], start: "2023-12-26", end: "2024-03-04" }
+  - { id: c1160-gelato-2403, stores: ["1160"], title: ジェラート 3-4月, kind: dev, bucket: ジェラート, items: [苺練乳ソルベ, キウイ×バナナ], start: "2024-03-05", end: "2024-05-07" }
+  - { id: c1160-gelato-2405, stores: ["1160"], title: ジェラート 5-6月, kind: dev, bucket: ジェラート, items: [ブルーベリーソルベ, サマーメロンソルベ], start: "2024-05-08", end: "2024-07-19" }
+  - { id: c1160-gelato-2407, stores: ["1160"], title: ジェラート 7-8月, kind: dev, bucket: ジェラート, items: [ココナッツミルク, チョコミント・ディスコ], start: "2024-07-20", end: "2024-09-14" }
+  - { id: c1160-gelato-2409, stores: ["1160"], title: ジェラート 9-10月, kind: dev, bucket: ジェラート, items: [巨峰ブルーベリースペシャル, ピーナッツバター], start: "2024-09-15", end: "2024-11-04" }
+  - { id: c1160-gelato-2411, stores: ["1160"], title: ジェラート 11-12月, kind: dev, bucket: ジェラート, items: [大人のベイリーズストロベリー, 黒糖ジンジャーミルク], start: "2024-11-05", end: "2025-01-18" }
+  - { id: c1160-gelato-2501, stores: ["1160"], title: ジェラート 1-2月, kind: dev, bucket: ジェラート, items: [リンゴブランデー, ビロードショコラ], start: "2025-01-19", end: "2025-03-14" }
+  - { id: c1160-gelato-2503, stores: ["1160"], title: ジェラート 3-4月, kind: dev, bucket: ジェラート, items: [苺ヨーグルト, 桜ブラン], start: "2025-03-15", end: "2025-05-14" }
+  - { id: c1160-gelato-2505, stores: ["1160"], title: ジェラート 5-6月, kind: dev, bucket: ジェラート, items: [ブルーベリーチーズケーキ, ミルキーメロン], start: "2025-05-15", end: "2025-07-03" }
+  - { id: c1160-gelato-2507, stores: ["1160"], title: ジェラート 7-8月, kind: dev, bucket: ジェラート, items: [蜜香ウーロン, パイナップルケーキ], start: "2025-07-04", end: "2025-09-06" }
+  - { id: c1160-gelato-2509, stores: ["1160"], title: ジェラート 9-10月, kind: dev, bucket: ジェラート, items: [かぼちゃプリンクラッシュ, 黒ごま豆乳もち], start: "2025-09-07", end: "2025-10-01" }
+  - { id: c1160-gelato-2511, stores: ["1160"], title: ジェラート 11-12月, kind: dev, bucket: ジェラート, items: [苺ティラミス, サングリア], start: "2025-10-02", end: "2026-01-09" }
+  - { id: c1160-gelato-2601, stores: ["1160"], title: ジェラート 1-2月, kind: dev, bucket: ジェラート, items: [リッチ苺ミルク, ショコラノワゼット], start: "2026-01-10", end: "2026-03-08" }
+  - { id: c1160-gelato-2603, stores: ["1160"], title: ジェラート 3-4月, kind: dev, bucket: ジェラート, items: [ドバイ・ピスタチオショコラ, 苺ブラン], start: "2026-03-09", end: "2026-05-08" }
+  - { id: c1160-gelato-2605, stores: ["1160"], title: ジェラート 5-6月, kind: dev, bucket: ジェラート, items: [リッチマンゴー・ミルク, ソルティアナナ], start: "2026-05-09", end: "2026-06-30" }
   - { id: c1160-gelato-2607, stores: ["1160"], title: ジェラート 7-8月, kind: dev, bucket: ジェラート, items: [ココマンゴー, アンゴリア・ロッサ], start: "2026-07-01", end: "2026-08-31" }
 
   # ================================================================
