@@ -2687,9 +2687,12 @@ def ingest_abc_campaigns(
 
     import yaml as _yaml
 
+    import calendar as _cal
+
     from ..db.warehouse import AggregateQuery
     from ..model import (
         GRAIN_DAY,
+        GRAIN_MONTH,
         KIND_FINAL,
         METRIC_PRODUCT_QTY,
         METRIC_PRODUCT_SALES,
@@ -2816,6 +2819,39 @@ def ingest_abc_campaigns(
     if not dry_run:
         warehouse.ensure_schema()
 
+    def _ym_minus(ym: str, k: int) -> str:
+        idx = int(ym[:4]) * 12 + (int(ym[5:7]) - 1) - k
+        return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
+
+    def _limited_checker(code_: str, start_ym: str):
+        """おすすめジェラートと同じ半年ルック: 直近6か月ぶんの月次商品で毎月連続して
+        出ていれば定番(GM)、どこかに抜けがあれば限定(=その回の販促商品)。月次履歴が
+        浅い(4か月未満)ときは限定側に倒す（安全側＝拾う）。判定不能なら全部拾う。"""
+        months = [_ym_minus(start_ym, k) for k in range(6)]
+        lo, hi = min(months), max(months)
+        try:
+            rows_ = warehouse.aggregate(
+                AggregateQuery(
+                    date_from=_date(int(lo[:4]), int(lo[5:7]), 1),
+                    date_to=_date(
+                        int(hi[:4]), int(hi[5:7]), _cal.monthrange(int(hi[:4]), int(hi[5:7]))[1]
+                    ),
+                    grain=GRAIN_MONTH,
+                    metrics=[METRIC_PRODUCT_SALES],
+                    store_codes=[code_],
+                    group_by=["date", "product_name"],
+                )
+            )
+        except Exception:  # noqa: BLE001
+            return lambda _n: True
+        per_month: dict[str, set] = {}
+        for r in rows_:
+            per_month.setdefault(r["date"].strftime("%Y-%m"), set()).add(r["product_name"])
+        data_months = [mm for mm in months if per_month.get(mm)]
+        if len(data_months) < 4:
+            return lambda _n: True
+        return lambda nm: any(nm not in per_month.get(mm, set()) for mm in data_months)
+
     with fw_session(artifacts) as session:
         try:
             session.page.set_default_timeout(9000)
@@ -2851,22 +2887,48 @@ def ingest_abc_campaigns(
                 continue
             bucket = c.get("bucket")
             kws = [k for k in (c.get("items") or []) if k]
-            n = 0
-            crows: list[ActualRow] = []
-            for prod in rows:
-                nm = prod["name"]
+
+            def _val_of(prod):
                 ints = prod["ints"]
                 sales = ints[_ABC_SALES] if len(ints) > _ABC_SALES else 0
                 qty = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
+                return sales, qty
+
+            # 対象商品だけ残す: items があれば商品名一致、無ければ bucket(区分)一致。
+            picked: list[tuple[str, int, int]] = []
+            for prod in rows:
+                nm = prod["name"]
+                sales, qty = _val_of(prod)
                 if sales <= 0 and qty <= 0:
                     continue
-                # 対象商品だけ残す: items があれば商品名一致、無ければ bucket(区分)一致。
                 if kws:
                     if not any(k in nm for k in kws):
                         continue
                 elif bucket:
                     if not rules or _classify(nm, rules, prod.get("group")) != bucket:
                         continue
+                picked.append((nm, sales, qty))
+
+            # items 指定なのに1件も当たらない回（キーワード表記ゆれ／未記入）は、
+            # おすすめジェラートと同じ「半年ルック」で自動救済：販売期間中に出た bucket 商品の
+            # うち“限定(直近6か月で抜けのある新顔)”を拾う。定番(GM)は拾わない。
+            fallback = 0
+            if kws and not picked and bucket and rules:
+                is_lim = _limited_checker(code, c["start"][:7])
+                for prod in rows:
+                    nm = prod["name"]
+                    sales, qty = _val_of(prod)
+                    if sales <= 0 and qty <= 0:
+                        continue
+                    if _classify(nm, rules, prod.get("group")) != bucket:
+                        continue
+                    if is_lim(nm):
+                        picked.append((nm, sales, qty))
+                        fallback += 1
+
+            n = 0
+            crows: list[ActualRow] = []
+            for nm, sales, qty in picked:
                 for metric, val in ((METRIC_PRODUCT_SALES, sales), (METRIC_PRODUCT_QTY, qty)):
                     if val <= 0:
                         continue
@@ -2885,7 +2947,8 @@ def ingest_abc_campaigns(
                         )
                     )
                 n += 1
-            print(f"[施策ABC] {code} {cid} {c['start']}〜{c['end']} 対象{n}品 抽出{len(rows)}行")
+            tag = f"（半年ルック救済 {fallback}品）" if fallback else ""
+            print(f"[施策ABC] {code} {cid} {c['start']}〜{c['end']} 対象{n}品 抽出{len(rows)}行{tag}")
             # 施策ごとにその場で書く。長時間スクレイプ中に Neon 接続が idle で切れて
             # 最後にまとめて書くと失敗するため（SSL closed）。切れていたら張り直して1回再試行。
             if not dry_run and crows:

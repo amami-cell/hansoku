@@ -159,7 +159,7 @@ campaigns:
   - { id: c1160-parfait-mikan, stores: ["1160"], title: みかんパフェ, kind: dev, bucket: パフェ, items: [みかん, 蜜柑, オレンジ], start: "2026-01-02", end: "2026-02-01" }
   - { id: c1160-parfait-shortcake, stores: ["1160"], title: ショートケーキパフェ, kind: dev, bucket: パフェ, items: [ショートケーキ], start: "2026-02-02", end: "2026-05-07" }
   # コラボ枠（bucket=コラボ で区分に束ね、items で該当商品を切り出す）
-  - { id: c1160-collab-hakuto, stores: ["1160"], title: 白桃パフェDaysコラボ, kind: dev, bucket: コラボ, items: [白桃], start: "2025-07-25", end: "2025-07-27", note: 期間限定コラボ }
+  - { id: c1160-collab-hakuto, stores: ["1160"], title: 白桃パフェDaysコラボ, kind: dev, bucket: パフェ, items: [白桃, 桃], start: "2025-07-25", end: "2025-07-27", note: 期間限定コラボ（実体は「丸ごと白桃とスパークリングジュレのパフェ」＝パフェ部門） }
   - { id: c1160-collab-kumamon, stores: ["1160"], title: くまもとモンコラボ, kind: dev, bucket: コラボ, items: [くまモン, くまもと, クマモン], start: "2025-11-01", end: "2025-11-30", note: 期間限定コラボ }
 
   # ── 門真Largo（1713）───────────────────────────────
