@@ -2773,7 +2773,6 @@ def ingest_abc_campaigns(
                 print(f"[施策ABC] 店舗選択に失敗（{name}）。飛ばす。")
                 continue
             rules = allrules.get(code)
-            collected: list[ActualRow] = []
             for c in camps:
                 if time.time() > deadline:
                     print(f"[施策ABC] 時間切れ（{budget_minutes:.0f}分）。残りは次回。")
@@ -2787,6 +2786,7 @@ def ingest_abc_campaigns(
                 bucket = c.get("bucket")
                 kws = [k for k in (c.get("items") or []) if k]
                 n = 0
+                crows: list[ActualRow] = []
                 for prod in rows:
                     nm = prod["name"]
                     ints = prod["ints"]
@@ -2804,7 +2804,7 @@ def ingest_abc_campaigns(
                     for metric, val in ((METRIC_PRODUCT_SALES, sales), (METRIC_PRODUCT_QTY, qty)):
                         if val <= 0:
                             continue
-                        collected.append(
+                        crows.append(
                             ActualRow(
                                 store_code=code,
                                 date=rep,
@@ -2820,8 +2820,18 @@ def ingest_abc_campaigns(
                         )
                     n += 1
                 print(f"[施策ABC] {code} {cid} {c['start']}〜{c['end']} 対象{n}品 抽出{len(rows)}行")
-            if not dry_run and collected:
-                total += warehouse.replace_actuals(collected, scope_stores=True, scope_metrics=True)
+                # 施策ごとにその場で書く。長時間スクレイプ中に Neon 接続が idle で切れて
+                # 最後にまとめて書くと失敗するため（SSL closed）。切れていたら張り直して1回再試行。
+                if not dry_run and crows:
+                    try:
+                        total += warehouse.replace_actuals(crows, scope_stores=True, scope_metrics=True)
+                    except Exception as e:  # noqa: BLE001
+                        print(f"[施策ABC] 書込リトライ（接続張り直し）: {e}")
+                        try:
+                            warehouse.close()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        total += warehouse.replace_actuals(crows, scope_stores=True, scope_metrics=True)
     print(f"[施策ABC] warehouse へ {total} 件 書き込みました（source={source}）")
     return 0
 
