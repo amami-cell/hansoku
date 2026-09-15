@@ -2703,7 +2703,13 @@ def ingest_abc_campaigns(
 
     data = _yaml.safe_load(SCHEDULE_PATH.read_text(encoding="utf-8")) or {}
     allrules = _loadcats()
-    want_ids = {s.strip() for s in (only_ids or "").split(",") if s.strip()}
+    # "" / all / *（および fw.yml の既定値 冷やし鶏）は「全施策」。それ以外はid絞り。
+    raw_ids = (only_ids or "").strip()
+    want_ids = (
+        set()
+        if raw_ids in ("", "all", "*", "冷やし鶏")
+        else {s.strip() for s in raw_ids.split(",") if s.strip()}
+    )
 
     def _resolve(code_or_name: str):
         try:
