@@ -906,6 +906,8 @@ ABC_MENU = ("販売管理", "店舗業務", "ABC分析")
 # 原価は 100.00・原価率は 25.25% で整数判定から外れるため、この並びで安定する。
 _ABC_QTY = 1  # 商品名の後ろの整数列での販売数量位置
 _ABC_SALES = 2  # 同・売上金額位置
+_ABC_COST = 3  # 同・原価金額位置（列: 単価0 数量1 売上2 原価金額3 粗利4）
+_ABC_GROSS = 4  # 同・粗利金額位置
 # 合計・総計・小計は商品ではないので商品グリッドから除外する
 _ABC_TOTAL_NAMES = {"合計", "総計", "小計", "合 計", "総 計", "小 計", "総合計"}
 
@@ -1319,6 +1321,8 @@ def ingest_abc(
     from ..model import (
         GRAIN_MONTH,
         KIND_FINAL,
+        METRIC_PRODUCT_COST,
+        METRIC_PRODUCT_GROSS,
         METRIC_PRODUCT_QTY,
         METRIC_PRODUCT_SALES,
         ActualRow,
@@ -1441,6 +1445,23 @@ def ingest_abc(
                             ingested_at=ingested_at,
                         )
                     )
+                # 原価金額・粗利金額（ABCグリッド由来）。売上・点数と同じ商品名で並べる。
+                for _m, _i in ((METRIC_PRODUCT_COST, _ABC_COST), (METRIC_PRODUCT_GROSS, _ABC_GROSS)):
+                    if len(ints) > _i:
+                        collected.append(
+                            ActualRow(
+                                store_code=ABC_GROUP_CODE,
+                                date=rep_date,
+                                grain=GRAIN_MONTH,
+                                metric=_m,
+                                value=float(ints[_i]),
+                                product_name=prod["name"][:80],
+                                product_category=prod["rank"],
+                                kind=KIND_FINAL,
+                                source=source,
+                                ingested_at=ingested_at,
+                            )
+                        )
             top = products[0]
             print(
                 f"[ABC] 稼働{len(picked_codes)}店 {len(products)}品 "
@@ -2217,6 +2238,8 @@ def ingest_abc_store(
         KIND_FINAL,
         METRIC_DEPT_QTY,
         METRIC_DEPT_SALES,
+        METRIC_PRODUCT_COST,
+        METRIC_PRODUCT_GROSS,
         METRIC_PRODUCT_QTY,
         METRIC_PRODUCT_SALES,
         ActualRow,
@@ -2381,6 +2404,27 @@ def ingest_abc_store(
                             ingested_at=ingested_at,
                         )
                     )
+                # 原価金額・粗利金額（売上のある商品のみ。0円内訳は原価も無いので採らない）。
+                if sales > 0:
+                    for _m, _i in (
+                        (METRIC_PRODUCT_COST, _ABC_COST),
+                        (METRIC_PRODUCT_GROSS, _ABC_GROSS),
+                    ):
+                        if len(ints) > _i:
+                            collected.append(
+                                ActualRow(
+                                    store_code=code,
+                                    date=rep_date,
+                                    grain=GRAIN_MONTH,
+                                    metric=_m,
+                                    value=float(ints[_i]),
+                                    product_name=prod["name"][:80],
+                                    product_category=prod["rank"],
+                                    kind=KIND_FINAL,
+                                    source=source,
+                                    ingested_at=ingested_at,
+                                )
+                            )
                 n_prod += 1
             top = products[0]["name"][:16] if products else "-"
 
@@ -2694,6 +2738,8 @@ def ingest_abc_campaigns(
         GRAIN_DAY,
         GRAIN_MONTH,
         KIND_FINAL,
+        METRIC_PRODUCT_COST,
+        METRIC_PRODUCT_GROSS,
         METRIC_PRODUCT_QTY,
         METRIC_PRODUCT_SALES,
         ActualRow,
@@ -2892,13 +2938,16 @@ def ingest_abc_campaigns(
                 ints = prod["ints"]
                 sales = ints[_ABC_SALES] if len(ints) > _ABC_SALES else 0
                 qty = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
-                return sales, qty
+                # 原価金額・粗利金額（無ければ None＝データ無しとして書かない）
+                cost = ints[_ABC_COST] if len(ints) > _ABC_COST else None
+                gross = ints[_ABC_GROSS] if len(ints) > _ABC_GROSS else None
+                return sales, qty, cost, gross
 
             # 対象商品だけ残す: items があれば商品名一致、無ければ bucket(区分)一致。
-            picked: list[tuple[str, int, int]] = []
+            picked: list[tuple[str, int, int, int | None, int | None]] = []
             for prod in rows:
                 nm = prod["name"]
-                sales, qty = _val_of(prod)
+                sales, qty, cost, gross = _val_of(prod)
                 if sales <= 0 and qty <= 0:
                     continue
                 if kws:
@@ -2907,7 +2956,7 @@ def ingest_abc_campaigns(
                 elif bucket:
                     if not rules or _classify(nm, rules, prod.get("group")) != bucket:
                         continue
-                picked.append((nm, sales, qty))
+                picked.append((nm, sales, qty, cost, gross))
 
             # items 指定なのに1件も当たらない回（キーワード表記ゆれ／未記入）は、
             # おすすめジェラートと同じ「半年ルック」で自動救済：販売期間中に出た bucket 商品の
@@ -2915,35 +2964,43 @@ def ingest_abc_campaigns(
             fallback = 0
             if kws and not picked and bucket and rules:
                 is_lim = _limited_checker(code, c["start"][:7])
-                cands: list[tuple[str, int, int]] = []
+                cands: list[tuple[str, int, int, int | None, int | None]] = []
                 for prod in rows:
                     nm = prod["name"]
-                    sales, qty = _val_of(prod)
+                    sales, qty, cost, gross = _val_of(prod)
                     if sales <= 0 and qty <= 0:
                         continue
                     if _classify(nm, rules, prod.get("group")) != bucket:
                         continue
                     if is_lim(nm):
-                        cands.append((nm, sales, qty))
+                        cands.append((nm, sales, qty, cost, gross))
                 # 拾いすぎ防止：売上上位5品までに絞る（その回の主役だけ残す）。
                 cands.sort(key=lambda x: x[1], reverse=True)
-                for nm, sales, qty in cands[:5]:
-                    picked.append((nm, sales, qty))
+                for nm, sales, qty, cost, gross in cands[:5]:
+                    picked.append((nm, sales, qty, cost, gross))
                     fallback += 1
 
             n = 0
             crows: list[ActualRow] = []
-            for nm, sales, qty in picked:
-                for metric, val in ((METRIC_PRODUCT_SALES, sales), (METRIC_PRODUCT_QTY, qty)):
-                    if val <= 0:
-                        continue
+            for nm, sales, qty, cost, gross in picked:
+                # 売上・点数は正のときだけ、原価は正のときだけ、粗利は売上が正なら符号問わず記録。
+                emit: list[tuple[str, float]] = []
+                if sales > 0:
+                    emit.append((METRIC_PRODUCT_SALES, float(sales)))
+                if qty > 0:
+                    emit.append((METRIC_PRODUCT_QTY, float(qty)))
+                if sales > 0 and cost is not None and cost > 0:
+                    emit.append((METRIC_PRODUCT_COST, float(cost)))
+                if sales > 0 and gross is not None:
+                    emit.append((METRIC_PRODUCT_GROSS, float(gross)))
+                for metric, val in emit:
                     crows.append(
                         ActualRow(
                             store_code=code,
                             date=rep,
                             grain=GRAIN_DAY,
                             metric=metric,
-                            value=float(val),
+                            value=val,
                             product_name=nm[:80],
                             product_category=cid,  # 施策idで紐づける
                             kind=KIND_FINAL,
