@@ -507,15 +507,22 @@ tbody tr:last-child td{border-bottom:0;}
 .ceff .sub,.ceff .muted{color:var(--ink-3);font-weight:400;}
 .ceff .sub{margin-left:4px;}
 
-/* 時間帯別 売上棒グラフ */
-.hbars{display:flex;align-items:flex-end;gap:4px;height:160px;padding:4px 2px 0;overflow-x:auto;}
+/* 時間帯別 客数棒グラフ＋売上折れ線 */
+.hlegend{display:flex;gap:14px;margin-bottom:8px;font-size:11px;color:var(--ink-3);}
+.hlg-c{color:var(--accent);} .hlg-s{color:var(--warning-ink);font-weight:600;}
+.hwrap{position:relative;overflow-x:auto;}
+.hbars{display:flex;align-items:flex-end;gap:4px;height:160px;padding:4px 2px 0;}
 .hbar{flex:1 1 0;min-width:16px;display:flex;flex-direction:column;align-items:center;height:100%;}
 .hcol{flex:1;width:100%;display:flex;align-items:flex-end;}
-.hfill{width:100%;background:var(--accent);border-radius:3px 3px 0 0;opacity:.55;transition:opacity .15s;}
-.hbar:hover .hfill{opacity:.9;}
+.hfill{width:100%;background:var(--accent);border-radius:3px 3px 0 0;opacity:.5;transition:opacity .15s;}
+.hbar:hover .hfill{opacity:.85;}
 .hbar.peak .hfill{background:var(--good-ink,var(--accent));opacity:.95;}
 .hlbl{margin-top:4px;font-size:10px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
 .hbar.peak .hlbl{color:var(--ink);font-weight:700;}
+/* 売上の折れ線を棒の集計面（ラベルを除く）にぴったり重ねる */
+.hline{position:absolute;left:2px;right:2px;top:4px;bottom:20px;pointer-events:none;overflow:visible;}
+.hline polyline{stroke:var(--warning-ink);stroke-width:1.6;fill:none;vector-effect:non-scaling-stroke;opacity:.9;}
+.hline circle{fill:var(--warning-ink);}
 
 /* 売れ筋商品（ABC）リスト */
 .plist{list-style:none;margin:0;padding:0;}
@@ -528,6 +535,9 @@ tbody tr:last-child td{border-bottom:0;}
 .pbar{flex:1 1 30%;height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;}
 .pfill{display:block;height:100%;background:var(--accent);opacity:.55;border-radius:4px;}
 .psales{flex:none;width:88px;text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+.pgp{flex:none;width:50px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums;color:var(--ink-3);}
+.pgp.up{color:var(--good-ink);font-weight:600;} .pgp.down{color:var(--critical-ink);font-weight:600;}
+.pgp.muted{color:var(--ink-3);opacity:.5;}
 .cgtag{font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);
   border:1px solid var(--accent-line);border-radius:4px;padding:1px 7px;line-height:1.6;}
 .fbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:14px;}

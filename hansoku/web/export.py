@@ -28,6 +28,8 @@ from ..model import (
     METRIC_DRINK_THEORY_COST,
     METRIC_FOOD_SALES,
     METRIC_FOOD_THEORY_COST,
+    METRIC_PRODUCT_COST,
+    METRIC_PRODUCT_GROSS,
     METRIC_PRODUCT_QTY,
     METRIC_PRODUCT_SALES,
     METRIC_SALES,
@@ -566,7 +568,26 @@ def _build_abc_by_month(
         # 区分見出し（"NN:名前"）のときだけグループとして採る。ランク(A/B/C)は無視。
         if cat and re.match(r"^\s*\d+\s*[:：]", str(cat)):
             group_map[key] = str(cat)
-    # 売上行のある商品に qty を足す。
+    # 商品別の原価金額・粗利金額（FW ABCグリッド由来）。売上と同じ (店,月,商品名) で束ねる。
+    # 売上金額は税込なので、原価/粗利も税抜へ割り戻して 売上=原価+粗利・原価率=原価÷売上 を
+    # 商品の税抜売上とそろえる。未取込の店/月は空＝cost/gross を付けない（後方互換）。
+    cost_map: dict[tuple, float] = {}
+    gross_map: dict[tuple, float] = {}
+    for metric, acc in ((METRIC_PRODUCT_COST, cost_map), (METRIC_PRODUCT_GROSS, gross_map)):
+        for row in warehouse.aggregate(
+            AggregateQuery(
+                date_from=date_from,
+                date_to=date_to,
+                grain=GRAIN_MONTH,
+                metrics=[metric],
+                store_codes=codes,
+                group_by=("store_code", "date", "product_name"),
+            )
+        ):
+            m = row["date"].strftime("%Y-%m")
+            key = (row["store_code"], m, row["product_name"])
+            acc[key] = acc.get(key, 0.0) + row["value"] / NET_DIVISOR  # 税込→税抜
+    # 売上行のある商品に qty・原価・粗利を足す。
     seen: set[tuple] = set()
     for code, months in prod_tmp.items():
         for m, items in months.items():
@@ -576,6 +597,10 @@ def _build_abc_by_month(
                 q = qty_map.get(key)
                 if q:
                     it["qty"] = round(q)
+                if key in cost_map:
+                    it["cost"] = round(cost_map[key])
+                if key in gross_map:
+                    it["gross"] = round(gross_map[key])
                 if key in group_map:
                     it["group"] = group_map[key]
     # 売価0円だが点数がある商品（例: テイクアウトジェラートの内訳）を、点数だけの

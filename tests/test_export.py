@@ -134,6 +134,62 @@ def test_売れ筋商品がproductsに焼かれる(loaded, master):
     assert got and got[0] == {"name": "生ビール中", "sales": round(682000 / 1.10), "rank": "A"}
 
 
+def test_商品の原価粗利がproductsに付く(loaded, master):
+    """FW ABC の原価金額・粗利金額が products の各商品に cost/gross（税抜・rounded int）で付く。"""
+    from datetime import datetime, timezone
+
+    from hansoku.model import (
+        GRAIN_MONTH,
+        KIND_FINAL,
+        METRIC_PRODUCT_COST,
+        METRIC_PRODUCT_GROSS,
+        METRIC_PRODUCT_SALES,
+        ActualRow,
+    )
+
+    code = master.active_codes[0]
+    now = datetime.now(timezone.utc)
+
+    def row(metric, value):
+        return ActualRow(store_code=code, date=date(2026, 7, 1), grain=GRAIN_MONTH,
+                         metric=metric, value=value, product_name="生ビール中",
+                         product_category="A", kind=KIND_FINAL, source="fw_abc", ingested_at=now)
+
+    loaded.replace_actuals([
+        row(METRIC_PRODUCT_SALES, 682000.0),
+        row(METRIC_PRODUCT_COST, 110000.0),
+        row(METRIC_PRODUCT_GROSS, 572000.0),
+    ])
+    payload = build(loaded, master, date_from=date(2025, 1, 1), date_to=date(2026, 12, 31))
+    got = payload["products"].get(code)
+    # 売上・原価・粗利いずれも税込→税抜へ割り戻す（÷1.10）。売上＝原価＋粗利 が保たれる。
+    assert got and got[0] == {
+        "name": "生ビール中",
+        "sales": round(682000 / 1.10),
+        "rank": "A",
+        "cost": round(110000 / 1.10),
+        "gross": round(572000 / 1.10),
+    }
+
+
+def test_原価粗利未取込なら商品にcostキーが無い(loaded, master):
+    """後方互換：原価/粗利を取り込んでいない店では cost/gross キーは付かない。"""
+    from datetime import datetime, timezone
+
+    from hansoku.model import GRAIN_MONTH, KIND_FINAL, METRIC_PRODUCT_SALES, ActualRow
+
+    code = master.active_codes[0]
+    now = datetime.now(timezone.utc)
+    loaded.replace_actuals([
+        ActualRow(store_code=code, date=date(2026, 7, 1), grain=GRAIN_MONTH,
+                  metric=METRIC_PRODUCT_SALES, value=396800.0, product_name="おすすめ刺盛",
+                  product_category="A", kind=KIND_FINAL, source="fw_abc", ingested_at=now),
+    ])
+    payload = build(loaded, master, date_from=date(2025, 1, 1), date_to=date(2026, 12, 31))
+    got = payload["products"].get(code)
+    assert got and "cost" not in got[0] and "gross" not in got[0]
+
+
 def test_全店の売れ筋がproducts_groupに焼かれる(loaded, master):
     """ABC分析の全店集計（擬似店舗 _group）が products_group に売上順で出る。"""
     from datetime import datetime, timezone

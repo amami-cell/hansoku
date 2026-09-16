@@ -2379,7 +2379,9 @@ function campDeptCardMonthly(c) {
           const sh = denom ? `・${Math.round(p.sales / denom * 100)}%` : "";
           const pv = py.find(q => q.name === p.name);
           const yoy = (pv && pv.sales) ? `・<span class="${p.sales >= pv.sales ? "up" : "down"}">${signed((p.sales / pv.sales - 1) * 100)}%</span>` : "";
-          return `<li><span class="cdinm">${esc(p.name)}</span><span class="cdiv">${yen(p.sales)}${sh}${yoy}</span></li>`;
+          const gp = prodGross(p);
+          const gpc = gp != null ? `・粗${pct100(gp)}` : "";
+          return `<li><span class="cdinm">${esc(p.name)}</span><span class="cdiv">${yen(p.sales)}${sh}${gpc}${yoy}</span></li>`;
         }).join("");
         return `<div class="cdmon-m"><div class="cdmm">${m}</div><ul class="cdilist">${lis}</ul></div>`;
       }).filter(Boolean).join("");
@@ -2446,7 +2448,9 @@ function campDeptCardSnapshot(c) {
       const lis = matched.sort((a, b2) => b2.sales - a.sales).map(p => {
         const sh = denom ? `・${bname ? esc(bname) + "内 " : ""}${Math.round(p.sales / denom * 100)}%` : "";
         const rk = p.rank ? `<span class="cdrk">${esc(p.rank)}</span>` : "";
-        return `<li><span class="cdinm">${esc(p.name)}</span>${rk}<span class="cdiv">${yen(p.sales)}${sh}</span></li>`;
+        const gp = prodGross(p);
+        const gpc = gp != null ? `・粗${pct100(gp)}` : "";
+        return `<li><span class="cdinm">${esc(p.name)}</span>${rk}<span class="cdiv">${yen(p.sales)}${sh}${gpc}</span></li>`;
       }).join("");
       return `<div class="cditem"><div class="cdih" data-store="${code}">${storeName(code)}</div>
         <ul class="cdilist">${lis}</ul></div>`;
@@ -4773,19 +4777,26 @@ function renderProfitability(code) {
         <div class="delta">${delta}・${man(ls.v)}円÷${nin(cov)}</div></div>`);
     }
   }
-  // 原価率 → 粗利率（＋前月比トレンド）
+  // 原価率 → 粗利率（＋前月比トレンド）。DATA.cost_rate は理論原価率。
   if (lcr) {
     const tr = costTrend(code);
-    let trend = `粗利率 ${pct(1 - lcr.v)}`;
+    let trend = `理論粗利率 ${pct(1 - lcr.v)}`;
     if (tr) {
       const up = tr.deltaPt > 0;
       const cls = tr.deltaPt >= 1.0 ? "down" : (tr.deltaPt <= -1.0 ? "up" : "");
       const arrow = up ? "▲" : (tr.deltaPt < 0 ? "▼" : "→");
       trend += `・<span class="${cls}">前月比 ${arrow}${signed(tr.deltaPt)}pt</span>`;
     }
-    cards.push(`<div class="kpi"><div class="lbl">原価率（${lcr.m}）</div>
+    cards.push(`<div class="kpi"><div class="lbl">理論原価率（${lcr.m}）</div>
       <div class="big ${lcr.v <= 0.35 ? "up" : "down"}">${pct(lcr.v)}</div>
       <div class="delta">${trend}</div></div>`);
+  }
+  // FW ABC の原価率→粗利率（実績ベース・全部門加重／ロス・棚卸差異は含まない）。理論と別枠で。
+  const abcCr = abcCostRate(code);
+  if (abcCr != null) {
+    cards.push(`<div class="kpi"><div class="lbl">ABC原価率（${abcMonthOf(code) || ""}）</div>
+      <div class="big ${abcCr <= 0.35 ? "up" : "down"}">${pct(abcCr)}</div>
+      <div class="delta">FW ABC 粗利率 ${pct(1 - abcCr)}<small>・ロス・棚卸差異は含まない</small></div></div>`);
   }
   // 粗利（推計）＝売上×粗利率。売上と原価率がそろう最新月で
   if (ls && lcr) {
@@ -4795,11 +4806,11 @@ function renderProfitability(code) {
       const cr = crAt(code, grM.m);
       cards.push(`<div class="kpi"><div class="lbl">粗利（推計・${grM.m}）</div>
         <div class="big">${man(grM.v * (1 - cr))}<span class="unit">円</span></div>
-        <div class="delta">売上 ${man(grM.v)}円 × 粗利率 ${pct(1 - cr)}</div></div>`);
+        <div class="delta">売上 ${man(grM.v)}円 × 理論粗利率 ${pct(1 - cr)}</div></div>`);
     }
   }
   if (!cards.length && !deptCr.length) return "";
-  // 部門別 原価率→粗利率（bucket.cost_rate は % 単位）
+  // 部門別 原価率→粗利率（bucket.cost_rate は % 単位＝FW ABC 実績）
   const deptChips = deptCr.length
     ? `<div class="prof-depts">${deptCr
         .slice()
@@ -4808,10 +4819,12 @@ function renderProfitability(code) {
           <i>${esc(b.name)}</i>原価${b.cost_rate}%<b>→粗利${(100 - b.cost_rate).toFixed(0)}%</b></span>`)
         .join("")}</div>`
     : "";
+  const abcNote = (deptCr.length || abcCostRate(code) != null)
+    ? "　ABCは実績（FW ABC）・ロス・棚卸差異は含まない／理論は理論原価率" : "";
   return `
     <section class="block">
       <div class="bhead"><h2>収益性・客単価</h2>
-        <span class="bnote">既存データ（売上・客数・ABC原価率）から算出</span></div>
+        <span class="bnote">既存データ（売上・客数・理論/ABC原価率）から算出${abcNote}</span></div>
       <div class="panel">
         <div class="kpis">${cards.join("")}</div>
         ${costSpark(code)}
@@ -4827,23 +4840,64 @@ function renderProducts(code) {
   if (!items || !items.length) return "";
   const max = Math.max(1, ...items.map(p => p.sales));
   const rankColor = r => r === "A" ? "var(--good-ink)" : r === "B" ? "var(--accent)" : "var(--ink-3)";
+  const anyGp = items.some(p => p.sales > 0 && (p.gross != null || p.cost != null));
   const rows = items.map((p, i) => {
     const pct = Math.max(3, Math.round(p.sales / max * 100));
     const rank = p.rank
       ? `<span class="prank" style="--pc:${rankColor(p.rank)}">${esc(p.rank)}</span>` : "";
+    // FW ABC の原価/粗利（ロス・棚卸差異を含まない）。粗利率＝粗利÷売上。
+    const gp = prodGross(p);
+    const gpChip = gp != null
+      ? `<span class="pgp ${gp >= 0.6 ? "up" : gp < 0.5 ? "down" : ""}" title="FW ABC 粗利率（ロス・棚卸差異は含まない）／原価率 ${pct100(1 - gp)}">粗${pct100(gp)}</span>`
+      : (anyGp ? `<span class="pgp muted">―</span>` : "");
     return `<li class="prow">
       <span class="pno">${i + 1}</span>
       <span class="pname">${esc(p.name)}</span>${rank}
       <span class="pbar"><span class="pfill" style="width:${pct}%"></span></span>
-      <span class="psales">${yen(p.sales)}</span></li>`;
+      <span class="psales">${yen(p.sales)}</span>${gpChip}</li>`;
   }).join("");
   const monthLbl = abcMonthLbl(code);
+  const gpNote = anyGp ? "　粗＝FW ABC粗利率（ロス・棚卸差異は含まない）" : "";
   return `
     <section class="block">
       <div class="bhead"><h2>売れ筋商品（ABC）</h2>
-        <span class="bnote">売上上位${items.length}品${monthLbl}　ランクはFWのABC</span></div>
+        <span class="bnote">売上上位${items.length}品${monthLbl}　ランクはFWのABC${gpNote}</span></div>
       <div class="panel"><ul class="plist">${rows}</ul></div>
     </section>`;
+}
+// FW ABC 商品の粗利率（分数 0-1）。粗利があれば 粗利÷売上、無く原価があれば 1−原価÷売上。
+// どちらも取り込まれていなければ null（後方互換：cost/gross は未取込店で欠落）。
+function prodGross(p) {
+  if (!p || !p.sales) return null;
+  if (p.gross != null) return p.gross / p.sales;
+  if (p.cost != null) return 1 - p.cost / p.sales;
+  return null;
+}
+const pct100 = f => `${Math.round(f * 100)}%`;
+// 店舗の FW ABC 実績原価率（分数 0-1）。全部門加重（部門売上×原価率の合計÷部門売上合計）を
+// 優先し、部門原価率が無ければ売れ筋商品の原価/粗利の合計から出す。どちらも無ければ null。
+function abcCostRate(code) {
+  const d = deptFor(code);
+  if (d && d.buckets) {
+    let sales = 0, cost = 0;
+    for (const b of d.buckets) {
+      if (b.cost_rate == null || !(b.sales > 0)) continue;
+      sales += b.sales;
+      cost += b.sales * b.cost_rate / 100;
+    }
+    if (sales > 0) return cost / sales;
+  }
+  const items = (DATA.products || {})[code] || [];
+  let sales = 0, cost = 0, ok = false;
+  for (const p of items) {
+    if (!(p.sales > 0)) continue;
+    let c = null;
+    if (p.cost != null) c = p.cost;
+    else if (p.gross != null) c = p.sales - p.gross;
+    if (c == null) continue;
+    sales += p.sales; cost += c; ok = true;
+  }
+  return (ok && sales > 0) ? cost / sales : null;
 }
 
 // ── 新ランチ効果（FW ABC・部門ランチ）──────────────────────────────────────
@@ -5016,33 +5070,57 @@ function renderLunch(code) {
     ${cmpNote}`;
 }
 
-// 時間帯別 売上・集客（FW時間帯別売上）。棒＝売上、ピーク時間帯を強調。
-// 時間帯別販促（ランチ強化・アイドルタイム対策など）の検討材料。
+// 時間帯別 客数・売上（FW時間帯別売上）。棒＝客数、ピーク時間帯を強調、売上は折れ線で重ねる。
+// 時間帯別販促（ランチ強化・アイドルタイム対策など）の検討材料。未取込の店は空案内を出す。
 function renderHourly(code) {
   const per = (DATA.hourly || {})[code];
-  if (!per) return "";
-  const hours = Object.keys(per).map(Number).sort((a, b) => a - b);
-  if (!hours.length) return "";
+  const monthLbl = DATA.hourly_month ? `（代表月 ${DATA.hourly_month}）` : "";
+  const hours = per ? Object.keys(per).map(Number).sort((a, b) => a - b) : [];
+  if (!hours.length) {
+    // 時間帯別が未取込の店でも節ごと消さず、取込待ちと分かる案内を出す。
+    return `
+    <section class="block">
+      <div class="bhead"><h2>時間帯別ピーク</h2>
+        <span class="bnote">FW時間帯別売上・客数のピーク把握</span></div>
+      <div class="panel"><div class="empty">時間帯別データは未取込です</div></div>
+    </section>`;
+  }
   const salesAt = h => (per[String(h)] || {}).sales || 0;
   const coversAt = h => (per[String(h)] || {}).covers || 0;
-  const max = Math.max(1, ...hours.map(salesAt));
-  const peak = hours.reduce((p, h) => (salesAt(h) > salesAt(p) ? h : p), hours[0]);
+  const maxC = Math.max(1, ...hours.map(coversAt));
+  const maxS = Math.max(1, ...hours.map(salesAt));
+  // ピークは客数基準（複数タイの時は全部強調）。
+  const peakC = Math.max(...hours.map(coversAt));
+  const peaks = hours.filter(h => coversAt(h) === peakC);
+  const peakLbl = peaks.map(h => `${h}時台`).join("・");
+  const totCovers = hours.reduce((a, h) => a + coversAt(h), 0);
   const totSales = hours.reduce((a, h) => a + salesAt(h), 0);
   const bars = hours.map(h => {
     const s = salesAt(h), c = coversAt(h);
-    const pct = Math.max(2, Math.round(s / max * 100));
-    return `<div class="hbar${h === peak ? " peak" : ""}" title="${h}時台　売上 ${yen(s)}・客数 ${c}人">
+    const isPeak = peaks.includes(h);
+    const pct = Math.max(2, Math.round(c / maxC * 100));
+    return `<div class="hbar${isPeak ? " peak" : ""}" title="${h}時台　客数 ${c}人・売上 ${yen(s)}">
       <div class="hcol"><div class="hfill" style="height:${pct}%"></div></div>
       <div class="hlbl">${h}</div></div>`;
   }).join("");
-  const monthLbl = DATA.hourly_month ? `（${DATA.hourly_month}）` : "";
+  // 売上の折れ線を棒の上に重ねる（客数の山と売上の山のズレ＝客単価差が見える）。
+  const W = 100, H = 100;  // viewBox 相対（preserveAspectRatio=none で棒に合わせて伸縮）
+  const n = hours.length;
+  const px = i => n > 1 ? (i + 0.5) / n * W : W / 2;
+  const py = h => H - (salesAt(h) / maxS) * H * 0.92 - 4;
+  const pts = hours.map((h, i) => `${px(i).toFixed(2)},${py(h).toFixed(2)}`).join(" ");
+  const dots = hours.map((h, i) =>
+    `<circle cx="${px(i).toFixed(2)}" cy="${py(h).toFixed(2)}" r="1.6"/>`).join("");
+  const line = `<svg class="hline" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+      <polyline points="${pts}" fill="none"/>${dots}</svg>`;
   return `
     <section class="block">
-      <div class="bhead"><h2>時間帯別 売上・集客</h2>
-        <span class="bnote">1時間ごとの売上${monthLbl}　ピーク ${peak}時台　棒にカーソルで客数</span></div>
+      <div class="bhead"><h2>時間帯別ピーク</h2>
+        <span class="bnote">1時間ごとの客数${monthLbl}　ピーク ${peakLbl}　棒にカーソルで売上</span></div>
       <div class="panel">
-        <div class="hbars">${bars}</div>
-        <figcaption>合計 ${man(totSales)}円／日中の山とアイドルタイムを見て、時間帯別の販促を検討できます。</figcaption>
+        <div class="hlegend"><span class="hlg hlg-c">■ 客数（棒）</span><span class="hlg hlg-s">— 売上（線）</span></div>
+        <div class="hwrap"><div class="hbars">${bars}</div>${line}</div>
+        <figcaption>客数 計${nin(totCovers)}・売上 計${man(totSales)}円／客数の山（ピーク ${peakLbl}）とアイドルタイムを見て、時間帯別の販促を検討できます。</figcaption>
       </div>
     </section>`;
 }
