@@ -733,6 +733,11 @@ def ingest_hourly(
         y, m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
         month = f"{y}-{m:02d}"
     d_from, d_to = _month_bounds(month)
+    # 当月（月途中）は終端日を今日までに詰める。末日（未来日）を投げると当月の
+    # グリッドが出ない/別挙動になる店があるため、9/16実行なら 9/16 で止める。
+    _today = datetime.now(timezone.utc).date()
+    if (_today.year, _today.month) == (int(month[:4]), int(month[5:7])):
+        d_to = _today.strftime("%Y/%m/%d")
     rep_date = _date(int(month[:4]), int(month[5:7]), 1)
 
     source = "fw_hourly"
@@ -766,9 +771,27 @@ def ingest_hourly(
                 print(f"[時間帯別] 日付レンジ設定に失敗: {name}")
                 skipped.append(f"{store.store_code}:日付レンジ")
                 continue
-            _click_search(session)
-            time.sleep(1.2)
-            grid = _extract_hour_grid(session)
+            # グリッド描画待ち：単発1.2秒だと当月（描画が遅い）で取りこぼすため、
+            # 検索を最大3回まで打ち直しつつ、行数が伸び止まる（=描画完了）まで粘る。
+            grid: list[dict] = []
+            for _attempt in range(3):
+                _click_search(session)
+                best: list[dict] = []
+                stable = 0
+                for _ in range(10):  # 最大 ~15秒/回
+                    time.sleep(1.5)
+                    g = _extract_hour_grid(session)
+                    if len(g) > len(best):
+                        best = g
+                        stable = 0
+                    elif g and len(g) == len(best):
+                        stable += 1
+                        if stable >= 2:  # 2回連続で同数＝描画完了とみなす
+                            break
+                if best:
+                    grid = best
+                    break
+                time.sleep(1.0)  # 空なら少し待って検索し直す
             if ti == 0:
                 # 最初の1店は生の視覚行も出して、ラベル・列の並びを確認できるようにする
                 print("[時間帯別] 先頭店の視覚行（先頭12行・診断用）:")
