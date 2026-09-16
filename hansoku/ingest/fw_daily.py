@@ -746,6 +746,7 @@ def ingest_hourly(
     collected: list[ActualRow] = []
     skipped: list[str] = []
 
+    # まず1セッションでコンボ候補→対象店リストを作る。
     with fw_session(artifacts) as session:
         _open_hourly(session)
         options = _combo_options(session)
@@ -756,86 +757,84 @@ def ingest_hourly(
             store = active_by_code.get(code) or master.find_by_name(opt["name"])
             if store and store.active:
                 targets.append((opt["value"], store))
-        print(f"[時間帯別] マスタと一致した稼働店 {len(targets)}件")
-        if store_limit:
-            targets = targets[:store_limit]
+    print(f"[時間帯別] マスタと一致した稼働店 {len(targets)}件")
+    if store_limit:
+        targets = targets[:store_limit]
 
-        for ti, (value, store) in enumerate(targets):
-            name = store.store_name
-            # 店ごとに時間帯別画面を開き直す（フレッシュ導線）。同じ画面で店だけ
-            # 切り替え続けると数店目以降でグリッドが再描画されず、6店目以降が全部
-            # 「グリッド無し」になっていた（＝実測の真因。1〜5店目は出ていた）。
-            # ABC取込と同じく1店=1オープンで確実に引く。ti==0はループ前に開いた画面を使う。
-            if ti > 0:
-                try:
-                    _open_hourly(session)
-                except Exception as e:  # noqa: BLE001
-                    print(f"[時間帯別] {name} 画面再オープンに失敗: {e}")
-                    skipped.append(f"{store.store_code}:再オープン")
+    # 【真因】同一セッションで店を切り替え続けると、数店目以降でグリッドが再描画され
+    # なくなる（実測：1〜5店目は出るのに6店目以降が全滅で店コード順。単店プローブは
+    # 正常＝データはあり、画面を開き直すだけ=同一セッションでは直らなかった）。
+    # 対策：劣化閾値（約5店）より小さいバッチごとにセッションを開き直す。
+    BATCH = 4
+    diag_done = False
+    for bi in range(0, len(targets), BATCH):
+        chunk = targets[bi:bi + BATCH]
+        with fw_session(artifacts) as session:
+            _open_hourly(session)
+            _combo_options(session)  # コンボが描画されるまで待つ（選択の空振り防止）
+            for value, store in chunk:
+                name = store.store_name
+                if not _select_combo(session, value):
+                    print(f"[時間帯別] 店舗選択に失敗: {name} ({value})")
+                    skipped.append(f"{store.store_code}:店舗選択")
                     continue
-            if not _select_combo(session, value):
-                print(f"[時間帯別] 店舗選択に失敗: {name} ({value})")
-                skipped.append(f"{store.store_code}:店舗選択")
-                continue
-            if not _set_date_range(session, d_from, d_to):
-                # 日付が効いていなければ別の期間のグリッドを読むことになる。続行しない。
-                print(f"[時間帯別] 日付レンジ設定に失敗: {name}")
-                skipped.append(f"{store.store_code}:日付レンジ")
-                continue
-            # 描画待ち：検索後、行数が伸び止まる（=描画完了）までポーリング。
-            # フレッシュ画面なので通常すぐ出るが、当月は描画が遅い店もあるので粘る。
-            _click_search(session)
-            grid: list[dict] = []
-            best: list[dict] = []
-            stable = 0
-            for _ in range(10):  # 最大 ~15秒
-                time.sleep(1.5)
-                g = _extract_hour_grid(session)
-                if len(g) > len(best):
-                    best = g
-                    stable = 0
-                elif g and len(g) == len(best):
-                    stable += 1
-                    if stable >= 2:  # 2回連続で同数＝描画完了とみなす
-                        break
-            grid = best
-            if ti == 0:
-                # 最初の1店は生の視覚行も出して、ラベル・列の並びを確認できるようにする
-                print("[時間帯別] 先頭店の視覚行（先頭12行・診断用）:")
-                for cells in _visual_rows(session)[:12]:
-                    print("   ", " | ".join(cells[:14]))
-            if not grid:
-                session.snapshot(f"nohour_{store.store_code}")
-                print(f"  {store.store_code} {name[:14]} 時間帯グリッドが読めませんでした")
-                skipped.append(f"{store.store_code}:グリッド無し")
-                continue
-            n_before = len(collected)
-            for band in grid:
-                ints = band["ints"]
-                if len(ints) <= _HOUR_SALES:
+                if not _set_date_range(session, d_from, d_to):
+                    # 日付が効いていなければ別期間のグリッドを読むことになる。続行しない。
+                    print(f"[時間帯別] 日付レンジ設定に失敗: {name}")
+                    skipped.append(f"{store.store_code}:日付レンジ")
                     continue
-                sales = ints[_HOUR_SALES]
-                covers = ints[_HOUR_COVERS]
-                for metric, val in ((METRIC_SALES, sales), (METRIC_COVERS, covers)):
-                    if val > 0:
-                        collected.append(
-                            ActualRow(
-                                store_code=store.store_code,
-                                date=rep_date,
-                                grain=GRAIN_HOUR,
-                                metric=metric,
-                                value=float(val),
-                                hour=band["hour"],
-                                kind=KIND_FINAL,
-                                source=source,
-                                ingested_at=ingested_at,
+                # 描画待ち：検索後、行数が伸び止まる（=描画完了）までポーリング。
+                _click_search(session)
+                best: list[dict] = []
+                stable = 0
+                for _ in range(10):  # 最大 ~15秒
+                    time.sleep(1.5)
+                    g = _extract_hour_grid(session)
+                    if len(g) > len(best):
+                        best = g
+                        stable = 0
+                    elif g and len(g) == len(best):
+                        stable += 1
+                        if stable >= 2:  # 2回連続で同数＝描画完了
+                            break
+                if not diag_done:
+                    diag_done = True
+                    print("[時間帯別] 先頭店の視覚行（先頭12行・診断用）:")
+                    for cells in _visual_rows(session)[:12]:
+                        print("   ", " | ".join(cells[:14]))
+                if not best:
+                    session.snapshot(f"nohour_{store.store_code}")
+                    print(f"  {store.store_code} {name[:14]} 時間帯グリッドが読めませんでした")
+                    skipped.append(f"{store.store_code}:グリッド無し")
+                    continue
+                n_before = len(collected)
+                for band in best:
+                    ints = band["ints"]
+                    if len(ints) <= _HOUR_SALES:
+                        continue
+                    sales = ints[_HOUR_SALES]
+                    covers = ints[_HOUR_COVERS]
+                    for metric, val in ((METRIC_SALES, sales), (METRIC_COVERS, covers)):
+                        if val > 0:
+                            collected.append(
+                                ActualRow(
+                                    store_code=store.store_code,
+                                    date=rep_date,
+                                    grain=GRAIN_HOUR,
+                                    metric=metric,
+                                    value=float(val),
+                                    hour=band["hour"],
+                                    kind=KIND_FINAL,
+                                    source=source,
+                                    ingested_at=ingested_at,
+                                )
                             )
-                        )
-            hours = sorted({b["hour"] for b in grid})
-            hspan = f"{hours[0]}〜{hours[-1]}時" if hours else "-"
-            print(
-                f"  {store.store_code} {name[:14]} {len(grid)}帯 {hspan} +{len(collected) - n_before}行"
-            )
+                hours = sorted({b["hour"] for b in best})
+                hspan = f"{hours[0]}〜{hours[-1]}時" if hours else "-"
+                print(
+                    f"  {store.store_code} {name[:14]} {len(best)}帯 {hspan}"
+                    f" +{len(collected) - n_before}行"
+                )
 
     print(f"[時間帯別] 収集 {len(collected)} 行")
     if skipped:
