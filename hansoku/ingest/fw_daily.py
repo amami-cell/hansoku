@@ -762,6 +762,17 @@ def ingest_hourly(
 
         for ti, (value, store) in enumerate(targets):
             name = store.store_name
+            # 店ごとに時間帯別画面を開き直す（フレッシュ導線）。同じ画面で店だけ
+            # 切り替え続けると数店目以降でグリッドが再描画されず、6店目以降が全部
+            # 「グリッド無し」になっていた（＝実測の真因。1〜5店目は出ていた）。
+            # ABC取込と同じく1店=1オープンで確実に引く。ti==0はループ前に開いた画面を使う。
+            if ti > 0:
+                try:
+                    _open_hourly(session)
+                except Exception as e:  # noqa: BLE001
+                    print(f"[時間帯別] {name} 画面再オープンに失敗: {e}")
+                    skipped.append(f"{store.store_code}:再オープン")
+                    continue
             if not _select_combo(session, value):
                 print(f"[時間帯別] 店舗選択に失敗: {name} ({value})")
                 skipped.append(f"{store.store_code}:店舗選択")
@@ -771,27 +782,23 @@ def ingest_hourly(
                 print(f"[時間帯別] 日付レンジ設定に失敗: {name}")
                 skipped.append(f"{store.store_code}:日付レンジ")
                 continue
-            # グリッド描画待ち：単発1.2秒だと当月（描画が遅い）で取りこぼすため、
-            # 検索を最大3回まで打ち直しつつ、行数が伸び止まる（=描画完了）まで粘る。
+            # 描画待ち：検索後、行数が伸び止まる（=描画完了）までポーリング。
+            # フレッシュ画面なので通常すぐ出るが、当月は描画が遅い店もあるので粘る。
+            _click_search(session)
             grid: list[dict] = []
-            for _attempt in range(3):
-                _click_search(session)
-                best: list[dict] = []
-                stable = 0
-                for _ in range(10):  # 最大 ~15秒/回
-                    time.sleep(1.5)
-                    g = _extract_hour_grid(session)
-                    if len(g) > len(best):
-                        best = g
-                        stable = 0
-                    elif g and len(g) == len(best):
-                        stable += 1
-                        if stable >= 2:  # 2回連続で同数＝描画完了とみなす
-                            break
-                if best:
-                    grid = best
-                    break
-                time.sleep(1.0)  # 空なら少し待って検索し直す
+            best: list[dict] = []
+            stable = 0
+            for _ in range(10):  # 最大 ~15秒
+                time.sleep(1.5)
+                g = _extract_hour_grid(session)
+                if len(g) > len(best):
+                    best = g
+                    stable = 0
+                elif g and len(g) == len(best):
+                    stable += 1
+                    if stable >= 2:  # 2回連続で同数＝描画完了とみなす
+                        break
+            grid = best
             if ti == 0:
                 # 最初の1店は生の視覚行も出して、ラベル・列の並びを確認できるようにする
                 print("[時間帯別] 先頭店の視覚行（先頭12行・診断用）:")
