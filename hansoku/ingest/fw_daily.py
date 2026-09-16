@@ -895,11 +895,26 @@ def probe_hourly_store(
             if not _set_date_range(session, d_from, d_to):
                 print(f"[時間帯probe] {label}: 日付設定に失敗 {d_from}〜{d_to}")
             _click_search(session)
-            time.sleep(1.6)
-            grid = _extract_hour_grid(session)
+            # 描画待ち：行数が伸び止まるまでポーリング（単発待ちだと取りこぼす）
+            grid = []
+            best = []
+            stable = 0
+            for _ in range(12):
+                time.sleep(1.5)
+                g = _extract_hour_grid(session)
+                if len(g) > len(best):
+                    best = g
+                    stable = 0
+                elif g and len(g) == len(best):
+                    stable += 1
+                    if stable >= 2:
+                        break
+            grid = best
             if not grid:
                 session.snapshot(f"nohour_probe_{label}")
-                print(f"=== {label} {d_from}〜{d_to} === グリッドなし")
+                print(f"=== {label} {d_from}〜{d_to} === グリッドなし。画面の視覚行（先頭18行・診断）:")
+                for cells in _visual_rows(session)[:18]:
+                    print("   ", " | ".join((c or "") for c in cells[:14]))
                 continue
             tot_c = tot_s = 0
             lines = []
