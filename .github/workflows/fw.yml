@@ -102,6 +102,10 @@ on:
         description: 'monthly-coverage: 数える指標（sales / dept_sales / product_sales）'
         required: false
         default: 'sales'
+      coverage_grain:
+        description: 'monthly-coverage: 粒度（空=month。時間帯別の穴探しは hour）'
+        required: false
+        default: ''
       abc_ingest_month:
         description: 'abc-store-ingest: 対象月 YYYY-MM（既定は前月）。--abc-store に店コード or 店名'
         required: false
@@ -296,6 +300,7 @@ jobs:
                 --abc-from "${{ inputs.abc_from }}" \
                 --abc-to "${{ inputs.abc_to }}" \
                 --metric "${{ inputs.coverage_metric }}" \
+                --coverage-grain "${{ inputs.coverage_grain }}" \
                 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "source-audit" ]; then
               # FWログイン不要。同じ指標を複数の取り込み口が書いていないか調べる。

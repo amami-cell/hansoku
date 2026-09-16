@@ -1602,6 +1602,7 @@ def report_monthly_coverage(
     date_from: str = "2024-01",
     date_to: str = "2026-08",
     metric: str | None = None,
+    grain: str | None = None,
 ) -> int:
     """指定指標（既定=月次売上）が店×月でどこまで埋まっているかを出す。
 
@@ -1609,12 +1610,15 @@ def report_monthly_coverage(
     バックフィルの前後で回して、埋まったか・どこが穴かを確かめるための道具。
     metric に dept_sales / product_sales を渡すと、ABCの取りこぼし月を洗い出せる
     （FWのグリッドは稀に埋まりきる前に読まれ、その月だけ0件になることがある）。
+    grain=hour を渡すと時間帯別（fw_hourly, 代表日=月初）の店×月カバレッジを出せる。
     """
     import sys as _sys
     from datetime import date as _date
 
     from ..db.warehouse import AggregateQuery
-    from ..model import GRAIN_MONTH, METRIC_DEPT_SALES, METRIC_SALES
+    from ..model import GRAIN_HOUR, GRAIN_MONTH, METRIC_DEPT_SALES, METRIC_SALES
+
+    grain = grain or GRAIN_MONTH
 
     try:
         _sys.stdout.reconfigure(line_buffering=True)
@@ -1643,7 +1647,7 @@ def report_monthly_coverage(
         AggregateQuery(
             date_from=d_from,
             date_to=d_to,
-            grain=GRAIN_MONTH,
+            grain=grain,
             metrics=[metric],
             store_codes=master.active_codes,
             group_by=("store_code", "date"),
@@ -1666,7 +1670,7 @@ def report_monthly_coverage(
             return "FWのABCに部門が無い（商品と部門が未紐付け）"
         return None
 
-    print(f"=== 月次カバレッジ [{metric}] {date_from}〜{date_to}（{len(want)}ヶ月） ===")
+    print(f"=== 店×月カバレッジ [{metric}/{grain}] {date_from}〜{date_to}（{len(want)}ヶ月） ===")
     full, partial, empty, other_pos = [], [], [], []
     for st in master.active:
         got = have.get(st.store_code, set())

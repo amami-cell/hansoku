@@ -298,6 +298,7 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 date_from=args.abc_from or "2024-01",
                 date_to=args.abc_to or "2026-08",
                 metric=args.metric,
+                grain=getattr(args, "coverage_grain", None),
             )
     if args.mode == "source-audit":
         from .ingest.fw_daily import report_source_audit
@@ -798,6 +799,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--metric",
         default=None,
         help="monthly-coverage で数える指標（既定 sales。ABCの穴探しは dept_sales）",
+    )
+    fwdaily.add_argument(
+        "--coverage-grain",
+        default=None,
+        dest="coverage_grain",
+        help="monthly-coverage の粒度（既定 month。時間帯別の穴探しは hour）",
     )
     fwdaily.add_argument("--menu", default=None, help="report モードで開く帳票名")
     fwdaily.add_argument("--months", type=int, default=2, help="遡る月数")
