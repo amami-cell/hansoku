@@ -1670,34 +1670,52 @@ def report_monthly_coverage(
             return "FWのABCに部門が無い（商品と部門が未紐付け）"
         return None
 
+    # 開業日 "YYYY-MM-DD" → 開店月 "YYYY-MM"。この月より前は営業しておらず、
+    # 実績が無いのが正しい＝欠けではなく対象外(N/A)として数える。
+    def _open_month(st) -> str | None:
+        o = (getattr(st, "opened", "") or "").strip()
+        return o[:7] if len(o) >= 7 else None
+
+    def _expected(st) -> list[str]:
+        om = _open_month(st)
+        return [m for m in want if om is None or m >= om]
+
     print(f"=== 店×月カバレッジ [{metric}/{grain}] {date_from}〜{date_to}（{len(want)}ヶ月） ===")
     full, partial, empty, other_pos = [], [], [], []
     for st in master.active:
         got = have.get(st.store_code, set())
-        miss = [m for m in want if m not in got]
-        head = f"  {st.store_code} {st.store_name[:16]:<16} {len(want) - len(miss):>2}/{len(want)}"
+        exp = _expected(st)
+        miss = [m for m in exp if m not in got]
+        pre = len(want) - len(exp)  # 開店前で対象外の月数
+        note = f"（開店前{pre}ヶ月は対象外）" if pre else ""
+        head = f"  {st.store_code} {st.store_name[:16]:<16} {len(exp) - len(miss):>2}/{len(exp)}"
         cannot = _cannot(st)
         if cannot and not got:
             other_pos.append(st.store_code)
             print(f"― {head}  {cannot}")
         elif not miss:
             full.append(st.store_code)
-            print(f"✓ {head}  すべて有り")
-        elif len(miss) == len(want):
+            print(f"✓ {head}  すべて有り{note}")
+        elif len(miss) == len(exp):
             empty.append(st.store_code)
-            print(f"✗ {head}  データ無し")
+            print(f"✗ {head}  データ無し{note}")
         else:
             partial.append(st.store_code)
             shown = ",".join(miss[:14]) + (" …" if len(miss) > 14 else "")
-            print(f"△ {head}  欠け: {shown}")
+            print(f"△ {head}  欠け: {shown}{note}")
 
     # 月ごとに「何店ぶん入っているか」も出す。穴が月側か店側かの切り分け用。
-    print("--- 月別に埋まっている店数 ---")
-    n_active = len(master.active)
+    # 分母はその月に営業していた店数（開店前の店は数えない）。
+    print("--- 月別に埋まっている店数（分母=その月の営業店） ---")
     for m in want:
-        n = sum(1 for st in master.active if m in have.get(st.store_code, set()))
-        bar = "■" * round(n / max(n_active, 1) * 20)
-        print(f"  {m}  {n:>2}/{n_active}  {bar}")
+        open_here = [
+            st for st in master.active
+            if (_open_month(st) is None or m >= _open_month(st)) and _cannot(st) is None
+        ]
+        denom = len(open_here)
+        n = sum(1 for st in open_here if m in have.get(st.store_code, set()))
+        bar = "■" * round(n / max(denom, 1) * 20)
+        print(f"  {m}  {n:>2}/{denom}  {bar}")
     print(
         f"=== 完備 {len(full)}店 / 欠けあり {len(partial)}店 / 皆無 {len(empty)}店"
         f" / FWでは取れない {len(other_pos)}店 ==="

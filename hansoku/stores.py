@@ -42,6 +42,10 @@ class Store:
     # FWのABCで部門（分類）が取れるか。FW側で商品に部門が紐付いていない店は
     # 何度取り込んでも部門0件になる。取込の不具合と区別するために持つ。
     abc_dept: bool = True
+    # 開業日 "YYYY-MM-DD"（分かる範囲で）。この月より前は営業していない＝実績が
+    # 無いのが正しい。カバレッジで「開店前の月」を欠けではなく対象外(N/A)として
+    # 扱い、各店を"営業期間で完備か"で見るために持つ。
+    opened: str = ""
     # 業態変更（リニューアル）した月 "YYYY-MM"。この月より前は別の店の数字なので、
     # またぐ前年比は「同じ店の比較」ではない。数字は消さずに注意書きを出すために持つ。
     renewal_month: str = ""
@@ -116,6 +120,7 @@ class StoreMaster:
                 active=bool(row.get("active", True)),
                 pos=str(row.get("pos", "") or "fw"),
                 abc_dept=bool(row.get("abc_dept", True)),
+                opened=str(row.get("opened", "") or ""),
                 renewal_month=str(row.get("renewal_month", "") or ""),
                 former_name=str(row.get("former_name", "") or ""),
                 aliases=tuple(str(a) for a in (row.get("aliases") or []) if a),
