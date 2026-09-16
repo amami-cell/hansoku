@@ -25,7 +25,8 @@ def _store(code: str, name: str, **overrides) -> Store:
 
 def test_全店が読み込める(master):
     assert len(master) == 24
-    assert len(master.active) == 24
+    # 1115（泡喰ライ）は2026-08末で閉店＝inactive。稼働店は23。
+    assert len(master.active) == 23
 
 
 def test_store_codeが一意(master):
@@ -109,8 +110,9 @@ def test_エリアは5つ(master):
     assert set(master.regions) == {"大阪", "東京", "京都", "兵庫", "福岡"}
 
 
-def test_大阪が最多の16店(master):
-    assert len(master.in_region("大阪")) == 16
+def test_大阪が最多の15店(master):
+    # 1115（泡喰ライ・大阪）が2026-08末で閉店したため 16→15。
+    assert len(master.in_region("大阪")) == 15
 
 
 def test_エリアで店舗を引ける(master):

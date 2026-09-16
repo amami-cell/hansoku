@@ -96,7 +96,8 @@ stores:
     brand: "AWAKURAI"
     brand_name: "曲ル角ニハ泡喰ライ"
     is_shared_facility: false
-    active: true
+    # 2026-08末で閉店。9月以降は取込対象・稼働店一覧から除外（1〜8月の実績はDBに残る）。
+    active: false
   - store_code: "1131"
     store_name: "CRAFTMAN UMAMI"
     yomi: ["くらふとまん", "うまみ"]
