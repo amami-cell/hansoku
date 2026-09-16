@@ -2747,6 +2747,66 @@ def ingest_abc_store(
     return 0
 
 
+def ingest_abc_stores(
+    warehouse,
+    master,
+    *,
+    artifacts: Path,
+    stores: list[str],
+    month: str | None = None,
+    dry_run: bool = False,
+    per_store_budget_minutes: float = 20.0,
+) -> int:
+    """複数店の店舗別月次ABCを、1店ずつ「新しいFWセッション」で順に取り込む。
+
+    店舗切替を同一セッション内で繰り返すとグリッド再描画が止まる事象があるため
+    （時間帯別で確認済み）、店ごとに fw_session を開き直す＝1店=1ログイン。
+    冪等キーは source=fw_abc_<code> で店ごとに分かれるので、途中で1店落ちても
+    取れた店はそのまま残り、その店だけ流し直せばよい。1店で例外が出ても止めずに
+    次の店へ進む（1店の失敗で全店を巻き添えにしない）。
+
+    stores は店コード or 店名の配列。month は "2024-01..2024-08,2026-09" 等をそのまま
+    各店の ingest_abc_store に渡す。戻り値は 0=全店成功 / 1=要確認の店あり。
+    """
+    import sys as _sys
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    rc = 0
+    ok: list[str] = []
+    warn: list[str] = []
+    total = len(stores)
+    print(f"[ABC全店] 対象 {total}店 / 月 {month} / 1店=1ログイン")
+    for idx, store in enumerate(stores, 1):
+        print(f"[ABC全店] === {idx}/{total} 店『{store}』開始 ===")
+        try:
+            r = ingest_abc_store(
+                warehouse,
+                master,
+                artifacts=artifacts,
+                store=store,
+                month=month,
+                dry_run=dry_run,
+                budget_minutes=per_store_budget_minutes,
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"::warning::[ABC全店] 店『{store}』で例外（続行）: {e}")
+            r = 1
+        if r == 0:
+            ok.append(store)
+        else:
+            warn.append(store)
+            rc = 1
+        print(f"[ABC全店] --- {idx}/{total} 店『{store}』終了 rc={r} ---")
+    print(f"[ABC全店] 完了 成功{len(ok)}店 / 要確認{len(warn)}店 / 全{total}店")
+    if warn:
+        print(f"[ABC全店] 要確認の店: {','.join(warn)}")
+    return rc
+
+
 def _abc_grouped_rows_stable(session) -> list[dict]:
     """今の日付レンジで、グループ→メニューの順に踏んでから内訳を全件（グループ付き）で採る。
     行数が3回連続で伸び止まるまで粘る（メニューは全商品より行数が多く描画が遅れるため）。"""

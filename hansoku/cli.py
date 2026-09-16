@@ -346,18 +346,44 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
         with get_warehouse(settings) as warehouse:
             return report_abc_coverage(warehouse, master, month=args.month)
     if args.mode == "abc-store-ingest":
-        from .ingest.fw_daily import ingest_abc_store
+        from .ingest.fw_daily import ingest_abc_store, ingest_abc_stores
 
         if not args.abc_store:
             raise SystemExit("abc-store-ingest には --abc-store（店コード or 店名）が必要です")
         settings = load_settings()
         master = StoreMaster.load(args.stores)
+        raw = args.abc_store.strip()
+        kw = raw.lower()
+        # --abc-store に「複数店」を渡せる：
+        #   カンマ区切り  例) "1006,1015,1069"（コード or 店名）
+        #   キーワード    all/active … 稼働中のFW連動店すべて
+        #                  nonlargo   … 上記から 1160(ルクア) を除く
+        # いずれも 1店=1ログインで順に回す（同一セッションで店を切替えない）。
         with get_warehouse(settings) as warehouse:
+            if "," in raw or kw in ("all", "active", "nonlargo"):
+                if kw in ("all", "active", "nonlargo"):
+                    stores = [
+                        s.store_code
+                        for s in master.active
+                        if getattr(s, "pos", "fw") == "fw"
+                    ]
+                    if kw == "nonlargo":
+                        stores = [c for c in stores if c != "1160"]
+                else:
+                    stores = [x.strip() for x in raw.split(",") if x.strip()]
+                return ingest_abc_stores(
+                    warehouse,
+                    master,
+                    artifacts=Path(args.artifacts),
+                    stores=stores,
+                    month=args.month,
+                    dry_run=args.dry_run,
+                )
             return ingest_abc_store(
                 warehouse,
                 master,
                 artifacts=Path(args.artifacts),
-                store=args.abc_store,
+                store=raw,
                 month=args.month,
                 dry_run=args.dry_run,
             )
