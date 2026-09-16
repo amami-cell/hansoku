@@ -131,9 +131,9 @@ jobs:
     # hosted=GitHub提供(無料枠を消費) / self-hosted=自前ランナー(枠を消費しない)。
     runs-on: ${{ inputs.runner == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
     # 重いモード（gelato-switch=日別二分探索、abc-store-ingest=23ヶ月分の店別再取込、
-    # abc-campaign=全施策再取込）は30分では収まらない。公開リポで無料枠は無制限のため
-    # これらだけ余裕を持たせる（他は従来どおり30分）。
-    timeout-minutes: ${{ (inputs.mode == 'gelato-switch' || inputs.mode == 'abc-store-ingest' || inputs.mode == 'abc-campaign') && 120 || 30 }}
+    # abc-campaign=全施策再取込、hourly-ingest=全店×描画待ちリトライ）は30分では収まらない
+    # ことがある。公開リポで無料枠は無制限のため、これらだけ余裕を持たせる（他は30分）。
+    timeout-minutes: ${{ (inputs.mode == 'gelato-switch' || inputs.mode == 'abc-store-ingest' || inputs.mode == 'abc-campaign' || inputs.mode == 'hourly-ingest') && 120 || 30 }}
 
     steps:
       - uses: actions/checkout@v4
