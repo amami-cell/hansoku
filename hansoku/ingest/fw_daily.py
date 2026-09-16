@@ -772,9 +772,18 @@ def ingest_hourly(
         with fw_session(artifacts) as session:
             _open_hourly(session)
             _combo_options(session)  # コンボが描画されるまで待つ（選択の空振り防止）
+            time.sleep(1.0)          # 新セッション直後はコンボ確定に少し猶予を持たせる
             for value, store in chunk:
                 name = store.store_name
-                if not _select_combo(session, value):
+                # 店舗選択は新セッション直後にまれに空振りする（バッチ先頭が丸ごと
+                # 失敗する事象＝一過性で、走行ごとに落ちる店が変わる）。数回まで粘る。
+                sel = False
+                for _sa in range(3):
+                    if _select_combo(session, value):
+                        sel = True
+                        break
+                    time.sleep(1.5)
+                if not sel:
                     print(f"[時間帯別] 店舗選択に失敗: {name} ({value})")
                     skipped.append(f"{store.store_code}:店舗選択")
                     continue
