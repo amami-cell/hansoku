@@ -74,8 +74,8 @@ class Test冪等性:
         report = ingest(reader, master, warehouse, year_months={"2026-08"}, strict=False)
         dates = warehouse.query("SELECT DISTINCT date FROM f_actuals")
         assert [d["date"] for d in dates] == [date(2026, 8, 1)]
-        # 24店 × 9指標 × (中間 + 確定)
-        assert report.rows_loaded == 24 * 9 * 2
+        # 23店（1115=泡喰ライは閉店で非稼働）× 9指標 × (中間 + 確定)
+        assert report.rows_loaded == 23 * 9 * 2
 
     def test_特定月の再取り込みは他の月を消さない(self, reader, master, warehouse):
         ingest(reader, master, warehouse, strict=False)

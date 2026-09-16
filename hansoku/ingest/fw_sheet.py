@@ -147,6 +147,10 @@ def build_rows(
                 result.unknown_stores[key] = result.unknown_stores.get(key, 0) + 1
                 continue
             if not store.active:
+                # 閉店店。稼働店の集計には載せないが、黙って消さず記録に残す。
+                result.skipped.append(
+                    f"[{tab}] {index}行目: {store.store_code} は閉店（稼働店では無い）"
+                )
                 continue
 
             kind_value = normalize_text(kind)
