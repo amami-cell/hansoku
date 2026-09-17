@@ -993,8 +993,8 @@ tbody tr:last-child td{border-bottom:0;}
 .ymxt td.ymxcompo-click:hover{background:var(--accent-soft);color:var(--accent);}
 /* 商品内訳の小ウインドウ（複数・ドラッグ移動可） */
 #fwins{position:fixed;inset:0;pointer-events:none;z-index:1000;}
-.fwin{position:absolute;pointer-events:auto;width:260px;height:min(52vh,380px);max-width:96vw;max-height:92vh;
-  min-width:200px;min-height:150px;background:var(--surface);
+.fwin{position:absolute;pointer-events:auto;width:340px;height:min(52vh,380px);max-width:96vw;max-height:92vh;
+  min-width:240px;min-height:150px;background:var(--surface);
   border:1px solid var(--line-strong);border-radius:12px;box-shadow:0 10px 34px rgba(0,0,0,.30);
   font-size:12.5px;overflow:hidden;display:flex;flex-direction:column;resize:both;}
 .fw-head{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--surface-2);
@@ -1007,18 +1007,25 @@ tbody tr:last-child td{border-bottom:0;}
 .fw-sz:hover{color:var(--accent);}
 .fw-x{background:none;border:0;font-size:17px;line-height:1;color:var(--ink-3);cursor:pointer;padding:0 2px;}
 .fw-x:hover{color:var(--ink);}
+/* パネル頭のトグル（並び替え・％基準）。ptab を小さめにして頭に収める。 */
+.fw-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:6px 10px;flex:0 0 auto;
+  background:var(--surface-2);border-bottom:1px solid var(--line);}
+.fw-ctl-l{font-size:10.5px;color:var(--ink-3);}
+.fw-ctl .ptabs{padding:2px;}
+.fw-ctl .ptab{font-size:11px;padding:3px 9px;}
 /* ⤢ の既定サイズ（標準→大→特大）。角ドラッグでさらに自由リサイズできる。 */
-.fwin.fw-lg{width:min(440px,94vw);height:min(66vh,560px);font-size:13.5px;}
-.fwin.fw-xl{width:min(640px,96vw);height:min(82vh,760px);font-size:15px;}
+.fwin.fw-lg{width:min(520px,94vw);height:min(66vh,560px);font-size:13.5px;}
+.fwin.fw-xl{width:min(760px,96vw);height:min(82vh,760px);font-size:15px;}
 .fwin.fw-xl .fw-list li{padding:9px 12px;}
 .fw-list{list-style:none;margin:0;padding:4px 4px;flex:1 1 auto;overflow:auto;
   font-variant-numeric:tabular-nums;}
 .fw-head{flex:0 0 auto;}
-.fw-list li{display:flex;justify-content:space-between;gap:10px;padding:6px 8px;border-bottom:1px solid var(--line);}
+.fw-list li{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:6px 8px;border-bottom:1px solid var(--line);}
 .fw-list li:last-child{border-bottom:0;}
-.fw-pn{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+/* 商品名は省略せず全文を折り返して表示。数値（売上・点数・％）は右で崩さない。 */
+.fw-pn{color:var(--ink);flex:1 1 auto;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.4;}
 .fw-rk{color:var(--ink-3);font-size:10px;}
-.fw-pv{color:var(--ink);font-weight:700;white-space:nowrap;}
+.fw-pv{color:var(--ink);font-weight:700;white-space:nowrap;flex:0 0 auto;text-align:right;}
 .fw-pq{color:var(--ink-2);font-weight:600;margin-left:6px;}
 .fw-pp{color:var(--ink-3);font-weight:600;margin-left:6px;}
 /* 販促に関わる部門・商品を色付け */

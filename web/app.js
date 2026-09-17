@@ -62,6 +62,8 @@ let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"
 let YEAR = null;                   // 年間販促ビューで表示中の年（数値）
 let STORE_YEAR = null;             // 店ページの年間スケジュールで見ている年（文字列 "YYYY"）
 let STORE_ANNUAL_VIEW = "chart"; // 店ページ年間スケジュールの表示（chart=既定・月次一覧＋帯 / calendar=開いて詳しく）
+let PANEL_SORT = "share";          // 品目構成比パネルの並び：share=売上構成比順（既定） / qty=出品数(点数)順
+let PANEL_PCT = "dept";            // 品目構成比パネルの％基準：dept=部門別構成比（既定） / total=売上構成比（その月の全体比）
 let ANNUAL_OPEN = {};              // カレンダー一覧の開閉状態（"code:month" と "code:month:区分" を鍵に）
 let MONTH_PICK_OPEN = false;       // 月詳細の月ピッカーを開いているか
 let PROMO_SORT = "effect";         // この店の販促の並び（effect=効果順 / recent=新しい順）
@@ -731,6 +733,7 @@ async function boot() {
   if (!DATA) return;   // 失敗時は loadDashboard が画面に理由を出して null を返す
   CAL_MONTH = CURRENT_MONTH;
   YEAR = new Date().getFullYear();
+  STORE_YEAR = String(new Date().getFullYear());
   GOALS = loadGoals();
   NOTES = loadNotes();
   LOCAL_STATUS = loadStatus();
@@ -858,6 +861,8 @@ function yoy(code) {
 
 // ── 集客（客数）。売上と別枠の DATA.covers を読む。人数なので円と混ぜない ──
 const nin = n => Math.round(n).toLocaleString("ja-JP") + "人";
+// 点数（出品数）用の素の整数フォーマッタ。客数(人)とは別物なので「人」を付けない。
+const ten = n => Math.round(n).toLocaleString("ja-JP");
 const coversAt = (code, month) => ((DATA.covers || {})[code] || {})[month];
 // 店の集客サマリ：確定月の期間合計客数と、直近確定月の前年同月比
 function coversSummary(code) {
@@ -2058,6 +2063,10 @@ const panelKey = d => d.kind === "month" ? `M:${d.code}:${d.m}` : `${d.code}:${d
 function panelContent(d) {
   const mo = +d.m.slice(5, 7);
   const hits = promoHitsForMonth(d.code, d.m);
+  // 商品行の並び：既定＝売上構成比順（売上高降順）／点数順＝出品数降順。
+  const prodCmp = (a, b) => PANEL_SORT === "qty"
+    ? ((b.qty || 0) - (a.qty || 0)) || ((b.sales || 0) - (a.sales || 0))
+    : ((b.sales || 0) - (a.sales || 0)) || ((b.qty || 0) - (a.qty || 0));
   if (d.kind === "month") {
     // その月の全部門を、各部門の商品明細まで展開して見せる。部門ごとに色分け、
     // 部門の合計は太字。商品は「出品数・売上・（部門内）売上構成比」。
@@ -2068,16 +2077,19 @@ function panelContent(d) {
       const col = catColor(c.name);
       const on = hits.cats.has(c.name);
       const catPct = tot ? Math.round((c.sales || 0) / tot * 100) : 0;
-      const prods = prodsInCat(d.code, d.m, c.name).slice().sort((a, b) => (b.sales - a.sales) || ((b.qty || 0) - (a.qty || 0)));
+      const prods = prodsInCat(d.code, d.m, c.name).slice().sort(prodCmp);
       const catQty = prods.reduce((a, p) => a + (p.qty || 0), 0);
-      html += `<li class="fw-sec${on ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn"><span class="ymxcdot" style="background:${col}"></span><b>${esc(c.name)}</b>${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv"><b>${man(c.sales)}</b>${catQty ? ` <span class="fw-pq">${nin(catQty)}点</span>` : ""}<span class="fw-pp">${catPct}%</span></span></li>`;
+      html += `<li class="fw-sec${on ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn"><span class="ymxcdot" style="background:${col}"></span><b>${esc(c.name)}</b>${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv"><b>${man(c.sales)}</b>${catQty ? ` <span class="fw-pq">${ten(catQty)}点</span>` : ""}<span class="fw-pp">${catPct}%</span></span></li>`;
       if (prods.length) {
         for (const p of prods) {
-          const ppct = c.sales ? Math.round((p.sales || 0) / c.sales * 100) : 0;
+          // ％基準：部門別＝商品売上÷その区分売上（既定）／売上＝商品売上÷その月の全体売上。
+          const ppct = PANEL_PCT === "total"
+            ? (tot ? Math.round((p.sales || 0) / tot * 100) : 0)
+            : (c.sales ? Math.round((p.sales || 0) / c.sales * 100) : 0);
           // 販促マークは「販促の対象商品」か「販促のある区分の“限定/おすすめ”商品」だけ。
           // GM(定番＝6か月連続)には付けない。
           const pOn = hits.items.has(p.name) || (on && isLimitedProduct(d.code, d.m, p.name));
-          const q = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
+          const q = (p.qty != null) ? ` <span class="fw-pq">${ten(p.qty)}点</span>` : "";
           html += `<li class="fw-subrow${pOn ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${pOn ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${ppct}%</span></span></li>`;
         }
       } else {
@@ -2087,18 +2099,23 @@ function panelContent(d) {
     const list = cats.length ? html : `<li class="muted">この月のデータがありません</li>`;
     return { key: panelKey(d), color: "var(--accent)", title: `${mo}月 部門別`, tab: `${mo}月 部門別`, sub: `${man(tot)}・${cats.length}区分`, list };
   }
-  const prods = prodsInCat(d.code, d.m, d.cat).slice().sort((a, b) => (b.sales - a.sales) || ((b.qty || 0) - (a.qty || 0)));
+  const prods = prodsInCat(d.code, d.m, d.cat).slice().sort(prodCmp);
   const tot = prods.reduce((a, p) => a + (p.sales || 0), 0);
   const totQty = prods.reduce((a, p) => a + (p.qty || 0), 0);
+  // 売上構成比（全体比）のときは、その月の全区分売上を分母にする。
+  const monthTot = PANEL_PCT === "total"
+    ? catsAtM(d.code, d.m).reduce((a, c) => a + (c.sales || 0), 0) : 0;
   const catOn = hits.cats.has(d.cat);
   const list = prods.length ? prods.map(p => {
-    const pct = tot ? Math.round((p.sales || 0) / tot * 100) : 0;
-    const qty = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
+    const pct = PANEL_PCT === "total"
+      ? (monthTot ? Math.round((p.sales || 0) / monthTot * 100) : 0)
+      : (tot ? Math.round((p.sales || 0) / tot * 100) : 0);
+    const qty = (p.qty != null) ? ` <span class="fw-pq">${ten(p.qty)}点</span>` : "";
     // 販促マーク：対象商品か、販促のある区分の“限定/おすすめ”商品だけ（GMは付けない）。
     const on = hits.items.has(p.name) || (catOn && isLimitedProduct(d.code, d.m, p.name));
     return `<li class="${on ? "promo" : ""}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`;
   }).join("") : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
-  const qsub = totQty ? `・計${nin(totQty)}点` : "";
+  const qsub = totQty ? `・計${ten(totQty)}点` : "";
   return { key: panelKey(d), color: catColor(d.cat), title: `${d.cat}｜${mo}月`, tab: `${d.cat} ${mo}月`, sub: `${man(tot)}・${prods.length}品${qsub}`, list };
 }
 // クリックの出し分け：PC=浮く小窓／携帯=下シート＋タブ。
@@ -2113,23 +2130,40 @@ function wirePanelRows(root) {
     openCompo(p[0], p[1], decodeURIComponent(p.slice(2).join(":")));
   }));
 }
+// パネル頭の並び替え・％基準トグル（PC小窓／携帯シート共通・その場で再描画）。
+function panelCtrl() {
+  const st = (v, l) => `<button class="ptab${PANEL_SORT === v ? " on" : ""}" data-panelsort="${v}">${l}</button>`;
+  const pt = (v, l) => `<button class="ptab${PANEL_PCT === v ? " on" : ""}" data-panelpct="${v}">${l}</button>`;
+  return `<div class="fw-ctl">` +
+    `<span class="fw-ctl-l">並び</span><div class="ptabs">${st("share", "売上構成比")}${st("qty", "出品数")}</div>` +
+    `<span class="fw-ctl-l">比率</span><div class="ptabs">${pt("dept", "部門別")}${pt("total", "売上")}</div>` +
+    `</div>`;
+}
+function wirePanelCtrl(root) {
+  root.querySelectorAll("[data-panelsort]").forEach(el => el.addEventListener("click", e => {
+    e.stopPropagation(); PANEL_SORT = el.dataset.panelsort; rerenderPanels();
+  }));
+  root.querySelectorAll("[data-panelpct]").forEach(el => el.addEventListener("click", e => {
+    e.stopPropagation(); PANEL_PCT = el.dataset.panelpct; rerenderPanels();
+  }));
+}
+// トグル操作後、開いているパネル（PC小窓すべて＋携帯シート）をその場で描き直す。
+function rerenderPanels() {
+  const layer = document.getElementById("fwins");
+  if (layer) [...layer.children].forEach(win => { if (win._desc) renderWindowBody(win); });
+  if (SHEET_TABS.length) renderSheet();
+}
 
 // ── PC：浮く小ウインドウ（複数・ドラッグ移動・角で自由リサイズ・⤢で既定サイズ）──────
-function openWindow(desc) {
-  const layer = fwinLayer();
-  const c = panelContent(desc);
-  const exist = [...layer.children].find(w => w.dataset.fkey === c.key);
-  if (exist) { fwinFront(exist); exist.classList.remove("fw-flash"); void exist.offsetWidth; exist.classList.add("fw-flash"); return; }
-  const win = document.createElement("div");
-  win.className = "fwin"; win.dataset.fkey = c.key;
-  const off = layer.children.length * 20;
-  win.style.left = (56 + off) + "px"; win.style.top = (84 + off) + "px";
+// 小窓の中身（頭・トグル・一覧）を描画して配線。トグル操作の再描画でも使い回す。
+function renderWindowBody(win) {
+  const c = panelContent(win._desc);
   win.innerHTML = `<div class="fw-head"><span class="fw-dot" style="background:${c.color}"></span>` +
     `<span class="fw-ti">${esc(c.title)}</span><span class="fw-sub">${c.sub}</span>` +
     `<button class="fw-sz" aria-label="大きさを切替">⤢</button>` +
     `<button class="fw-x" aria-label="閉じる">×</button></div>` +
+    panelCtrl() +
     `<ul class="fw-list">${c.list}</ul>`;
-  layer.appendChild(win); fwinFront(win);
   win.querySelector(".fw-x").addEventListener("click", () => win.remove());
   const SIZES = ["", "fw-lg", "fw-xl"];
   win.querySelector(".fw-sz").addEventListener("click", e => {
@@ -2140,9 +2174,22 @@ function openWindow(desc) {
     const next = SIZES[(cur + 1 + 1) % SIZES.length]; if (next) win.classList.add(next);
     fwinFront(win);
   });
-  win.addEventListener("mousedown", () => fwinFront(win));
   fwinDrag(win, win.querySelector(".fw-head"));
   wirePanelRows(win);
+  wirePanelCtrl(win);
+}
+function openWindow(desc) {
+  const layer = fwinLayer();
+  const key = panelKey(desc);
+  const exist = [...layer.children].find(w => w.dataset.fkey === key);
+  if (exist) { fwinFront(exist); exist.classList.remove("fw-flash"); void exist.offsetWidth; exist.classList.add("fw-flash"); return; }
+  const win = document.createElement("div");
+  win.className = "fwin"; win.dataset.fkey = key; win._desc = desc;
+  const off = layer.children.length * 20;
+  win.style.left = (56 + off) + "px"; win.style.top = (84 + off) + "px";
+  renderWindowBody(win);
+  layer.appendChild(win); fwinFront(win);
+  win.addEventListener("mousedown", () => fwinFront(win));
 }
 
 // ── 携帯：下から出るシート＋タブ（複数はタブで切替。重ならない）───────────────
@@ -2177,6 +2224,7 @@ function renderSheet() {
     `<div class="fs-tabs">${tabs}</div>` +
     `<div class="fs-sub"><span class="fw-dot" style="background:${c.color}"></span><b>${esc(c.title)}</b>　${c.sub}` +
     `<button class="fs-close" data-fsdismiss="1">閉じる</button></div>` +
+    panelCtrl() +
     `<ul class="fw-list fs-list">${c.list}</ul>`;
   // 高さは一定（既定56vh）。ユーザーが決めた高さがあればそれを固定（部門を変えても同じ）。
   sheet.style.height = (SHEET_H || Math.round(window.innerHeight * 0.56)) + "px";
@@ -2191,6 +2239,7 @@ function renderSheet() {
   }));
   sheet.querySelectorAll("[data-fsdismiss]").forEach(el => el.addEventListener("click", () => { SHEET_TABS = []; renderSheet(); }));
   wirePanelRows(sheet);
+  wirePanelCtrl(sheet);
 }
 function openSheet(desc) {
   const k = panelKey(desc);
@@ -2503,14 +2552,14 @@ function campPeriodActual(c) {
     .sort((x, y) => (y.sales - x.sales) || ((y.qty || 0) - (x.qty || 0)))
     .map(p => {
       const pct = tot ? Math.round((p.sales || 0) / tot * 100) : 0;
-      const q = (p.qty != null) ? ` <span class="fw-pq">${nin(p.qty)}点</span>` : "";
+      const q = (p.qty != null) ? ` <span class="fw-pq">${ten(p.qty)}点</span>` : "";
       return `<li><span class="fw-pn">${esc(p.name)}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${pct}%</span></span></li>`;
     }).join("");
   return `<section class="block">
     <div class="bhead"><h2>販売時期の実績</h2>
       <span class="bnote">${esc(c.start)}〜${esc(c.end)} の実データ（丸ごとの月ではなく販売期間ぶん）・税抜／構成比は施策内</span></div>
     <div class="panel">
-      <div class="cactual-sum">売上 <b>${man(tot)}</b>・${a.items.length}品・計${nin(a.qty || 0)}点</div>
+      <div class="cactual-sum">売上 <b>${man(tot)}</b>・${a.items.length}品・計${ten(a.qty || 0)}点</div>
       <ul class="fw-list">${rows}</ul>
     </div></section>`;
 }
@@ -2546,13 +2595,13 @@ function campGelatoCompo(c) {
     const pct = Math.round(q / denom * 1000) / 10;
     const hot = promo.some(k => k && n.includes(k));
     return `<li><span class="fw-pn">${hot ? "★ " : ""}${esc(n)}</span>` +
-      `<span class="fw-pv"><span class="fw-pq">${nin(q)}点</span><span class="fw-pp">${pct}%</span></span></li>`;
+      `<span class="fw-pv"><span class="fw-pq">${ten(q)}点</span><span class="fw-pp">${pct}%</span></span></li>`;
   }).join("");
   return `<section class="block">
     <div class="bhead"><h2>TOジェラート 出品数構成比</h2>
       <span class="bnote">${esc(c.start)}〜${esc(c.end)}／ジェラートは0円のため出品数(点数)で見る。総スクープ＝シングル×1＋ダブル×2＋トリプル×3。★＝この回の販促2品</span></div>
     <div class="panel">
-      <div class="cactual-sum">総出品数(スクープ) <b>${nin(scoops)}</b>　容器内訳: 単${nin(single)}／双${nin(dbl)}／三${nin(tri)}</div>
+      <div class="cactual-sum">総出品数(スクープ) <b>${ten(scoops)}</b>　容器内訳: 単${ten(single)}／双${ten(dbl)}／三${ten(tri)}</div>
       <ul class="fw-list">${rows}</ul>
     </div></section>`;
 }
