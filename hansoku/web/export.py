@@ -103,9 +103,10 @@ def _categories_for_month(items: list[dict], rules: dict, total_sales: float) ->
     出数（数量）は商品単位では取れない（FWは商品別に売上のみ）ので品目数（SKU数）を出す。
     区分の並びは categories の定義順→その他 を末尾に。
     """
-    order = [c["name"] for c in rules.get("categories", [])]
     other = rules.get("other", "その他")
-    order.append(other)
+    # 区分名で重複を除く（同名の区分が2つ定義されていても1行にまとめる）。
+    # 例: ルクアは「フード」の定義が2つあり、放置すると部門が二重に出る。
+    order = list(dict.fromkeys([c["name"] for c in rules.get("categories", [])] + [other]))
     agg: dict[str, dict] = {}
     for it in items:
         cat = classify_category(it.get("name", ""), rules, it.get("group"))

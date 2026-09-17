@@ -2007,7 +2007,8 @@ function catsAtM(code, m) {
     (agg[c] = agg[c] || { sales: 0, count: 0 });
     agg[c].sales += p.sales || 0; agg[c].count += 1;
   }
-  const order = (r.categories || []).map(c => c.name).concat(r.other || "その他");
+  // 区分名の重複を除く（同名区分が2つあっても部門を二重に出さない）。
+  const order = [...new Set((r.categories || []).map(c => c.name).concat(r.other || "その他"))];
   return order.filter(n => agg[n]).map(n => ({
     name: n, sales: Math.round(agg[n].sales), count: agg[n].count, share: agg[n].sales / total,
   }));
