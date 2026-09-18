@@ -2091,10 +2091,14 @@ function subToggleCtrl(code, m, p) {
     `aria-expanded="${open}">${open ? "▾" : "▸"} 内訳${p.subs.length}件${open ? "" : "（詳細表示）"}</button>`;
 }
 // 内訳（サブ）の <li> 群。名前は全文折返し（fw-pn）、点数、売上は sales>0 のときだけ。表示専用。
+// 0円サブ（内訳）は出品数（点数）の多い順に見せる。点数同値は売上で。
+function subsByQty(subs) {
+  return (subs || []).slice().sort((a, b) => (b.qty || 0) - (a.qty || 0) || (b.sales || 0) - (a.sales || 0));
+}
 function subRowsHtml(code, m, p, col) {
   if (!p || !p.subs || !p.subs.length || !SUBS_OPEN.has(subKey(code, m, p.name))) return "";
   const cc = col ? ` style="--cc:${col}"` : "";
-  return p.subs.map(s => {
+  return subsByQty(p.subs).map(s => {
     const q = (s.qty != null) ? ` <span class="fw-pq">${ten(s.qty)}点</span>` : "";
     // 内訳サブは少額（+50円風味など）が多いので万ではなく円で出す（0万にならないように）
     const v = (s.sales > 0) ? yen(s.sales) : "";
@@ -4964,7 +4968,7 @@ function renderProducts(code) {
     const tog = hasSubs ? subToggleCtrl(code, m, p) : "";
     let subs = "";
     if (hasSubs) {
-      subs = p.subs.map(s => {
+      subs = subsByQty(p.subs).map(s => {
         const q = (s.qty != null) ? `<span class="psub-q">${ten(s.qty)}点</span>` : "";
         const v = (s.sales > 0) ? `<span class="psub-v">${yen(s.sales)}</span>` : "";
         return `<li class="prowsub" data-subrow="${esc(k)}"${open ? "" : " hidden"}>` +
