@@ -21,6 +21,7 @@ from hansoku.model import (
     METRIC_COVERS,
     METRIC_DEPT_QTY,
     METRIC_DEPT_SALES,
+    METRIC_PRODUCT_QTY,
     METRIC_PRODUCT_SALES,
     METRIC_SALES,
     METRIC_SALES_BUDGET,
@@ -98,6 +99,34 @@ def main() -> int:
             print(f"\n== 商品売上の最新月 {latest} の上位{len(items)} ==")
             for name, val, cat in items:
                 print(f"  [{cat}] {name}: {val:,}円")
+
+        # 0円サブ商品（売上0・点数あり＝メイン商品の選択メニュー内訳）の一覧。
+        # どのメイン商品のサブかを人が対応付けるための材料。FW区分見出し付きで出す。
+        qrows = wh.aggregate(
+            AggregateQuery(
+                date_from=FROM, date_to=TO, grain=GRAIN_MONTH,
+                metrics=[METRIC_PRODUCT_QTY], store_codes=[CODE],
+                group_by=("store_code", "date", "product_name", "product_category"),
+            )
+        )
+        qby_m: dict[str, dict] = {}
+        for r in qrows:
+            m = r["date"].strftime("%Y-%m")
+            qby_m.setdefault(m, {})[r["product_name"]] = (round(r["value"]), r["product_category"])
+        # 対象月: MONTHS 指定があればそれ、無ければ最新の商品月。
+        zmonths = [m.strip() for m in os.environ.get("MONTHS", "").split(",") if m.strip()]
+        if not zmonths and pby_m:
+            zmonths = [max(pby_m)]
+        for m in zmonths:
+            sales_names = {n for n, v, c in pby_m.get(m, []) if v > 0}
+            zeros = [(n, q, cat) for n, (q, cat) in qby_m.get(m, {}).items()
+                     if q > 0 and n not in sales_names]
+            zeros.sort(key=lambda x: (str(x[2] or ""), -x[1]))
+            print(f"\n== {m} の0円サブ商品（売上0・点数あり）{len(zeros)}件 ==")
+            if not zeros:
+                print("  （なし）")
+            for name, q, grp in zeros:
+                print(f"  [{grp or '区分なし'}] {name}: {q:,}点")
 
         # MONTHS 環境変数で指定した月の商品上位を出す（例: 前年の秋の商品を洗い出す）。
         want = [m.strip() for m in os.environ.get("MONTHS", "").split(",") if m.strip()]
