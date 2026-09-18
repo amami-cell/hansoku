@@ -2096,7 +2096,8 @@ function subRowsHtml(code, m, p, col) {
   const cc = col ? ` style="--cc:${col}"` : "";
   return p.subs.map(s => {
     const q = (s.qty != null) ? ` <span class="fw-pq">${ten(s.qty)}点</span>` : "";
-    const v = (s.sales > 0) ? man(s.sales) : "";
+    // 内訳サブは少額（+50円風味など）が多いので万ではなく円で出す（0万にならないように）
+    const v = (s.sales > 0) ? yen(s.sales) : "";
     return `<li class="fw-subitem"${cc}><span class="fw-pn">${esc(s.name)}</span>` +
       `<span class="fw-pv">${v}${q}</span></li>`;
   }).join("");
