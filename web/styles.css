@@ -545,6 +545,14 @@ tbody tr:last-child td{border-bottom:0;}
 .psub-n{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;word-break:break-word;line-height:1.4;}
 .psub-q{flex:none;color:var(--ink-2);font-variant-numeric:tabular-nums;}
 .psub-v{flex:none;width:88px;text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+/* 内訳サブメニューのアコーディオン開閉（開く/閉じるを高さアニメで滑らかに） */
+.psubwrap,.fw-list li.fw-subwrap{display:block;padding:0;margin:0;border-bottom:0;list-style:none;}
+.subacc{display:grid;grid-template-rows:0fr;transition:grid-template-rows .28s cubic-bezier(.4,0,.2,1);}
+.psubwrap.open>.subacc,.fw-subwrap.open>.subacc{grid-template-rows:1fr;}
+.subacc>.subacc-in{overflow:hidden;min-height:0;opacity:.35;transition:opacity .26s ease;}
+.psubwrap.open>.subacc>.subacc-in,.fw-subwrap.open>.subacc>.subacc-in{opacity:1;}
+.psubs,.fw-subs{list-style:none;margin:0;padding:0;}
+@media (prefers-reduced-motion:reduce){.subacc,.subacc>.subacc-in{transition:none;}}
 .cgtag{font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);
   border:1px solid var(--accent-line);border-radius:4px;padding:1px 7px;line-height:1.6;}
 .fbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:14px;}

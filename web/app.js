@@ -958,20 +958,9 @@ function render() {
       render();
     }));
   // 0円サブ（内訳）の親行の開閉（売れ筋一覧＝本文側。パネルは wireSubToggle が受ける）。
-  // その場でDOMを切替える（render() を呼ぶと基礎データの折りたたみごと畳まれてしまうため）。
+  // その場で高さアニメ開閉（render() を呼ぶと基礎データの折りたたみごと畳まれてしまうため）。
   app.querySelectorAll("[data-subtoggle]").forEach(el =>
-    el.addEventListener("click", e => {
-      e.stopPropagation();
-      const k = el.dataset.subtoggle;
-      const open = !SUBS_OPEN.has(k);
-      if (open) SUBS_OPEN.add(k); else SUBS_OPEN.delete(k);
-      // 親行（.prow）の直後に続く内訳行（.prowsub）だけを開閉する。
-      let n = 0, node = (el.closest(".prow") || el).nextElementSibling;
-      while (node && node.classList.contains("prowsub")) { node.hidden = !open; n++; node = node.nextElementSibling; }
-      el.classList.toggle("on", open);
-      el.setAttribute("aria-expanded", String(open));
-      el.textContent = `${open ? "▾" : "▸"} 内訳${n}件${open ? "" : "（詳細表示）"}`;
-    }));
+    el.addEventListener("click", e => { e.stopPropagation(); toggleSub(el); }));
   app.querySelectorAll("[data-mpick]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); MONTH_PICK_OPEN = !MONTH_PICK_OPEN; render(); }));
   // 構成比（金額）セル → 商品内訳の小ウインドウを開く（複数可）。render しない＝既存の窓は残る。
@@ -2095,24 +2084,45 @@ function subToggleCtrl(code, m, p) {
 function subsByQty(subs) {
   return (subs || []).slice().sort((a, b) => (b.qty || 0) - (a.qty || 0) || (b.sales || 0) - (a.sales || 0));
 }
+// 内訳（サブ）は常に描画し、閉じているときはアコーディオン（高さ0）で畳んでおく。
+// こうすると開閉が CSS の高さアニメで滑らかに動く（再描画で一瞬パッと出さない）。
 function subRowsHtml(code, m, p, col) {
-  if (!p || !p.subs || !p.subs.length || !SUBS_OPEN.has(subKey(code, m, p.name))) return "";
+  if (!p || !p.subs || !p.subs.length) return "";
+  const k = subKey(code, m, p.name);
+  const open = SUBS_OPEN.has(k);
   const cc = col ? ` style="--cc:${col}"` : "";
-  return subsByQty(p.subs).map(s => {
+  const items = subsByQty(p.subs).map(s => {
     const q = (s.qty != null) ? ` <span class="fw-pq">${ten(s.qty)}点</span>` : "";
     // 内訳サブは少額（+50円風味など）が多いので万ではなく円で出す（0万にならないように）
     const v = (s.sales > 0) ? yen(s.sales) : "";
     return `<li class="fw-subitem"${cc}><span class="fw-pn">${esc(s.name)}</span>` +
       `<span class="fw-pv">${v}${q}</span></li>`;
   }).join("");
+  return `<li class="fw-subwrap${open ? " open" : ""}" data-subwrap="${esc(k)}">` +
+    `<div class="subacc"><div class="subacc-in"><ul class="fw-subs">${items}</ul></div></div></li>`;
 }
-// 開閉ボタンの配線（その場で開閉し、開いているパネルを描き直す）。
+// 内訳の開閉：SUBS_OPEN を切替え、親行の直後のラッパに .open を付け外しするだけ。
+// 高さは CSS（grid-template-rows 0fr↔1fr）でアニメする。再描画しないので滑らかに開閉する。
+function toggleSub(el) {
+  const k = el.dataset.subtoggle;
+  const open = !SUBS_OPEN.has(k);
+  if (open) SUBS_OPEN.add(k); else SUBS_OPEN.delete(k);
+  const li = el.closest("li") || el.closest(".prow");
+  const wrap = li ? li.nextElementSibling : null;
+  let n = 0;
+  if (wrap && /subwrap/.test(wrap.className)) {
+    wrap.classList.toggle("open", open);
+    n = wrap.querySelectorAll("li").length;
+  }
+  el.classList.toggle("on", open);
+  el.setAttribute("aria-expanded", String(open));
+  el.textContent = `${open ? "▾" : "▸"} 内訳${n}件${open ? "" : "（詳細表示）"}`;
+}
+// 開閉ボタンの配線（その場で高さアニメ開閉。再描画しない）。
 function wireSubToggle(root) {
   root.querySelectorAll("[data-subtoggle]").forEach(el => el.addEventListener("click", e => {
     e.stopPropagation();
-    const k = el.dataset.subtoggle;
-    if (SUBS_OPEN.has(k)) SUBS_OPEN.delete(k); else SUBS_OPEN.add(k);
-    rerenderPanels();
+    toggleSub(el);
   }));
 }
 function panelContent(d) {
@@ -4968,12 +4978,14 @@ function renderProducts(code) {
     const tog = hasSubs ? subToggleCtrl(code, m, p) : "";
     let subs = "";
     if (hasSubs) {
-      subs = subsByQty(p.subs).map(s => {
+      const items = subsByQty(p.subs).map(s => {
         const q = (s.qty != null) ? `<span class="psub-q">${ten(s.qty)}点</span>` : "";
         const v = (s.sales > 0) ? `<span class="psub-v">${yen(s.sales)}</span>` : "";
-        return `<li class="prowsub" data-subrow="${esc(k)}"${open ? "" : " hidden"}>` +
-          `<span class="psub-n">${esc(s.name)}</span>${q}${v}</li>`;
+        return `<li class="prowsub"><span class="psub-n">${esc(s.name)}</span>${q}${v}</li>`;
       }).join("");
+      // 内訳は常に描画し、閉じているときは高さ0で畳む（開閉を高さアニメで滑らかに）。
+      subs = `<li class="psubwrap${open ? " open" : ""}" data-subwrap="${esc(k)}">` +
+        `<div class="subacc"><div class="subacc-in"><ul class="psubs">${items}</ul></div></div></li>`;
     }
     return `<li class="prow">
       <span class="pno">${i + 1}</span>
