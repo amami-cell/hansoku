@@ -133,20 +133,43 @@ def _categories_for_month(items: list[dict], rules: dict, total_sales: float) ->
 ZERO_SUB_OTHER_PARENT = "その他の内訳"
 
 
-def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
-    """0円サブ（選択メニュー内訳）を親メイン商品の下に畳む。
+def _match_sub_parent(name: str | None, exact: dict, contains: dict) -> str | None:
+    """商品名からサブ→親メイン商品名を引く。完全一致優先→キーワード部分一致。
 
-    サブ＝FW区分見出し（group="NN:名前"）を持つ商品（例: テイクアウトジェラートの
-    風味選択）。rules["zero_groups"]（見出しラベル→親メイン商品名）のある店だけ効く。
-    無い店は素通し（従来どおり内訳もトップに並ぶ）。
+    完全一致(exact)と部分一致(contains)を分けているのは、風味名など短い語を部分一致に
+    使うと別商品（例: "ピスタチオ" が "苺とピスタチオのフレジェ"）まで巻き込むため。
+    部分一致は接頭辞など衝突しない語だけに使う（例: "SN)"）。一致しなければ None。"""
+    if not name:
+        return None
+    if exact and name in exact:
+        return exact[name]
+    if contains:
+        for kw, parent in contains.items():
+            if kw and kw in name:
+                return parent
+    return None
+
+
+def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
+    """0円サブ（選択メニュー内訳）や商品名指定のサブを、親メイン商品の下に畳む。
+
+    サブになるのは次のいずれか:
+    - FW区分見出し（group="NN:名前"）を持つ商品（例: テイクアウトジェラートの風味選択）。
+      rules["zero_groups"]（見出しラベル→親メイン商品名）で親を引く。
+    - FW見出しを持たず売上つきでトップに出る内訳（例: "ピスタチオ" 単品, "イチゴ増し",
+      セットの "スコーン単品"）。rules["sub_products"]（商品名の完全一致→親）と
+      rules["sub_products_contains"]（部分一致→親）で親を引く。
+    どのルールも無い店は素通し（従来どおり内訳もトップに並ぶ）。
 
     - 親名が実在商品ならその下に、無ければ表示専用の親ノード（synthetic:True）を作って束ねる。
     - サブは親の `subs`（{name, qty, sales, cost?, gross?}）に入れ、トップ階層からは外す。
     - 売上ロールアップ: サブに売上があれば親の「売上」にのみ +計上（点数は足さない＝二重計上回避）。
-    - 未マップの見出しは暫定「その他の内訳」に集約（この店に zero_groups がある場合のみ）。
+    - FW見出しはあるが未マップの見出しは暫定「その他の内訳」に集約（zero_groups がある店のみ）。
     返り値は畳んだあとのトップ階層の商品リスト。"""
     zero_groups = (rules or {}).get("zero_groups") or {}
-    if not zero_groups:
+    sub_exact = (rules or {}).get("sub_products") or {}
+    sub_contains = (rules or {}).get("sub_products_contains") or {}
+    if not zero_groups and not sub_exact and not sub_contains:
         return items
     by_name: dict[str, dict] = {}
     for it in items:
@@ -157,11 +180,16 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
     synthetic: dict[str, dict] = {}
     for it in items:
         group = it.get("group")
-        if not group:
-            tops.append(it)   # メイン商品（見出し無し）はそのまま
+        parent_name: str | None = None
+        if group and zero_groups:
+            # FW見出しを持つサブ：見出しから親を決める（未マップは その他の内訳）。
+            parent_name = zero_groups.get(_group_label(group), ZERO_SUB_OTHER_PARENT)
+        if parent_name is None:
+            # 見出し無し（or zero_groups 無し）は商品名でサブ判定。
+            parent_name = _match_sub_parent(it.get("name"), sub_exact, sub_contains)
+        if parent_name is None:
+            tops.append(it)   # メイン商品（サブでない）はそのまま
             continue
-        # サブ：所属見出しから親メイン商品名を決める（未マップは その他の内訳）。
-        parent_name = zero_groups.get(_group_label(group), ZERO_SUB_OTHER_PARENT)
         parent = by_name.get(parent_name) or synthetic.get(parent_name)
         if parent is None:
             # 実在しない親は表示専用ノードを新設（品目区分は親名で分類される）。

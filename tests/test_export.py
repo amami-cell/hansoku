@@ -98,6 +98,80 @@ def test_サブのcost粗利も内訳に引き継がれる():
                    "cost": 3000, "gross": 5000}
 
 
+# FW見出しを持たず売上つきでトップに出る内訳を、商品名でメインに畳む（sub_products）。
+SUBP_RULES = {
+    "other": "その他",
+    "sub_products": {
+        "ピスタチオ": "TOジェラート（風味・全TO共通）",
+        "イチゴ増し": "LARGOケーキプレート",
+    },
+    "sub_products_contains": {
+        "SN)": "2000ミニパフェ＆スコーンタルトセット",
+    },
+    "categories": [
+        {"name": "パフェ", "keywords": ["パフェ", "フレジェ"]},
+        {"name": "ジェラート", "keywords": ["TOジェラート"]},
+        {"name": "ケーキ", "keywords": ["プレート"]},
+    ],
+}
+
+
+def test_商品名完全一致でメインに畳み売上だけ足す():
+    """FW見出しの無い内訳（増し・単品風味）を商品名の完全一致でメインに畳む。
+    売上は親に+計上、点数は加算しない。サブはトップから消える。"""
+    items = [
+        {"name": "LARGOケーキプレート", "sales": 176400, "rank": "A", "qty": 100},
+        {"name": "イチゴ増し", "sales": 211500, "rank": "A", "qty": 300},
+    ]
+    tops = _nest_zero_subs(items, SUBP_RULES)
+    assert [t["name"] for t in tops] == ["LARGOケーキプレート"]
+    parent = tops[0]
+    assert parent["sales"] == 176400 + 211500   # 売上は合算
+    assert parent["qty"] == 100                 # 点数は本体のまま
+    assert parent["subs"] == [{"name": "イチゴ増し", "qty": 300, "sales": 211500}]
+
+
+def test_完全一致は短い風味名でも別商品を巻き込まない():
+    """"ピスタチオ" 完全一致は畳むが、"苺とピスタチオのフレジェ"（パフェ）は巻き込まない。"""
+    items = [
+        {"name": "ピスタチオ", "sales": 331250, "rank": "A", "qty": 400},
+        {"name": "苺とピスタチオのフレジェ", "sales": 1097050, "rank": "A", "qty": 500},
+    ]
+    tops = _nest_zero_subs(items, SUBP_RULES)
+    names = [t["name"] for t in tops]
+    assert "苺とピスタチオのフレジェ" in names          # パフェはトップに残る
+    assert "ピスタチオ" not in names                    # 単品風味は畳まれる
+    parent = next(t for t in tops if t["name"] == "TOジェラート（風味・全TO共通）")
+    assert parent["synthetic"] is True
+    assert parent["sales"] == 331250
+
+
+def test_部分一致は接頭辞でセットのサブに畳む():
+    """"SN)" 接頭辞の紅茶選択を 2000セットのサブに畳む（部分一致）。"""
+    items = [
+        {"name": "SN)ルイボス", "sales": 900, "rank": None, "qty": 3},
+        {"name": "SN)アサイベリー", "sales": 300, "rank": None, "qty": 1},
+    ]
+    tops = _nest_zero_subs(items, SUBP_RULES)
+    assert len(tops) == 1
+    assert tops[0]["name"] == "2000ミニパフェ＆スコーンタルトセット"
+    assert tops[0]["sales"] == 1200
+    assert len(tops[0]["subs"]) == 2
+
+
+def test_sub_productsだけの店でも畳む():
+    """zero_groups が無くても sub_products / sub_products_contains があれば効く。"""
+    only_subp = {"other": "その他", "sub_products": {"イチゴ増し": "LARGOケーキプレート"},
+                 "categories": []}
+    items = [
+        {"name": "LARGOケーキプレート", "sales": 100, "rank": "A", "qty": 10},
+        {"name": "イチゴ増し", "sales": 50, "rank": None, "qty": 5},
+    ]
+    tops = _nest_zero_subs(items, only_subp)
+    assert [t["name"] for t in tops] == ["LARGOケーキプレート"]
+    assert tops[0]["sales"] == 150
+
+
 def test_classify_category_group_overrides_name():
     """内訳（0円の選択商品）は FW区分見出し（groups）を商品名より優先して束ねる。"""
     rules = {
