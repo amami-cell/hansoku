@@ -2101,8 +2101,32 @@ function subRowsHtml(code, m, p, col) {
   return `<li class="fw-subwrap${open ? " open" : ""}" data-subwrap="${esc(k)}">` +
     `<div class="subacc"><div class="subacc-in"><ul class="fw-subs">${items}</ul></div></div></li>`;
 }
+// スクロールできる先祖（overflow auto/scroll）を探す。無ければ null＝ページ（window）。
+function scrollParentOf(node) {
+  for (let p = node && node.parentElement; p; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight) return p;
+  }
+  return null;
+}
+// 開閉アニメの間、対象の行（row）の画面上の位置を固定する。内訳を畳むと下（や上）の
+// 高さが変わって、触っているメイン行の位置が飛ぶのを防ぐ＝行を基準にスクロールを追従補正。
+function pinRowDuring(row, ms) {
+  if (!row) return;
+  const sc = scrollParentOf(row);
+  const before = row.getBoundingClientRect().top;
+  if (row._pinRAF) cancelAnimationFrame(row._pinRAF);
+  const t0 = performance.now();
+  const step = () => {
+    const dy = row.getBoundingClientRect().top - before;
+    if (Math.abs(dy) > 0.5) { if (sc) sc.scrollTop += dy; else window.scrollBy(0, dy); }
+    row._pinRAF = (performance.now() - t0 < ms) ? requestAnimationFrame(step) : 0;
+  };
+  row._pinRAF = requestAnimationFrame(step);
+}
 // 内訳の開閉：SUBS_OPEN を切替え、親行の直後のラッパに .open を付け外しするだけ。
 // 高さは CSS（grid-template-rows 0fr↔1fr）でアニメする。再描画しないので滑らかに開閉する。
+// 開閉中は触ったメイン行を画面に固定して位置が飛ばないようにする。
 function toggleSub(el) {
   const k = el.dataset.subtoggle;
   const open = !SUBS_OPEN.has(k);
@@ -2117,6 +2141,7 @@ function toggleSub(el) {
   el.classList.toggle("on", open);
   el.setAttribute("aria-expanded", String(open));
   el.textContent = `${open ? "▾" : "▸"} 内訳${n}件${open ? "" : "（詳細表示）"}`;
+  pinRowDuring(li, 520);   // CSS 0.46s のアニメが終わるまで行を固定（少し余裕）
 }
 // 開閉ボタンの配線（その場で高さアニメ開閉。再描画しない）。
 function wireSubToggle(root) {
