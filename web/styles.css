@@ -538,6 +538,13 @@ tbody tr:last-child td{border-bottom:0;}
 .pgp{flex:none;width:50px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums;color:var(--ink-3);}
 .pgp.up{color:var(--good-ink);font-weight:600;} .pgp.down{color:var(--critical-ink);font-weight:600;}
 .pgp.muted{color:var(--ink-3);opacity:.5;}
+/* 売れ筋一覧（ABC）の 0円サブ内訳行：親の下に一段下げて折返し表示 */
+.prowsub{display:flex;align-items:flex-start;gap:8px;padding:3px 2px 3px 30px;
+  border-bottom:1px solid var(--line);font-size:11.5px;color:var(--ink-3);}
+.prowsub:last-child{border-bottom:none;}
+.psub-n{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;word-break:break-word;line-height:1.4;}
+.psub-q{flex:none;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+.psub-v{flex:none;width:88px;text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums;}
 .cgtag{font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);
   border:1px solid var(--accent-line);border-radius:4px;padding:1px 7px;line-height:1.6;}
 .fbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:14px;}
@@ -1069,6 +1076,17 @@ tbody tr:last-child td{border-bottom:0;}
 .fw-list li.fw-subrow{border-left:4px solid color-mix(in srgb, var(--cc) 45%, transparent);
   padding-left:20px;color:var(--ink-2);font-size:12px;}
 .fw-list li.fw-sec.promo,.fw-list li.fw-subrow.promo{background:color-mix(in srgb, var(--accent) 12%, transparent);}
+/* 0円サブ（選択メニュー内訳）の畳み表示：親行の開閉ボタン＋開いたときの内訳行 */
+.fw-subtog{display:inline-block;margin-left:6px;padding:1px 7px;font-size:10.5px;font-weight:600;
+  line-height:1.5;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line);
+  border-radius:999px;cursor:pointer;white-space:nowrap;font-family:inherit;}
+.fw-subtog:hover{border-color:var(--accent);color:var(--accent);}
+.fw-subtog.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);}
+/* 内訳（サブ）行：親よりさらに一段下げ、控えめに。名前は全文折返し。 */
+.fw-list li.fw-subitem{padding-left:34px;color:var(--ink-3);font-size:11.5px;
+  background:color-mix(in srgb, var(--cc, var(--ink-3)) 4%, transparent);}
+.fw-list li.fw-subitem .fw-pn{color:var(--ink-3);}
+.fw-list li.fw-subitem .fw-pv{color:var(--ink-2);font-weight:600;}
 .ymxcompo-lg{margin-top:10px;}
 .ymxcl-t{font-size:12px;font-weight:600;color:var(--ink-2);}
 /* 前年差の内訳（なぜ増えた/減った：区分ごとの差を大きい順に） */

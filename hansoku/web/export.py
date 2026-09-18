@@ -130,6 +130,57 @@ def _categories_for_month(items: list[dict], rules: dict, total_sales: float) ->
     return out
 
 
+ZERO_SUB_OTHER_PARENT = "その他の内訳"
+
+
+def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
+    """0円サブ（選択メニュー内訳）を親メイン商品の下に畳む。
+
+    サブ＝FW区分見出し（group="NN:名前"）を持つ商品（例: テイクアウトジェラートの
+    風味選択）。rules["zero_groups"]（見出しラベル→親メイン商品名）のある店だけ効く。
+    無い店は素通し（従来どおり内訳もトップに並ぶ）。
+
+    - 親名が実在商品ならその下に、無ければ表示専用の親ノード（synthetic:True）を作って束ねる。
+    - サブは親の `subs`（{name, qty, sales, cost?, gross?}）に入れ、トップ階層からは外す。
+    - 売上ロールアップ: サブに売上があれば親の「売上」にのみ +計上（点数は足さない＝二重計上回避）。
+    - 未マップの見出しは暫定「その他の内訳」に集約（この店に zero_groups がある場合のみ）。
+    返り値は畳んだあとのトップ階層の商品リスト。"""
+    zero_groups = (rules or {}).get("zero_groups") or {}
+    if not zero_groups:
+        return items
+    by_name: dict[str, dict] = {}
+    for it in items:
+        nm = it.get("name")
+        if nm and nm not in by_name:
+            by_name[nm] = it
+    tops: list[dict] = []
+    synthetic: dict[str, dict] = {}
+    for it in items:
+        group = it.get("group")
+        if not group:
+            tops.append(it)   # メイン商品（見出し無し）はそのまま
+            continue
+        # サブ：所属見出しから親メイン商品名を決める（未マップは その他の内訳）。
+        parent_name = zero_groups.get(_group_label(group), ZERO_SUB_OTHER_PARENT)
+        parent = by_name.get(parent_name) or synthetic.get(parent_name)
+        if parent is None:
+            # 実在しない親は表示専用ノードを新設（品目区分は親名で分類される）。
+            parent = {"name": parent_name, "sales": 0, "qty": None,
+                      "rank": None, "subs": [], "synthetic": True}
+            synthetic[parent_name] = parent
+        sub = {"name": it.get("name"), "qty": it.get("qty"), "sales": it.get("sales", 0)}
+        if "cost" in it:
+            sub["cost"] = it["cost"]
+        if "gross" in it:
+            sub["gross"] = it["gross"]
+        parent.setdefault("subs", []).append(sub)
+        s = it.get("sales") or 0
+        if s > 0:                       # 売上のあるサブだけ親の売上に足す（点数は足さない）
+            parent["sales"] = (parent.get("sales") or 0) + s
+    tops.extend(synthetic.values())     # 新設した親をトップに加える
+    return tops
+
+
 def load_lunch(path: Path | None = None) -> list[dict]:
     """人が貼る config/lunch_analysis.json（ランチ効果分析）を読む。無ければ空。"""
     p = Path(path) if path else DEFAULT_LUNCH_PATH
@@ -619,6 +670,10 @@ def _build_abc_by_month(
     for code, months in prod_tmp.items():
         rules = store_categories.get(code)
         for m, items in months.items():
+            # 0円サブ（選択メニュー内訳）を親メイン商品の下に畳む（zero_groups のある店だけ）。
+            # サブをトップから外し、売上を親へロールアップしてから、区分集計・売れ筋切りを行う。
+            # こうすると品目数（品目区分の count）にサブが二重に乗らない。
+            items = _nest_zero_subs(items, rules)
             items.sort(key=lambda p: p["sales"], reverse=True)
             # 品目区分（店ごとのルールがある店だけ）。全商品で束ねてから売れ筋を切る。
             if rules:
@@ -626,13 +681,15 @@ def _build_abc_by_month(
                 cats = _categories_for_month(items, rules, total)
                 if cats:
                     categories_monthly.setdefault(code, {})[m] = cats
-            # 売れ筋 top-N に加え、内訳（FW区分見出し付き＝選択商品）と、売価0円だが点数の
-            # ある商品は必ず残す。内訳は点数が本体なので top-N から切れても消さない。
+            # 売れ筋 top-N に加え、内訳（FW区分見出し付き＝選択商品）・内訳を畳んだ親
+            # （subs 持ち）・売価0円だが点数のある商品は必ず残す。内訳は点数が本体なので
+            # top-N から切れても消さない。
             keep = items[:MONTHLY_PRODUCTS_N]
             kept = {id(p) for p in keep}
             extra = [p for p in items[MONTHLY_PRODUCTS_N:]
                      if id(p) not in kept
-                     and (p.get("group") or (not p.get("sales") and p.get("qty")))]
+                     and (p.get("group") or p.get("subs")
+                          or (not p.get("sales") and p.get("qty")))]
             products_monthly.setdefault(code, {})[m] = keep + extra
     return departments_monthly, products_monthly, categories_monthly
 

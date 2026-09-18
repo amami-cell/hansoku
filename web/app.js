@@ -66,6 +66,9 @@ let PANEL_SORT = "share";          // 品目構成比パネルの並び：share=
 let PANEL_PCT = "dept";            // 品目構成比パネルの％基準：dept=部門別構成比（既定） / total=売上構成比（その月の全体比）
 let ANNUAL_OPEN = {};              // カレンダー一覧の開閉状態（"code:month" と "code:month:区分" を鍵に）
 let MONTH_PICK_OPEN = false;       // 月詳細の月ピッカーを開いているか
+// 0円サブ（選択メニュー内訳）を親メイン商品の下に畳んで表示。開いている親の鍵
+// （"code:month:親名"）の集合。既定は畳む（空集合）。パネル・売れ筋一覧で共通に使う。
+const SUBS_OPEN = new Set();
 let PROMO_SORT = "effect";         // この店の販促の並び（effect=効果順 / recent=新しい順）
 let PROMO_FILTER = "all";          // この店の販促の状態フィルタ（all / live / done）
 let STORE_LIST_SORT = "region";    // 店舗一覧の並び（region / budget / yoy / sales）
@@ -953,6 +956,21 @@ function render() {
       const k = `${parts[0]}:${parts[1]}:${decodeURIComponent(parts.slice(2).join(":"))}`;
       if (ANNUAL_OPEN[k]) delete ANNUAL_OPEN[k]; else ANNUAL_OPEN[k] = true;
       render();
+    }));
+  // 0円サブ（内訳）の親行の開閉（売れ筋一覧＝本文側。パネルは wireSubToggle が受ける）。
+  // その場でDOMを切替える（render() を呼ぶと基礎データの折りたたみごと畳まれてしまうため）。
+  app.querySelectorAll("[data-subtoggle]").forEach(el =>
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const k = el.dataset.subtoggle;
+      const open = !SUBS_OPEN.has(k);
+      if (open) SUBS_OPEN.add(k); else SUBS_OPEN.delete(k);
+      // 親行（.prow）の直後に続く内訳行（.prowsub）だけを開閉する。
+      let n = 0, node = (el.closest(".prow") || el).nextElementSibling;
+      while (node && node.classList.contains("prowsub")) { node.hidden = !open; n++; node = node.nextElementSibling; }
+      el.classList.toggle("on", open);
+      el.setAttribute("aria-expanded", String(open));
+      el.textContent = `${open ? "▾" : "▸"} 内訳${n}件${open ? "" : "（詳細表示）"}`;
     }));
   app.querySelectorAll("[data-mpick]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); MONTH_PICK_OPEN = !MONTH_PICK_OPEN; render(); }));
@@ -2060,6 +2078,38 @@ function fwinDrag(win, handle) {
 // 販促に関わる区分・商品は色付け（promo クラス）。desc={kind,code,m,cat}
 const isMobile = () => !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches);
 const panelKey = d => d.kind === "month" ? `M:${d.code}:${d.m}` : `${d.code}:${d.m}:${d.cat}`;
+// ── 0円サブ（選択メニュー内訳）の畳み表示 ────────────────────────────────────
+// 親メイン商品の行に付ける開閉ボタン（既定＝畳む）と、開いたときの内訳（サブ）行。
+// 焼き込み（export）で親に subs 配列が付き、サブはトップから外れている。古いデータで
+// subs が無くても何も出さない（後方互換）。
+const subKey = (code, m, name) => `${code}:${m}:${name}`;
+function subToggleCtrl(code, m, p) {
+  if (!p || !p.subs || !p.subs.length) return "";
+  const k = subKey(code, m, p.name);
+  const open = SUBS_OPEN.has(k);
+  return ` <button class="fw-subtog${open ? " on" : ""}" data-subtoggle="${esc(k)}" ` +
+    `aria-expanded="${open}">${open ? "▾" : "▸"} 内訳${p.subs.length}件${open ? "" : "（詳細表示）"}</button>`;
+}
+// 内訳（サブ）の <li> 群。名前は全文折返し（fw-pn）、点数、売上は sales>0 のときだけ。表示専用。
+function subRowsHtml(code, m, p, col) {
+  if (!p || !p.subs || !p.subs.length || !SUBS_OPEN.has(subKey(code, m, p.name))) return "";
+  const cc = col ? ` style="--cc:${col}"` : "";
+  return p.subs.map(s => {
+    const q = (s.qty != null) ? ` <span class="fw-pq">${ten(s.qty)}点</span>` : "";
+    const v = (s.sales > 0) ? man(s.sales) : "";
+    return `<li class="fw-subitem"${cc}><span class="fw-pn">${esc(s.name)}</span>` +
+      `<span class="fw-pv">${v}${q}</span></li>`;
+  }).join("");
+}
+// 開閉ボタンの配線（その場で開閉し、開いているパネルを描き直す）。
+function wireSubToggle(root) {
+  root.querySelectorAll("[data-subtoggle]").forEach(el => el.addEventListener("click", e => {
+    e.stopPropagation();
+    const k = el.dataset.subtoggle;
+    if (SUBS_OPEN.has(k)) SUBS_OPEN.delete(k); else SUBS_OPEN.add(k);
+    rerenderPanels();
+  }));
+}
 function panelContent(d) {
   const mo = +d.m.slice(5, 7);
   const hits = promoHitsForMonth(d.code, d.m);
@@ -2090,7 +2140,8 @@ function panelContent(d) {
           // GM(定番＝6か月連続)には付けない。
           const pOn = hits.items.has(p.name) || (on && isLimitedProduct(d.code, d.m, p.name));
           const q = (p.qty != null) ? ` <span class="fw-pq">${ten(p.qty)}点</span>` : "";
-          html += `<li class="fw-subrow${pOn ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${pOn ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${ppct}%</span></span></li>`;
+          html += `<li class="fw-subrow${pOn ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${pOn ? ' <span class="fw-pbadge">販促</span>' : ""}${subToggleCtrl(d.code, d.m, p)}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${ppct}%</span></span></li>`;
+          html += subRowsHtml(d.code, d.m, p, col);
         }
       } else {
         html += `<li class="fw-subrow" style="--cc:${col}"><span class="muted">商品明細なし</span></li>`;
@@ -2113,7 +2164,8 @@ function panelContent(d) {
     const qty = (p.qty != null) ? ` <span class="fw-pq">${ten(p.qty)}点</span>` : "";
     // 販促マーク：対象商品か、販促のある区分の“限定/おすすめ”商品だけ（GMは付けない）。
     const on = hits.items.has(p.name) || (catOn && isLimitedProduct(d.code, d.m, p.name));
-    return `<li class="${on ? "promo" : ""}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`;
+    return `<li class="${on ? "promo" : ""}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${on ? ' <span class="fw-pbadge">販促</span>' : ""}${subToggleCtrl(d.code, d.m, p)}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`
+      + subRowsHtml(d.code, d.m, p);
   }).join("") : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
   const qsub = totQty ? `・計${ten(totQty)}点` : "";
   return { key: panelKey(d), color: catColor(d.cat), title: `${d.cat}｜${mo}月`, tab: `${d.cat} ${mo}月`, sub: `${man(tot)}・${prods.length}品${qsub}`, list };
@@ -2177,6 +2229,7 @@ function renderWindowBody(win) {
   fwinDrag(win, win.querySelector(".fw-head"));
   wirePanelRows(win);
   wirePanelCtrl(win);
+  wireSubToggle(win);
 }
 function openWindow(desc) {
   const layer = fwinLayer();
@@ -2240,6 +2293,7 @@ function renderSheet() {
   sheet.querySelectorAll("[data-fsdismiss]").forEach(el => el.addEventListener("click", () => { SHEET_TABS = []; renderSheet(); }));
   wirePanelRows(sheet);
   wirePanelCtrl(sheet);
+  wireSubToggle(sheet);
 }
 function openSheet(desc) {
   const k = panelKey(desc);
@@ -4891,6 +4945,7 @@ function renderProducts(code) {
   const max = Math.max(1, ...items.map(p => p.sales));
   const rankColor = r => r === "A" ? "var(--good-ink)" : r === "B" ? "var(--accent)" : "var(--ink-3)";
   const anyGp = items.some(p => p.sales > 0 && (p.gross != null || p.cost != null));
+  const m = abcMonthOf(code);
   const rows = items.map((p, i) => {
     const pct = Math.max(3, Math.round(p.sales / max * 100));
     const rank = p.rank
@@ -4900,11 +4955,26 @@ function renderProducts(code) {
     const gpChip = gp != null
       ? `<span class="pgp ${gp >= 0.6 ? "up" : gp < 0.5 ? "down" : ""}" title="FW ABC 粗利率（ロス・棚卸差異は含まない）／原価率 ${pct100(1 - gp)}">粗${pct100(gp)}</span>`
       : (anyGp ? `<span class="pgp muted">―</span>` : "");
+    // 0円サブ（選択メニュー内訳）を持つ親商品には開閉ボタンを付ける。内訳行は常に描画し、
+    // 畳んでいるときは hidden にする（トグルはその場でDOM切替＝基礎データの折りたたみを畳まない）。
+    const hasSubs = !!(p.subs && p.subs.length);
+    const k = hasSubs ? subKey(code, m, p.name) : "";
+    const open = hasSubs && SUBS_OPEN.has(k);
+    const tog = hasSubs ? subToggleCtrl(code, m, p) : "";
+    let subs = "";
+    if (hasSubs) {
+      subs = p.subs.map(s => {
+        const q = (s.qty != null) ? `<span class="psub-q">${ten(s.qty)}点</span>` : "";
+        const v = (s.sales > 0) ? `<span class="psub-v">${yen(s.sales)}</span>` : "";
+        return `<li class="prowsub" data-subrow="${esc(k)}"${open ? "" : " hidden"}>` +
+          `<span class="psub-n">${esc(s.name)}</span>${q}${v}</li>`;
+      }).join("");
+    }
     return `<li class="prow">
       <span class="pno">${i + 1}</span>
-      <span class="pname">${esc(p.name)}</span>${rank}
+      <span class="pname">${esc(p.name)}</span>${rank}${tog}
       <span class="pbar"><span class="pfill" style="width:${pct}%"></span></span>
-      <span class="psales">${yen(p.sales)}</span>${gpChip}</li>`;
+      <span class="psales">${yen(p.sales)}</span>${gpChip}</li>${subs}`;
   }).join("");
   const monthLbl = abcMonthLbl(code);
   const gpNote = anyGp ? "　粗＝FW ABC粗利率（ロス・棚卸差異は含まない）" : "";

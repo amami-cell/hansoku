@@ -3,7 +3,99 @@ from datetime import date
 
 import pytest
 
-from hansoku.web.export import build, classify_category
+from hansoku.web.export import build, classify_category, _nest_zero_subs
+
+
+# 0円サブ（選択メニュー内訳）を親メイン商品の下に畳む変換。zero_groups のある店だけ効く。
+ZERO_RULES = {
+    "other": "その他",
+    "zero_groups": {
+        "テイクアウトジェラート": "TOジェラート（風味・全TO共通）",
+        "ジェラートサンデーダブル": "サンデーダブル",
+    },
+    "categories": [
+        {"name": "パフェ", "keywords": ["サンデー"]},
+        {"name": "ジェラート", "keywords": ["ジェラート", "TOジェラート"]},
+    ],
+}
+
+
+def test_サブが実在の親に畳まれ売上だけロールアップされる():
+    """親名が実在商品なら、その下に内訳をぶら下げ、売上のあるサブは親の売上に足す
+    （点数は足さない＝二重計上回避）。サブはトップ階層から外れる。"""
+    items = [
+        {"name": "サンデーダブル", "sales": 100000, "rank": "A", "qty": 200},
+        {"name": "サンデーダブル ベリー", "sales": 3000, "rank": None, "qty": 40,
+         "group": "06:ジェラートサンデーダブル"},
+        {"name": "サンデーダブル 抹茶", "sales": 0, "rank": None, "qty": 60,
+         "group": "06:ジェラートサンデーダブル"},
+    ]
+    tops = _nest_zero_subs(items, ZERO_RULES)
+    assert [t["name"] for t in tops] == ["サンデーダブル"]   # サブはトップから消える
+    parent = tops[0]
+    assert parent["sales"] == 103000          # 売上のあるサブ(3000)だけ足す
+    assert parent["qty"] == 200               # 点数は足さない（本体のまま）
+    assert [s["name"] for s in parent["subs"]] == ["サンデーダブル ベリー", "サンデーダブル 抹茶"]
+    assert parent["subs"][0] == {"name": "サンデーダブル ベリー", "qty": 40, "sales": 3000}
+
+
+def test_親が実在しなければ表示専用の親ノードを作る():
+    """親名が実在しなければ synthetic な親を新設し、売上はサブ売上の合計になる。
+    親名で品目区分に分類できるよう name/rank を持つ。"""
+    items = [
+        {"name": "TOダブル ピスタチオ", "sales": 0, "rank": None, "qty": 120,
+         "group": "20:テイクアウトジェラート"},
+        {"name": "TOダブル いちご", "sales": 5000, "rank": None, "qty": 30,
+         "group": "20:テイクアウトジェラート"},
+    ]
+    tops = _nest_zero_subs(items, ZERO_RULES)
+    assert len(tops) == 1
+    parent = tops[0]
+    assert parent["name"] == "TOジェラート（風味・全TO共通）"
+    assert parent["synthetic"] is True
+    assert parent["qty"] is None and parent["rank"] is None
+    assert parent["sales"] == 5000            # サブ売上の合計
+    assert len(parent["subs"]) == 2
+    # 親名から品目区分（ジェラート）に分類できる。
+    assert classify_category(parent["name"], ZERO_RULES) == "ジェラート"
+
+
+def test_未マップの見出しはその他の内訳に集約される():
+    """zero_groups に無い見出しのサブは暫定「その他の内訳」にまとめる。"""
+    items = [
+        {"name": "P・コーラ", "sales": 0, "rank": None, "qty": 15, "group": "11:ソフトドリンク"},
+        {"name": "P・ジンジャー", "sales": 0, "rank": None, "qty": 7, "group": "11:ソフトドリンク"},
+    ]
+    tops = _nest_zero_subs(items, ZERO_RULES)
+    assert len(tops) == 1
+    assert tops[0]["name"] == "その他の内訳"
+    assert tops[0]["synthetic"] is True
+    assert len(tops[0]["subs"]) == 2
+
+
+def test_zero_groupsが無い店は素通し():
+    """zero_groups の無い店は変換しない（内訳もトップにそのまま並ぶ・後方互換）。"""
+    items = [
+        {"name": "サンデーダブル", "sales": 100000, "rank": "A", "qty": 200},
+        {"name": "サンデーダブル ベリー", "sales": 0, "rank": None, "qty": 40,
+         "group": "06:ジェラートサンデーダブル"},
+    ]
+    no_zero = {"other": "その他", "categories": []}
+    assert _nest_zero_subs(items, no_zero) is items       # 変更なし（同一リスト）
+    assert _nest_zero_subs(items, None) is items
+
+
+def test_サブのcost粗利も内訳に引き継がれる():
+    """サブに原価/粗利があれば内訳（subs）にも引き継ぐ（後方互換：無ければキー無し）。"""
+    items = [
+        {"name": "サンデーダブル", "sales": 100000, "rank": "A", "qty": 200},
+        {"name": "サンデーダブル 有料トッピング", "sales": 8000, "rank": None, "qty": 20,
+         "group": "06:ジェラートサンデーダブル", "cost": 3000, "gross": 5000},
+    ]
+    parent = _nest_zero_subs(items, ZERO_RULES)[0]
+    sub = parent["subs"][0]
+    assert sub == {"name": "サンデーダブル 有料トッピング", "qty": 20, "sales": 8000,
+                   "cost": 3000, "gross": 5000}
 
 
 def test_classify_category_group_overrides_name():
