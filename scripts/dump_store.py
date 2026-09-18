@@ -152,6 +152,25 @@ def main() -> int:
             for name, val in rows:
                 print(f"  {name}: 累計{round(val):,}円")
 
+        # PROBE_NAME 環境変数で指定した商品名を月ごとに追う（正体調査用）。
+        # 売上（税込）・点数・FW区分見出し(product_category)を月別に並べる。部分一致も拾う。
+        probes = [p.strip() for p in os.environ.get("PROBE_NAME", "").split(",") if p.strip()]
+        for probe in probes:
+            print(f"\n== 商品名『{probe}』を月別に追跡（部分一致含む）==")
+            hit = False
+            for m in sorted(set(pby_m) | set(qby_m)):
+                smap = {n: (v, c) for n, v, c in pby_m.get(m, [])}
+                for name in sorted(set(smap) | set(qby_m.get(m, {}))):
+                    if probe not in name:
+                        continue
+                    hit = True
+                    sval, rank = smap.get(name, (0, None))
+                    qty, grp = qby_m.get(m, {}).get(name, (0, None))
+                    print(f"  {m}  [{grp or '見出し無し'}] {name}: "
+                          f"売上{sval:,}円 / {qty:,}点 / ランク{rank or '-'}")
+            if not hit:
+                print("  （該当なし）")
+
         # MONTHS 環境変数で指定した月の商品上位を出す（例: 前年の秋の商品を洗い出す）。
         want = [m.strip() for m in os.environ.get("MONTHS", "").split(",") if m.strip()]
         for m in want:

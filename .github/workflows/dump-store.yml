@@ -11,6 +11,10 @@ on:
         description: "商品上位を出す月（カンマ区切り YYYY-MM）"
         required: false
         default: "2025-09,2025-10,2025-11"
+      probe:
+        description: "正体を追う商品名（カンマ区切り・部分一致）"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -36,6 +40,7 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           STORE: ${{ github.event.inputs.store }}
           MONTHS: ${{ github.event.inputs.months }}
+          PROBE_NAME: ${{ github.event.inputs.probe }}
         run: |
           set -o pipefail
           python scripts/dump_store.py | tee -a "$GITHUB_STEP_SUMMARY"
