@@ -128,6 +128,30 @@ def main() -> int:
             for name, q, grp in zeros:
                 print(f"  [{grp or '区分なし'}] {name}: {q:,}点")
 
+        # 品目区分「その他」に落ちる商品の全件（全期間で重複集約）。keyword追加で各区分へ
+        # 吸収するための材料。売れ筋（売上>0）だけを対象にする。
+        try:
+            from hansoku.web.export import classify_category, load_store_categories
+            rules = load_store_categories().get(CODE)
+        except Exception as e:  # noqa: BLE001
+            rules = None
+            print(f"\n（品目区分ルール読込に失敗: {e}）")
+        if rules:
+            other_name = rules.get("other", "その他")
+            agg: dict[str, float] = {}
+            for m, items in pby_m.items():
+                for name, val, cat in items:
+                    if val <= 0:
+                        continue
+                    if classify_category(name, rules) == other_name:
+                        agg[name] = agg.get(name, 0) + val
+            rows = sorted(agg.items(), key=lambda x: -x[1])
+            print(f"\n== 品目区分「{other_name}」に落ちる商品 全{len(rows)}種（全期間・売上>0）==")
+            if not rows:
+                print("  （なし）")
+            for name, val in rows:
+                print(f"  {name}: 累計{round(val):,}円")
+
         # MONTHS 環境変数で指定した月の商品上位を出す（例: 前年の秋の商品を洗い出す）。
         want = [m.strip() for m in os.environ.get("MONTHS", "").split(",") if m.strip()]
         for m in want:
