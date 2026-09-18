@@ -2109,11 +2109,11 @@ function scrollParentOf(node) {
   }
   return null;
 }
-// 開閉アニメの間、対象の行（row）の画面上の位置を固定する。内訳を畳むと下（や上）の
-// 高さが変わって、触っているメイン行の位置が飛ぶのを防ぐ＝行を基準にスクロールを追従補正。
-function pinRowDuring(row, ms) {
+// 開閉アニメの間、基準行（row）の画面上の位置を固定する。内訳の高さが変わっても
+// 「今見ている位置」がずれない＝行を基準にスクロールを毎フレーム追従補正する。
+// sc はスクロールする器（小窓＝fw-list など。ページ全体スクロールなら null＝window）。
+function pinRowDuring(row, sc, ms) {
   if (!row) return;
-  const sc = scrollParentOf(row);
   const before = row.getBoundingClientRect().top;
   if (row._pinRAF) cancelAnimationFrame(row._pinRAF);
   const t0 = performance.now();
@@ -2126,7 +2126,8 @@ function pinRowDuring(row, ms) {
 }
 // 内訳の開閉：SUBS_OPEN を切替え、親行の直後のラッパに .open を付け外しするだけ。
 // 高さは CSS（grid-template-rows 0fr↔1fr）でアニメする。再描画しないので滑らかに開閉する。
-// 開閉中は触ったメイン行を画面に固定して位置が飛ばないようにする。
+// 開閉中は「ビューポート上端にいちばん近い、内訳でない行」を画面に固定＝見ている位置が
+// 飛ばないようにする（下にスクロールしてから閉じても、見ている行がそのまま残る）。
 function toggleSub(el) {
   const k = el.dataset.subtoggle;
   const open = !SUBS_OPEN.has(k);
@@ -2141,7 +2142,18 @@ function toggleSub(el) {
   el.classList.toggle("on", open);
   el.setAttribute("aria-expanded", String(open));
   el.textContent = `${open ? "▾" : "▸"} 内訳${n}件${open ? "" : "（詳細表示）"}`;
-  pinRowDuring(li, 520);   // CSS 0.46s のアニメが終わるまで行を固定（少し余裕）
+  // アンカー＝画面上端にいちばん近い、内訳（subwrap）でない行。これを固定する。
+  const sc = scrollParentOf(li);
+  const top = sc ? sc.getBoundingClientRect().top : 0;
+  const list = li ? li.closest("ul") : null;
+  let anchor = li;
+  if (list) {
+    for (const r of list.children) {
+      if (!(r instanceof HTMLElement) || /subwrap/.test(r.className)) continue;
+      if (r.getBoundingClientRect().top >= top - 1) { anchor = r; break; }
+    }
+  }
+  pinRowDuring(anchor, sc, 700);   // CSS 0.6s のアニメが終わるまで固定（少し余裕）
 }
 // 開閉ボタンの配線（その場で高さアニメ開閉。再描画しない）。
 function wireSubToggle(root) {

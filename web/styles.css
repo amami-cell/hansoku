@@ -545,14 +545,17 @@ tbody tr:last-child td{border-bottom:0;}
 .psub-n{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;word-break:break-word;line-height:1.4;}
 .psub-q{flex:none;color:var(--ink-2);font-variant-numeric:tabular-nums;}
 .psub-v{flex:none;width:88px;text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums;}
-/* 内訳サブメニューのアコーディオン開閉（開く/閉じるを高さアニメで滑らかに） */
+/* 内訳サブメニューのアコーディオン開閉（開く/閉じるをゆっくり柔らかい高さアニメで） */
 .psubwrap,.fw-list li.fw-subwrap{display:block;padding:0;margin:0;border-bottom:0;list-style:none;}
-.subacc{display:grid;grid-template-rows:0fr;transition:grid-template-rows .46s cubic-bezier(.22,.61,.36,1);}
+.subacc{display:grid;grid-template-rows:0fr;transition:grid-template-rows .62s cubic-bezier(.16,1,.3,1);}
 .psubwrap.open>.subacc,.fw-subwrap.open>.subacc{grid-template-rows:1fr;}
-.subacc>.subacc-in{overflow:hidden;min-height:0;opacity:0;transform:translateY(-5px);
-  transition:opacity .42s ease,transform .46s cubic-bezier(.22,.61,.36,1);}
+.subacc>.subacc-in{overflow:hidden;min-height:0;opacity:0;transform:translateY(-8px);
+  transition:opacity .5s ease,transform .62s cubic-bezier(.16,1,.3,1);}
 .psubwrap.open>.subacc>.subacc-in,.fw-subwrap.open>.subacc>.subacc-in{opacity:1;transform:translateY(0);}
 .psubs,.fw-subs{list-style:none;margin:0;padding:0;}
+/* 開閉中はJSで「見ている行」を固定するので、ブラウザ標準のスクロール補正は切る（二重補正防止） */
+html{overflow-anchor:none;}
+.fw-list{overflow-anchor:none;}
 @media (prefers-reduced-motion:reduce){.subacc,.subacc>.subacc-in{transition:none;}}
 .cgtag{font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);
   border:1px solid var(--accent-line);border-radius:4px;padding:1px 7px;line-height:1.6;}
