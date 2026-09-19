@@ -560,9 +560,9 @@ tbody tr:last-child td{border-bottom:0;}
 html{overflow-anchor:none;}
 /* 小窓(fw-list)の overflow-anchor と余白は、後段の .fw-list 定義（overflow:auto 側）に
    まとめる。ここで padding-bottom を書いても後段の padding ショートハンドで上書きされるため。 */
-/* 内訳のある画面のページ末尾に、たっぷりスクロール余白を常設（JSで #subspacer を挿す）。
-   末尾付近でサブを閉じてもページが窮屈にならず、スクロールが下端で頭打ち（戻り）しない。 */
-#subspacer{height:160dvh;flex:none;pointer-events:none;}
+/* 下余白（スペーサー）は JS が「サブを開いている間だけ」挿入し、上にスクロールすると外す。
+   常設ではないので、閉じて戻ったときに余分な空白が残らない。 */
+#subspacer{flex:none;pointer-events:none;}
 @media (prefers-reduced-motion:reduce){.subacc,.subacc>.subacc-in{transition:none;}}
 .cgtag{font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);
   border:1px solid var(--accent-line);border-radius:4px;padding:1px 7px;line-height:1.6;}
@@ -1043,7 +1043,7 @@ html{overflow-anchor:none;}
 .fwin.fw-lg{width:min(520px,94vw);height:min(66vh,560px);font-size:13.5px;}
 .fwin.fw-xl{width:min(760px,96vw);height:min(82vh,760px);font-size:15px;}
 .fwin.fw-xl .fw-list li{padding:9px 12px;}
-.fw-list{list-style:none;margin:0;padding:4px 4px 85vh;flex:1 1 auto;overflow:auto;
+.fw-list{list-style:none;margin:0;padding:4px 4px;flex:1 1 auto;overflow:auto;
   overflow-anchor:none;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
   font-variant-numeric:tabular-nums;}
 .fw-head{flex:0 0 auto;}
@@ -1088,9 +1088,8 @@ html{overflow-anchor:none;}
   border-bottom:1px solid var(--line);flex:0 0 auto;}
 .fs-close{margin-left:auto;background:none;border:1px solid var(--line);border-radius:8px;padding:5px 12px;
   font-size:12.5px;color:var(--ink-2);cursor:pointer;}
-/* 下シートのリストも、末尾でサブを閉じてもスクロールが頭打ち（戻り）しないよう
-   たっぷり下余白を確保（.fw-list の 85vh を .fs-list が上書きしていたのを是正）。 */
-.fs-list{flex:1 1 auto;overflow:auto;padding-bottom:85vh;overscroll-behavior:contain;}
+/* 下シートのリスト。下余白は JS が開いている間だけ付ける（常設しない）。 */
+.fs-list{flex:1 1 auto;overflow:auto;padding-bottom:16px;overscroll-behavior:contain;overflow-anchor:none;}
 /* 部門別（月）：部門ごとに色分け。部門ヘッダは合計を太字、商品は一段下げて明細 */
 .fw-list li.fw-sec{border-left:4px solid var(--cc);background:color-mix(in srgb, var(--cc) 10%, transparent);
   font-size:13px;margin-top:4px;}

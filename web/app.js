@@ -929,8 +929,6 @@ function render() {
   if (!WRITE_OK) {
     app.querySelectorAll("[data-upload],[data-crdel],[data-goal],[data-memo],[data-status]").forEach(el => el.remove());
   }
-  ensureSubSpacer();   // 内訳のある画面は末尾に余白を常設（末尾で閉じてもメインが戻らない）
-
   app.querySelectorAll("[data-camp]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "campaign", id: el.dataset.camp }); }));
   app.querySelectorAll("[data-store]").forEach(el =>
@@ -2102,27 +2100,52 @@ function subRowsHtml(code, m, p, col) {
   return `<li class="fw-subwrap${open ? " open" : ""}" data-subwrap="${esc(k)}">` +
     `<div class="subacc"><div class="subacc-in"><ul class="fw-subs">${items}</ul></div></div></li>`;
 }
-// アコーディオン（内訳）のある画面では、ページ末尾に1画面ぶんの余白を「常設」する。
-// これが無いと、ページ末尾付近でサブを閉じたときにページが縮んでスクロールが下端で
-// 頭打ち（クランプ）→戻り＝メインが動く。常設なので開閉のたびに足し引きせず、戻りも出ない。
-function ensureSubSpacer() {
-  const has = !!document.querySelector("#app [data-subtoggle]");
-  let sp = document.getElementById("subspacer");
-  if (has && !sp) {
-    sp = document.createElement("div");
-    sp.id = "subspacer";
-    sp.setAttribute("aria-hidden", "true");
-    document.body.appendChild(sp);
-  } else if (!has && sp) {
-    sp.remove();
+// 下余白（スペーサー）は「サブを開いている間だけ」必要。閉じても即座には外さない
+// （下端で詰まってメインが動くため）。余白が画面外に出た＝上にスクロールした時点で外す。
+// これで「閉じた瞬間はメイン固定」「戻ったら余分な余白なし」を両立する。
+const SPACERS = new Set();                 // 現在余白を付けているスクローラ（要素 / window）
+const _spacerListen = new WeakSet();
+const spacerPx = () => Math.round(window.innerHeight * 0.85);
+// li が属するスクロール器：小窓/下シートなら fw-list/fs-list、無ければページ全体(window)。
+function subScroller(li) {
+  for (let p = li && li.parentElement; p; p = p.parentElement) {
+    if (p.classList && (p.classList.contains("fw-list") || p.classList.contains("fs-list"))) return p;
   }
+  return window;
+}
+function applySpacer(target, on) {
+  if (target === window) {
+    let sp = document.getElementById("subspacer");
+    if (on) {
+      if (!sp) { sp = document.createElement("div"); sp.id = "subspacer"; sp.setAttribute("aria-hidden", "true"); document.body.appendChild(sp); }
+      sp.style.height = spacerPx() + "px";
+    } else if (sp) { sp.remove(); }
+  } else {
+    target.style.paddingBottom = on ? spacerPx() + "px" : "";
+  }
+  if (on) {
+    SPACERS.add(target);
+    const el = target === window ? window : target;
+    if (!_spacerListen.has(el)) { _spacerListen.add(el); el.addEventListener("scroll", () => tryReleaseSpacer(target), { passive: true }); }
+  } else {
+    SPACERS.delete(target);
+  }
+}
+// 余白を外しても画面が動かない＝今のスクロール位置が「余白なしでも成立する」時だけ外す。
+// 余白なしの最大スクロール量(naturalMax)以下まで上にスクロールしていれば、外しても
+// スクロールは動かない（メインも動かない）。まだ下（余白側）にいる間は残す。
+function tryReleaseSpacer(target) {
+  if (SUBS_OPEN.size) return;              // どこか開いている間は残す
+  if (!SPACERS.has(target)) return;
+  const el = target === window ? document.scrollingElement : target;
+  if (!el) return;
+  const naturalMax = Math.max(0, el.scrollHeight - spacerPx() - el.clientHeight);
+  if (el.scrollTop <= naturalMax + 2) applySpacer(target, false);
 }
 // 内訳の開閉：SUBS_OPEN を切替え、親行の直後のラッパに .open を付け外しするだけ。
 // 高さは CSS（grid-template-rows 0fr↔1fr）でアニメする。再描画しないので滑らかに開閉する。
-// メイン行は「上に何も変化しない」ので、スクロールをいじらなければ画面の同じ位置に残る。
-// JSでスクロール追従（ピン）すると、開いた直後にユーザーがスクロールしたのを追いかけて
-// 閉じるときに動かしてしまう。だから追従はやめ、CSS（overflow-anchor:none）＋末尾余白だけで
-// 「メインは動かず、下の内容だけがふわっと上下する」を実現する。
+// スクロールは追従（ピン）しない＝メイン行は動かない。開く時だけ下余白を付け、末尾で閉じても
+// スクロールが詰まらない（メインが動かない）ようにする。余白は上にスクロールした時に外れる。
 function toggleSub(el) {
   const k = el.dataset.subtoggle;
   const open = !SUBS_OPEN.has(k);
@@ -2137,6 +2160,10 @@ function toggleSub(el) {
   el.classList.toggle("on", open);
   el.setAttribute("aria-expanded", String(open));
   el.textContent = `${open ? "▾" : "▸"} 内訳${n}件${open ? "" : "（詳細表示）"}`;
+  if (!li) return;
+  const target = subScroller(li);
+  if (open) applySpacer(target, true);     // 開いたら余白を付与（閉じる時の詰まり防止）
+  else tryReleaseSpacer(target);           // 閉じた時、既に安全なら外す。ダメなら次のスクロールで外れる
 }
 // 開閉ボタンの配線（その場で高さアニメ開閉。再描画しない）。
 function wireSubToggle(root) {
