@@ -2102,30 +2102,6 @@ function subRowsHtml(code, m, p, col) {
   return `<li class="fw-subwrap${open ? " open" : ""}" data-subwrap="${esc(k)}">` +
     `<div class="subacc"><div class="subacc-in"><ul class="fw-subs">${items}</ul></div></div></li>`;
 }
-// スクロールできる先祖（overflow auto/scroll）を探す。無ければ null＝ページ（window）。
-function scrollParentOf(node) {
-  for (let p = node && node.parentElement; p; p = p.parentElement) {
-    const oy = getComputedStyle(p).overflowY;
-    if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight) return p;
-  }
-  return null;
-}
-// 開閉アニメの間、タップしたメイン行(row)を画面の同じ位置に釘付けにする。内訳の高さが
-// 変わっても（開く＝下が下がる／閉じる＝下が上がってくる）、このメインだけは1pxも動かない。
-// ブラウザ標準のスクロール補正は切ってある(overflow-anchor:none)ので二重補正しない。
-// sc はスクロールする器（小窓＝fw-list。ページ全体なら null＝window）。
-function pinMainDuring(row, sc, ms) {
-  if (!row) return;
-  const top = row.getBoundingClientRect().top;   // ここに釘付け
-  if (row._pinRAF) cancelAnimationFrame(row._pinRAF);
-  const t0 = performance.now();
-  const step = () => {
-    const dy = row.getBoundingClientRect().top - top;
-    if (Math.abs(dy) > 0.3) { if (sc) sc.scrollTop += dy; else window.scrollBy(0, dy); }
-    row._pinRAF = (performance.now() - t0 < ms) ? requestAnimationFrame(step) : 0;
-  };
-  row._pinRAF = requestAnimationFrame(step);
-}
 // アコーディオン（内訳）のある画面では、ページ末尾に1画面ぶんの余白を「常設」する。
 // これが無いと、ページ末尾付近でサブを閉じたときにページが縮んでスクロールが下端で
 // 頭打ち（クランプ）→戻り＝メインが動く。常設なので開閉のたびに足し引きせず、戻りも出ない。
@@ -2143,8 +2119,10 @@ function ensureSubSpacer() {
 }
 // 内訳の開閉：SUBS_OPEN を切替え、親行の直後のラッパに .open を付け外しするだけ。
 // 高さは CSS（grid-template-rows 0fr↔1fr）でアニメする。再描画しないので滑らかに開閉する。
-// 開閉の間、タップしたメイン行だけは画面の同じ位置に釘付け（動かさない）。閉じるときは
-// 下の内容がふわっと上がってくるだけで、そのメインはその場に残る。
+// メイン行は「上に何も変化しない」ので、スクロールをいじらなければ画面の同じ位置に残る。
+// JSでスクロール追従（ピン）すると、開いた直後にユーザーがスクロールしたのを追いかけて
+// 閉じるときに動かしてしまう。だから追従はやめ、CSS（overflow-anchor:none）＋末尾余白だけで
+// 「メインは動かず、下の内容だけがふわっと上下する」を実現する。
 function toggleSub(el) {
   const k = el.dataset.subtoggle;
   const open = !SUBS_OPEN.has(k);
@@ -2159,8 +2137,6 @@ function toggleSub(el) {
   el.classList.toggle("on", open);
   el.setAttribute("aria-expanded", String(open));
   el.textContent = `${open ? "▾" : "▸"} 内訳${n}件${open ? "" : "（詳細表示）"}`;
-  if (!li) return;
-  pinMainDuring(li, scrollParentOf(li), 1100);    // CSS 0.95s のアニメが終わるまで釘付け
 }
 // 開閉ボタンの配線（その場で高さアニメ開閉。再描画しない）。
 function wireSubToggle(root) {
