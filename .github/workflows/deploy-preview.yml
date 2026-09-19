@@ -53,6 +53,10 @@ jobs:
           APP_PASSWORD: ${{ secrets.HANSOKU_APP_PASSWORD }}
         run: |
           set -o pipefail
+          # 静的アセット(styles.css/app.js/dashboard.js)のキャッシュ破棄：毎デプロイで一意化。
+          # これが無いと Safari 等が古いCSS/JSを使い続け、修正が反映されない。
+          BUILD="$(date +%s)"
+          sed -i "s/__BUILD__/${BUILD}/g" web/index.html
           TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]\"'"'")"
           ACCOUNT="$(printf '%s' "$CF_ACCOUNT" | tr -d '[:space:]\"'"'")"
           npm install -g wrangler@4
