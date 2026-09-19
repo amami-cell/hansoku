@@ -558,7 +558,8 @@ tbody tr:last-child td{border-bottom:0;}
 /* 開閉時にブラウザが勝手にスクロールを動かさない（＝上のメインを絶対に動かさない）。
    JSでもスクロールは一切いじらない。閉じても縮むのは内訳の下だけ。 */
 html{overflow-anchor:none;}
-.fw-list{overflow-anchor:none;padding-bottom:70vh;}
+/* 小窓(fw-list)の overflow-anchor と余白は、後段の .fw-list 定義（overflow:auto 側）に
+   まとめる。ここで padding-bottom を書いても後段の padding ショートハンドで上書きされるため。 */
 /* 内訳のある画面のページ末尾に、たっぷりスクロール余白を常設（JSで #subspacer を挿す）。
    末尾付近でサブを閉じてもページが窮屈にならず、スクロールが下端で頭打ち（戻り）しない。 */
 #subspacer{height:160dvh;flex:none;pointer-events:none;}
@@ -1042,8 +1043,8 @@ html{overflow-anchor:none;}
 .fwin.fw-lg{width:min(520px,94vw);height:min(66vh,560px);font-size:13.5px;}
 .fwin.fw-xl{width:min(760px,96vw);height:min(82vh,760px);font-size:15px;}
 .fwin.fw-xl .fw-list li{padding:9px 12px;}
-.fw-list{list-style:none;margin:0;padding:4px 4px;flex:1 1 auto;overflow:auto;
-  overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
+.fw-list{list-style:none;margin:0;padding:4px 4px 85vh;flex:1 1 auto;overflow:auto;
+  overflow-anchor:none;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
   font-variant-numeric:tabular-nums;}
 .fw-head{flex:0 0 auto;}
 .fw-list li{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:6px 8px;border-bottom:1px solid var(--line);}
