@@ -547,18 +547,19 @@ tbody tr:last-child td{border-bottom:0;}
 .psub-v{flex:none;width:88px;text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums;}
 /* 内訳サブメニューのアコーディオン開閉（開く/閉じるをゆっくり柔らかい高さアニメで） */
 .psubwrap,.fw-list li.fw-subwrap{display:block;padding:0;margin:0;border-bottom:0;list-style:none;}
-.subacc{display:grid;grid-template-rows:0fr;transition:grid-template-rows 1.2s cubic-bezier(.16,1,.3,1);}
+/* 高さだけ素直に開閉（スライドのねっとり感を排除）。短め＝キビキビ柔らかく。 */
+.subacc{display:grid;grid-template-rows:0fr;transition:grid-template-rows .34s cubic-bezier(.22,.61,.36,1);}
 .psubwrap.open>.subacc,.fw-subwrap.open>.subacc{grid-template-rows:1fr;}
-.subacc>.subacc-in{overflow:hidden;min-height:0;opacity:0;transform:translateY(-12px);
-  transition:opacity .9s ease,transform 1.2s cubic-bezier(.16,1,.3,1);}
-.psubwrap.open>.subacc>.subacc-in,.fw-subwrap.open>.subacc>.subacc-in{opacity:1;transform:translateY(0);}
+.subacc>.subacc-in{overflow:hidden;min-height:0;opacity:0;transition:opacity .26s ease;}
+.psubwrap.open>.subacc>.subacc-in,.fw-subwrap.open>.subacc>.subacc-in{opacity:1;}
 .psubs,.fw-subs{list-style:none;margin:0;padding:0;}
-/* 開閉中はJSで「見ている行」を固定するので、ブラウザ標準のスクロール補正は切る（二重補正防止） */
+/* 開閉時にブラウザが勝手にスクロールを動かさない（＝上のメインを絶対に動かさない）。
+   JSでもスクロールは一切いじらない。閉じても縮むのは内訳の下だけ。 */
 html{overflow-anchor:none;}
-.fw-list{overflow-anchor:none;padding-bottom:40vh;}
-/* 内訳のある画面のページ末尾余白。末尾付近でサブを閉じてもスクロールが下端で頭打ち
-   （戻り）しないよう、1画面ぶんのスクロール余地を常設する（JSで #subspacer を挿す）。 */
-#subspacer{height:100dvh;flex:none;pointer-events:none;}
+.fw-list{overflow-anchor:none;padding-bottom:70vh;}
+/* 内訳のある画面のページ末尾に、たっぷりスクロール余白を常設（JSで #subspacer を挿す）。
+   末尾付近でサブを閉じてもページが窮屈にならず、スクロールが下端で頭打ち（戻り）しない。 */
+#subspacer{height:160dvh;flex:none;pointer-events:none;}
 @media (prefers-reduced-motion:reduce){.subacc,.subacc>.subacc-in{transition:none;}}
 .cgtag{font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);
   border:1px solid var(--accent-line);border-radius:4px;padding:1px 7px;line-height:1.6;}
