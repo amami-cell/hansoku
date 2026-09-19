@@ -1043,6 +1043,7 @@ html{overflow-anchor:none;}
 .fwin.fw-xl{width:min(760px,96vw);height:min(82vh,760px);font-size:15px;}
 .fwin.fw-xl .fw-list li{padding:9px 12px;}
 .fw-list{list-style:none;margin:0;padding:4px 4px;flex:1 1 auto;overflow:auto;
+  overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
   font-variant-numeric:tabular-nums;}
 .fw-head{flex:0 0 auto;}
 .fw-list li{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:6px 8px;border-bottom:1px solid var(--line);}
@@ -1069,7 +1070,7 @@ html{overflow-anchor:none;}
 /* 携帯：下から出るシート＋タブ（複数はタブで切替・重ならない） */
 #fsheet{position:fixed;left:0;right:0;bottom:0;z-index:1100;background:var(--surface);
   border-top:1px solid var(--line-strong);border-radius:16px 16px 0 0;box-shadow:0 -10px 34px rgba(0,0,0,.30);
-  max-height:94vh;display:flex;flex-direction:column;animation:fsUp .18s ease;}
+  max-height:94vh;display:flex;flex-direction:column;animation:fsUp .18s ease;overscroll-behavior:contain;}
 @keyframes fsUp{from{transform:translateY(100%);}to{transform:translateY(0);}}
 /* 上部ハンドル：上下ドラッグで高さ調整（触りやすいよう縦20pxの当たり判定） */
 .fs-grab{height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
@@ -1655,7 +1656,7 @@ b.warn{color:var(--warning-ink);}
 .sheet-hd input{flex:1;min-width:0;font:inherit;font-size:16px;padding:11px 13px;
   border:1px solid var(--line-strong);border-radius:10px;background:var(--bg);color:var(--ink);}
 .sheet-hd input:focus{outline:2px solid var(--accent);outline-offset:1px;}
-.sheet-bdy{overflow-y:auto;padding:6px 8px 14px;-webkit-overflow-scrolling:touch;}
+.sheet-bdy{overflow-y:auto;padding:6px 8px 14px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
 .sr-hint{margin:14px 12px;font-size:13px;color:var(--ink-3);line-height:1.8;}
 .sr-list{list-style:none;margin:0;padding:0;}
 .sr-item{display:flex;align-items:center;gap:11px;width:100%;text-align:left;
