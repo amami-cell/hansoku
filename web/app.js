@@ -929,6 +929,7 @@ function render() {
   if (!WRITE_OK) {
     app.querySelectorAll("[data-upload],[data-crdel],[data-goal],[data-memo],[data-status]").forEach(el => el.remove());
   }
+  ensureSubSpacer();   // 内訳のある画面は末尾に余白を常設（末尾で閉じてもメインが戻らない）
 
   app.querySelectorAll("[data-camp]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); go({ kind: "campaign", id: el.dataset.camp }); }));
@@ -2125,6 +2126,21 @@ function pinMainDuring(row, sc, ms) {
   };
   row._pinRAF = requestAnimationFrame(step);
 }
+// アコーディオン（内訳）のある画面では、ページ末尾に1画面ぶんの余白を「常設」する。
+// これが無いと、ページ末尾付近でサブを閉じたときにページが縮んでスクロールが下端で
+// 頭打ち（クランプ）→戻り＝メインが動く。常設なので開閉のたびに足し引きせず、戻りも出ない。
+function ensureSubSpacer() {
+  const has = !!document.querySelector("#app [data-subtoggle]");
+  let sp = document.getElementById("subspacer");
+  if (has && !sp) {
+    sp = document.createElement("div");
+    sp.id = "subspacer";
+    sp.setAttribute("aria-hidden", "true");
+    document.body.appendChild(sp);
+  } else if (!has && sp) {
+    sp.remove();
+  }
+}
 // 内訳の開閉：SUBS_OPEN を切替え、親行の直後のラッパに .open を付け外しするだけ。
 // 高さは CSS（grid-template-rows 0fr↔1fr）でアニメする。再描画しないので滑らかに開閉する。
 // 開閉の間、タップしたメイン行だけは画面の同じ位置に釘付け（動かさない）。閉じるときは
@@ -2144,7 +2160,7 @@ function toggleSub(el) {
   el.setAttribute("aria-expanded", String(open));
   el.textContent = `${open ? "▾" : "▸"} 内訳${n}件${open ? "" : "（詳細表示）"}`;
   if (!li) return;
-  pinMainDuring(li, scrollParentOf(li), 1100);   // CSS 0.95s のアニメが終わるまで釘付け
+  pinMainDuring(li, scrollParentOf(li), 1100);    // CSS 0.95s のアニメが終わるまで釘付け
 }
 // 開閉ボタンの配線（その場で高さアニメ開閉。再描画しない）。
 function wireSubToggle(root) {
