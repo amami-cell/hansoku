@@ -2109,41 +2109,26 @@ function scrollParentOf(node) {
   }
   return null;
 }
-// 画面上部に貼り付く固定ヘッダ（appbar＋店ページのタブバー）の下端Y。ここを基準に
-// 「メイン行が隠れない位置」を決める。無ければ0。
-function stickyTopOffset() {
-  let y = 0;
-  document.querySelectorAll(".appbar, .snav").forEach(e => {
-    const cs = getComputedStyle(e);
-    if (cs.position === "sticky" || cs.position === "fixed") {
-      const r = e.getBoundingClientRect();
-      if (r.top <= 1 && r.bottom > y) y = r.bottom;
-    }
-  });
-  return y;
-}
-// 開閉アニメの間、タップしたメイン行(row)を画面の固定位置に留める。row の画面Yを
-// startTop→endTop へ ms かけて滑らかに動かしながら毎フレーム合わせる。内訳の高さが
-// 変わっても、また下へスクロールして閉じても、メイン行が同じ位置に居続ける（見失わない）。
+// 開閉アニメの間、タップしたメイン行(row)を画面の同じ位置に釘付けにする。内訳の高さが
+// 変わっても（開く＝下が下がる／閉じる＝下が上がってくる）、このメインだけは1pxも動かない。
+// ブラウザ標準のスクロール補正は切ってある(overflow-anchor:none)ので二重補正しない。
 // sc はスクロールする器（小窓＝fw-list。ページ全体なら null＝window）。
-function pinMainDuring(row, sc, startTop, endTop, ms) {
+function pinMainDuring(row, sc, ms) {
   if (!row) return;
+  const top = row.getBoundingClientRect().top;   // ここに釘付け
   if (row._pinRAF) cancelAnimationFrame(row._pinRAF);
   const t0 = performance.now();
-  const ease = t => 1 - Math.pow(1 - t, 3);   // easeOutCubic
   const step = () => {
-    const t = Math.min(1, (performance.now() - t0) / ms);
-    const want = startTop + (endTop - startTop) * ease(t);
-    const dy = row.getBoundingClientRect().top - want;
+    const dy = row.getBoundingClientRect().top - top;
     if (Math.abs(dy) > 0.3) { if (sc) sc.scrollTop += dy; else window.scrollBy(0, dy); }
-    row._pinRAF = (t < 1) ? requestAnimationFrame(step) : 0;
+    row._pinRAF = (performance.now() - t0 < ms) ? requestAnimationFrame(step) : 0;
   };
   row._pinRAF = requestAnimationFrame(step);
 }
 // 内訳の開閉：SUBS_OPEN を切替え、親行の直後のラッパに .open を付け外しするだけ。
 // 高さは CSS（grid-template-rows 0fr↔1fr）でアニメする。再描画しないので滑らかに開閉する。
-// 開閉の間、タップしたメイン行を固定位置に留める。メインが画面外(上)にあるときは、
-// ヘッダ直下の見える位置へゆっくり引き戻す（＝下のメインが上がってきて、見失わない）。
+// 開閉の間、タップしたメイン行だけは画面の同じ位置に釘付け（動かさない）。閉じるときは
+// 下の内容がふわっと上がってくるだけで、そのメインはその場に残る。
 function toggleSub(el) {
   const k = el.dataset.subtoggle;
   const open = !SUBS_OPEN.has(k);
@@ -2159,13 +2144,7 @@ function toggleSub(el) {
   el.setAttribute("aria-expanded", String(open));
   el.textContent = `${open ? "▾" : "▸"} 内訳${n}件${open ? "" : "（詳細表示）"}`;
   if (!li) return;
-  const sc = scrollParentOf(li);
-  // 見える基準位置：小窓は器の上端+少し／ページは固定ヘッダ直下+少し。
-  const visTop = (sc ? sc.getBoundingClientRect().top : stickyTopOffset()) + 8;
-  const cur = li.getBoundingClientRect().top;
-  // メインが基準位置より上（隠れかけ）なら基準位置へ引き戻す。見えていればその場を保つ。
-  const endTop = cur < visTop ? visTop : cur;
-  pinMainDuring(li, sc, cur, endTop, 720);   // CSS 0.72s のアニメに合わせて留める
+  pinMainDuring(li, scrollParentOf(li), 1100);   // CSS 0.95s のアニメが終わるまで釘付け
 }
 // 開閉ボタンの配線（その場で高さアニメ開閉。再描画しない）。
 function wireSubToggle(root) {
