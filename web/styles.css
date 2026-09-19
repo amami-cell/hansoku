@@ -1088,7 +1088,9 @@ html{overflow-anchor:none;}
   border-bottom:1px solid var(--line);flex:0 0 auto;}
 .fs-close{margin-left:auto;background:none;border:1px solid var(--line);border-radius:8px;padding:5px 12px;
   font-size:12.5px;color:var(--ink-2);cursor:pointer;}
-.fs-list{flex:1 1 auto;overflow:auto;padding-bottom:16px;}
+/* 下シートのリストも、末尾でサブを閉じてもスクロールが頭打ち（戻り）しないよう
+   たっぷり下余白を確保（.fw-list の 85vh を .fs-list が上書きしていたのを是正）。 */
+.fs-list{flex:1 1 auto;overflow:auto;padding-bottom:85vh;overscroll-behavior:contain;}
 /* 部門別（月）：部門ごとに色分け。部門ヘッダは合計を太字、商品は一段下げて明細 */
 .fw-list li.fw-sec{border-left:4px solid var(--cc);background:color-mix(in srgb, var(--cc) 10%, transparent);
   font-size:13px;margin-top:4px;}
