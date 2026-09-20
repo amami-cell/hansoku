@@ -2142,10 +2142,32 @@ function tryReleaseSpacer(target) {
   const naturalMax = Math.max(0, el.scrollHeight - spacerPx() - el.clientHeight);
   if (el.scrollTop <= naturalMax + 2) applySpacer(target, false);
 }
+// 「画面より上で内訳が畳まれた分」だけスクロールを補正して、見ている位置がズレないようにする。
+// メイン＋内訳を画面より上までスクロールしてから閉じると、上で消えた高さのぶん下の内容が
+// せり上がる（＝メインが動いて見える）。ラッパが完全に画面上端より上にある間だけ、その
+// 高さ変化ぶんスクロールを足し引きする（ユーザーのスクロールとは別＝競合しない）。
+function keepBelowStable(wrap, target, ms) {
+  if (!wrap) return;
+  const win = target === window;
+  const vTop = win ? 0 : target.getBoundingClientRect().top;
+  // 判定は開始時に一度だけ：ラッパ上端が画面上端より上なら「上で畳まれる」＝補正する。
+  // 補正で位置が変わっても判定を切り替えない（切り替えると途中で止まってズレる）。
+  if (wrap.getBoundingClientRect().top >= vTop - 0.5) return;
+  let prevH = wrap.getBoundingClientRect().height;
+  const t0 = performance.now();
+  const step = () => {
+    const h = wrap.getBoundingClientRect().height;
+    const dH = h - prevH;
+    if (Math.abs(dH) > 0.1) { if (win) window.scrollBy(0, dH); else target.scrollTop += dH; }
+    prevH = wrap.getBoundingClientRect().height;
+    if (performance.now() - t0 < ms) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
 // 内訳の開閉：SUBS_OPEN を切替え、親行の直後のラッパに .open を付け外しするだけ。
 // 高さは CSS（grid-template-rows 0fr↔1fr）でアニメする。再描画しないので滑らかに開閉する。
-// スクロールは追従（ピン）しない＝メイン行は動かない。開く時だけ下余白を付け、末尾で閉じても
-// スクロールが詰まらない（メインが動かない）ようにする。余白は上にスクロールした時に外れる。
+// メイン行は動かさない：①開く時だけ下余白を付け、末尾で閉じてもスクロールが詰まらない
+// （クランプ防止／余白は上スクロールで外れる）②画面より上で畳んだ分は keepBelowStable が補正。
 function toggleSub(el) {
   const k = el.dataset.subtoggle;
   const open = !SUBS_OPEN.has(k);
@@ -2164,6 +2186,7 @@ function toggleSub(el) {
   const target = subScroller(li);
   if (open) applySpacer(target, true);     // 開いたら余白を付与（閉じる時の詰まり防止）
   else tryReleaseSpacer(target);           // 閉じた時、既に安全なら外す。ダメなら次のスクロールで外れる
+  if (wrap) keepBelowStable(wrap, target, 1000);  // 画面より上で畳んだ分を補正（見ている位置を保つ）
 }
 // 開閉ボタンの配線（その場で高さアニメ開閉。再描画しない）。
 function wireSubToggle(root) {

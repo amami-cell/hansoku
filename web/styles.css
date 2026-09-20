@@ -555,8 +555,8 @@ tbody tr:last-child td{border-bottom:0;}
   transition:opacity .6s ease,transform .8s cubic-bezier(.16,1,.3,1);}
 .psubwrap.open>.subacc>.subacc-in,.fw-subwrap.open>.subacc>.subacc-in{opacity:1;transform:translateY(0);}
 .psubs,.fw-subs{list-style:none;margin:0;padding:0;}
-/* 開閉時にブラウザが勝手にスクロールを動かさない（＝上のメインを絶対に動かさない）。
-   JSでもスクロールは一切いじらない。閉じても縮むのは内訳の下だけ。 */
+/* ブラウザ標準のスクロール補正は使わない（window でと要素でとで挙動がバラつくため）。
+   代わりに JS が「画面より上で畳まれた分」だけスクロールを補正する（keepBelowStable）。 */
 html{overflow-anchor:none;}
 /* 小窓(fw-list)の overflow-anchor と余白は、後段の .fw-list 定義（overflow:auto 側）に
    まとめる。ここで padding-bottom を書いても後段の padding ショートハンドで上書きされるため。 */
