@@ -189,6 +189,48 @@ def main() -> int:
             for name, (q, v) in items_hd:
                 print(f"    {name}: 累計{v:,}円 / {q:,}点")
 
+        # 画面と同じパイプライン（サブ畳み→品目区分・group適用）を再現して、各月の
+        # 「その他」区分に実際に何が残るかを出す。区分立て（アルコール等）の効果確認用。
+        try:
+            from hansoku.web.export import _categories_for_month, _nest_zero_subs
+        except Exception as e:  # noqa: BLE001
+            _nest_zero_subs = None
+            print(f"\n（品目区分パイプライン読込に失敗: {e}）")
+        if rules and _nest_zero_subs is not None:
+            other_name = rules.get("other", "その他")
+            months_all = sorted(set(pby_m) | set(qby_m))
+            recent = months_all[-4:]
+            print(f"\n== 品目区分の最終結果（画面と同じ集計・直近{len(recent)}ヶ月）==")
+            for m in recent:
+                items: list[dict] = []
+                smap = {n: v for n, v, c in pby_m.get(m, [])}
+                qmap = qby_m.get(m, {})
+                names = set(smap) | set(qmap)
+                for name in names:
+                    sval = smap.get(name, 0)
+                    q, grp = qmap.get(name, (0, None))
+                    items.append({"name": name, "sales": sval, "rank": None,
+                                  "qty": round(q) if q else None, "group": grp})
+                items = _nest_zero_subs(items, rules)
+                total = sum(p["sales"] for p in items)
+                cats = _categories_for_month(items, rules, total)
+                line = "  ".join(f"{c['name']}={c['sales']:,}円({c['count']}品)" for c in cats)
+                print(f"\n  [{m}] 合計{round(total):,}円")
+                print(f"    {line}")
+                # その他の中身（トップに残った売上つき商品）を列挙
+                others = sorted(
+                    [(p["name"], round(p["sales"]))
+                     for p in items
+                     if classify_category(p.get("name", ""), rules, p.get("group")) == other_name
+                     and (p.get("sales") or 0) > 0],
+                    key=lambda x: -x[1])
+                if others:
+                    print(f"    └ その他の売上つき中身 {len(others)}件:")
+                    for name, val in others:
+                        print(f"        {name}: {val:,}円")
+                else:
+                    print("    └ その他に売上つき商品なし（0円）")
+
         # MONTHS 環境変数で指定した月の商品上位を出す（例: 前年の秋の商品を洗い出す）。
         want = [m.strip() for m in os.environ.get("MONTHS", "").split(",") if m.strip()]
         for m in want:
