@@ -617,12 +617,16 @@ async function handleTargets(request, env, who) {
   const sql = neon(env.DATABASE_URL);
 
   if (request.method === "GET") {
-    const rows = await sql`SELECT campaign_id, target_value, set_by, set_at FROM promo_targets`;
-    const targets = {};
+    const rows = await sql`SELECT campaign_id, metric, target_value, set_by, set_at FROM promo_targets`;
+    const targets = {};       // 後方互換：売上のみ campaign_id → {value,by,at}
+    const byMetric = {};      // 全指標：campaign_id → { metric: {value,by,at} }
     for (const r of rows) {
-      targets[r.campaign_id] = { value: Number(r.target_value), by: r.set_by, at: r.set_at };
+      const metric = r.metric || "sales";
+      const cell = { value: Number(r.target_value), by: r.set_by, at: r.set_at };
+      (byMetric[r.campaign_id] = byMetric[r.campaign_id] || {})[metric] = cell;
+      if (metric === "sales") targets[r.campaign_id] = cell;
     }
-    return json({ targets });
+    return json({ targets, targets_by_metric: byMetric });
   }
 
   if (request.method === "POST") {
@@ -637,22 +641,25 @@ async function handleTargets(request, env, who) {
     }
     const id = typeof body.id === "string" ? body.id.slice(0, 128) : "";
     if (!id) return json({ error: "no-id" }, 400);
+    // 指標。未指定は sales（後方互換）。英数・小文字と _ のみ許可。
+    const metric = (typeof body.metric === "string" && /^[a-z0-9_]{1,32}$/.test(body.metric))
+      ? body.metric : "sales";
 
     const t = body.target;
     if (t === null || t === undefined || t === "") {
-      await sql`DELETE FROM promo_targets WHERE campaign_id = ${id}`;
-      await logAudit(env, email, "target.clear", id, "");
-      return json({ ok: true, id, target: null });
+      await sql`DELETE FROM promo_targets WHERE campaign_id = ${id} AND metric = ${metric}`;
+      await logAudit(env, email, "target.clear", `${id}#${metric}`, "");
+      return json({ ok: true, id, metric, target: null });
     }
-    const value = Math.round(Number(t));
+    const value = Number(t);
     if (!Number.isFinite(value) || value < 0) return json({ error: "bad-target" }, 400);
     await sql`
-      INSERT INTO promo_targets (campaign_id, target_value, set_by, set_at)
-      VALUES (${id}, ${value}, ${email}, now())
-      ON CONFLICT (campaign_id) DO UPDATE
+      INSERT INTO promo_targets (campaign_id, metric, target_value, set_by, set_at)
+      VALUES (${id}, ${metric}, ${value}, ${email}, now())
+      ON CONFLICT (campaign_id, metric) DO UPDATE
         SET target_value = EXCLUDED.target_value, set_by = EXCLUDED.set_by, set_at = now()`;
-    await logAudit(env, email, "target.set", id, String(value));
-    return json({ ok: true, id, target: value, by: email });
+    await logAudit(env, email, "target.set", `${id}#${metric}`, String(value));
+    return json({ ok: true, id, metric, target: value, by: email });
   }
 
   return json({ error: "method" }, 405);
