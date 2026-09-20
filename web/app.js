@@ -808,9 +808,12 @@ function budgetRate(code) {
 // 実原価（前月棚卸＋当月仕入−当月棚卸）。FWのABC部門に依存しないので、
 // 部門が紐付いていない店・月でも出る。rate は cost_rate と同じ分数。
 const acAt = (code, month) => ((DATA.actual_cost || {})[code] || {})[month];
+// suspect が付いた月は率として使わない。指標の並べ替えや粗利率の穴埋めに
+// 混ぜると、棚卸の取り違え（実測で 342.9% の月があった）がそのまま順位になる。
+// 消さずに店舗詳細では「要確認」として理由つきで出す（元データの誤りに気づけるように）。
 const acRateAt = (code, month) => {
   const a = acAt(code, month);
-  return a && typeof a.rate === "number" ? a.rate : undefined;
+  return a && typeof a.rate === "number" && !a.suspect ? a.rate : undefined;
 };
 function valueAt(code, month) {
   if (METRIC === "cost_rate") return (DATA.cost_rate[code] || {})[month];
@@ -4471,14 +4474,19 @@ function renderProfitability(code) {
   if (lac) {
     const a = lac.a;
     const r = typeof a.rate === "number" ? a.rate : null;
-    const cls = r == null ? "" : (r <= 0.35 ? "up" : "down");
-    cards.push(`<div class="kpi"><div class="lbl">実原価率（${lac.m}）</div>
+    // 値が信用できない月は、数字は見せつつ「要確認」と理由を出す。
+    // 黙って消すと、棚卸の入力ミスが直らないまま毎月出続ける。
+    const cls = a.suspect ? "down" : (r == null ? "" : (r <= 0.35 ? "up" : "down"));
+    const foot = a.suspect
+      ? `<b class="warn">要確認</b>：${esc(a.suspect)}<br>実原価 ${man(a.total)}円`
+      : `実原価 ${man(a.total)}円・フード ${man(a.food)}／ドリンク ${man(a.drink)}円`;
+    cards.push(`<div class="kpi"><div class="lbl">実原価率（${lac.m}）${a.suspect ? " ⚠" : ""}</div>
       <div class="big ${cls}">${r == null ? "―" : pct(r)}</div>
-      <div class="delta">実原価 ${man(a.total)}円
-        ・フード ${man(a.food)}／ドリンク ${man(a.drink)}円</div></div>`);
+      <div class="delta">${foot}</div></div>`);
     // 不明ロス＝実原価率−理論原価率。同じ月で両方そろうときだけ。
     // 月が違う2つの率の差は不明ロスではないので、月をずらしてまで出さない。
-    const th = crAt(code, lac.m);
+    // 要確認の月は差も信用できないので出さない（嘘のロスが出る）。
+    const th = a.suspect ? undefined : crAt(code, lac.m);
     if (r != null && typeof th === "number") {
       const diff = r - th;
       const sv = salesAt(code, lac.m);

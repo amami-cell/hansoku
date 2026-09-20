@@ -118,3 +118,63 @@ class Test月の並び:
         from hansoku.cli import _month_range
 
         assert _month_range("2026-08", "2026-07") == []
+
+
+class Test信用できない値に印をつける:
+    """材料が揃っていても、値そのものが嘘の月がある。消さずに印を付ける。
+
+    実測（2026-02〜08、24店）で出た2種類:
+      1151 NagaGutsu 2026-04 … 342.9%（翌月 18.0%）＝棚卸の取り違え
+      1743 すさび湯 新宿東口 2026-05 … 0.6%（開店直後の在庫積み）
+    どちらも「材料は揃っている」ので欠測ガードでは止まらない。
+    """
+
+    def test_率が高すぎる月に印がつく(self):
+        w = wh(
+            m2026_03={("1151", "food_inventory"): 100, ("1151", "drink_inventory"): 0},
+            m2026_04={
+                ("1151", "food_purchase"): 5000, ("1151", "drink_purchase"): 0,
+                ("1151", "food_inventory"): 10, ("1151", "drink_inventory"): 0,
+                ("1151", "sales"): 1000,
+            },
+        )
+        got = actual_cost_by_month(w, months=["2026-04"])["1151"]["2026-04"]
+        assert got["rate"] > 1.0
+        assert got["suspect"] and "高すぎる" in got["suspect"]
+
+    def test_率が低すぎる月に印がつく(self):
+        w = wh(
+            m2026_04={("1743", "food_inventory"): 0, ("1743", "drink_inventory"): 0},
+            m2026_05={
+                ("1743", "food_purchase"): 1000, ("1743", "drink_purchase"): 0,
+                ("1743", "food_inventory"): 990, ("1743", "drink_inventory"): 0,
+                ("1743", "sales"): 1000,
+            },
+        )
+        got = actual_cost_by_month(w, months=["2026-05"])["1743"]["2026-05"]
+        assert got["rate"] < 0.10
+        assert got["suspect"] and "低すぎる" in got["suspect"]
+
+    def test_ふつうの月には印がつかない(self):
+        w = wh(
+            m2026_07={("1069", "food_inventory"): 100, ("1069", "drink_inventory"): 50},
+            m2026_08={
+                ("1069", "food_purchase"): 1000, ("1069", "drink_purchase"): 300,
+                ("1069", "food_inventory"): 200, ("1069", "drink_inventory"): 80,
+                ("1069", "sales"): 5000,
+            },
+        )
+        got = actual_cost_by_month(w, months=["2026-08"])["1069"]["2026-08"]
+        assert got["rate"] == 0.234
+        assert got["suspect"] is None
+
+    def test_売上が無い月は率が無いので印もつかない(self):
+        w = wh(
+            m2026_07={("1069", "food_inventory"): 100, ("1069", "drink_inventory"): 50},
+            m2026_08={
+                ("1069", "food_purchase"): 1000, ("1069", "drink_purchase"): 300,
+                ("1069", "food_inventory"): 200, ("1069", "drink_inventory"): 80,
+            },
+        )
+        got = actual_cost_by_month(w, months=["2026-08"])["1069"]["2026-08"]
+        assert got["rate"] is None and got["suspect"] is None
