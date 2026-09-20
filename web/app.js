@@ -1718,6 +1718,21 @@ function renderTargetBoard() {
   const ownerBar = showOwnerFilter
     ? `<div class="fbar"><span class="flabel">担当者</span>${chip("all", "すべて")}${owners.map(o => chip(o, o)).join("")}</div>`
     : "";
+  // 担当者サマリ：担当者ごとの平均達成率（実績が出ている指標の平均）と件数。誰が遅れているか一望。
+  const ownerSummary = showOwnerFilter
+    ? owners.map(o => {
+        const grp = all.filter(x => ownerOf(x.c) === o);
+        const rates = grp.flatMap(x => x.items.filter(i => i.ach).map(i => i.ach.rate));
+        const avg = rates.length ? Math.round(rates.reduce((a, b) => a + b, 0) / rates.length) : null;
+        const cls = avg == null ? "muted" : avg >= 100 ? "good" : "bad";
+        return `<button class="tb-sum ${cls}${BOARD_OWNER === o ? " on" : ""}" data-boardowner="${esc(o)}">
+          <span class="tb-sum-n">${esc(o)}</span>
+          <span class="tb-sum-v">${avg == null ? "―" : avg + "%"}</span>
+          <span class="tb-sum-c">${grp.length}件</span></button>`;
+      }).join("")
+    : "";
+  const summaryBar = ownerSummary
+    ? `<div class="tb-sumbar"><span class="tb-sum-l">担当者別 平均達成率</span>${ownerSummary}</div>` : "";
   const worst = x => Math.min(...x.items.map(i => (i.ach ? i.ach.rate : 9999)));
   withT.sort((a, b) => {
     const la = campStatus(a.c).k === "live" ? 0 : 1, lb = campStatus(b.c).k === "live" ? 0 : 1;
@@ -1744,6 +1759,7 @@ function renderTargetBoard() {
   return `<section class="block">
     <div class="bhead"><h2>目標スコアボード</h2>
       <span class="bnote">目標を入れた販促の達成率を一望（達成=緑／原価率は低いほど達成）　${withT.length}件・未達を上に</span></div>
+    ${summaryBar}
     ${ownerBar}
     <div class="panel">${withT.length ? `<ul class="tblist">${rows}</ul>` : empty}</div>
   </section>`;

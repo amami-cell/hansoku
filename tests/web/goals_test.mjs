@@ -223,6 +223,22 @@ await test("スコアボードの担当者フィルタで絞れる", () => {
   call(`BOARD_OWNER="all"`);   // 後続テストに影響させない
 });
 
+await test("担当者サマリ：担当者別の平均達成率が色つきで出る", () => {
+  const { call } = loadForm(base);
+  call(`BOARD_OWNER="all";
+    SERVER_TARGETS_M={"a@2026":{sales:{value:14000000}},"b@2026":{sales:{value:20000000}}};
+    DATA.campaigns=[
+      {id:"a",stores:["1160"],title:"A",kind:"osusume",start:"2026-08-01",end:"2026-08-01",open_ended:true,owner:"田中"},
+      {id:"b",stores:["1160"],title:"B",kind:"osusume",start:"2026-08-01",end:"2026-08-01",open_ended:true,owner:"佐藤"}];`);
+  const h = call(`renderTargetBoard()`);
+  assert.ok(h.includes("担当者別 平均達成率"), "サマリ見出しが出る");
+  // 実績 2026-08 の売上 15M。田中 目標14M→107%（緑）、佐藤 目標20M→75%（赤）
+  assert.match(h, /class="tb-sum good[^"]*"[^>]*data-boardowner="田中"/, "田中は達成＝緑");
+  assert.match(h, /class="tb-sum bad[^"]*"[^>]*data-boardowner="佐藤"/, "佐藤は未達＝赤");
+  assert.ok(h.includes('tb-sum-v">107%') && h.includes('tb-sum-v">75%'), "平均達成率の数値");
+  call(`BOARD_OWNER="all"`);
+});
+
 await test("複製起票：複製元の目標が初期値として引き継がれる", () => {
   const h = loadForm(base);
   h.call(`SERVER_TARGETS_M = {"src@2025":{sales:{value:16000000}, cost_rate:{value:28}}};
