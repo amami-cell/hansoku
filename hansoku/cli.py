@@ -633,6 +633,93 @@ def cmd_stores(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_actual_cost(args: argparse.Namespace) -> int:
+    """実原価（前月棚卸＋当月仕入−当月棚卸）が店×月でどれだけ出せているかを見る。
+
+    出せていない店・月について**どの材料が欠けているか**まで出す。
+    「実原価が空」とだけ分かっても、棚卸が無いのか仕入が無いのかで打ち手が違う。
+    読み取りだけ。
+    """
+    from .analytics import _prev_month, actual_cost_by_month
+    from .model import (
+        METRIC_DRINK_INVENTORY,
+        METRIC_DRINK_PURCHASE,
+        METRIC_FOOD_INVENTORY,
+        METRIC_FOOD_PURCHASE,
+    )
+
+    months = _month_range(args.month_from, args.month_to)
+    settings = load_settings()
+    master = StoreMaster.load(args.stores)
+    codes = [args.store] if args.store else list(master.active_codes)
+    name_of = {s.store_code: s.store_name for s in master.all}
+
+    with get_warehouse(settings) as warehouse:
+        got = actual_cost_by_month(warehouse, months=months, store_codes=codes)
+        # 欠けている理由を言うために、材料そのものも引く（前月棚卸ぶん1ヶ月多く）
+        need = sorted(set(months) | {_prev_month(m) for m in months})
+        have: dict[str, dict] = {}
+        for month in need:
+            start = datetime.strptime(month, "%Y-%m").date()
+            have[month] = totals(
+                warehouse,
+                date_from=start,
+                date_to=date(start.year, start.month, 28),
+                metrics=[
+                    METRIC_FOOD_INVENTORY, METRIC_DRINK_INVENTORY,
+                    METRIC_FOOD_PURCHASE, METRIC_DRINK_PURCHASE,
+                ],
+                store_codes=codes,
+            )
+
+    print(f"実原価が出せている店×月（{months[0]} 〜 {months[-1]}）")
+    print(f"{'店':<22}" + "".join(f"{m[2:]:>8}" for m in months))
+    missing: dict[str, int] = {}
+    for code in sorted(codes):
+        cells = []
+        for month in months:
+            v = got.get(code, {}).get(month)
+            if v and v.get("rate") is not None:
+                cells.append(f"{v['rate'] * 100:>7.1f}%")
+            elif v:
+                cells.append("   円のみ")   # 原価は出たが売上が無く率にできない
+            else:
+                cells.append("       ―")
+                prev, cur = have.get(_prev_month(month), {}), have.get(month, {})
+                for label, key, src in (
+                    ("前月棚卸", METRIC_FOOD_INVENTORY, prev),
+                    ("前月棚卸", METRIC_DRINK_INVENTORY, prev),
+                    ("当月仕入", METRIC_FOOD_PURCHASE, cur),
+                    ("当月仕入", METRIC_DRINK_PURCHASE, cur),
+                    ("当月棚卸", METRIC_FOOD_INVENTORY, cur),
+                    ("当月棚卸", METRIC_DRINK_INVENTORY, cur),
+                ):
+                    if src.get((code, key)) is None:
+                        missing[label] = missing.get(label, 0) + 1
+        label = f"{code} {name_of.get(code, '')}"[:21]
+        print(f"{label:<22}" + "".join(cells))
+
+    filled = sum(1 for c in codes for m in months if got.get(c, {}).get(m))
+    print(f"\n出せた店×月: {filled} / {len(codes) * len(months)}")
+    if missing:
+        print("出せなかった理由（欠けている材料の延べ数）:")
+        for label, n in sorted(missing.items(), key=lambda kv: -kv[1]):
+            print(f"  {label} … {n}")
+        print("※ 棚卸は2026-01から。それ以前はインフォマートのシートに元データが無い。")
+    return 0
+
+
+def _month_range(start: str, end: str) -> list[str]:
+    """'2026-02' 〜 '2026-08' → 月のリスト。年またぎも扱う。"""
+    y1, m1 = (int(x) for x in start.split("-"))
+    y2, m2 = (int(x) for x in end.split("-"))
+    out = []
+    while (y1, m1) <= (y2, m2):
+        out.append(f"{y1}-{m1:02d}")
+        y1, m1 = (y1 + 1, 1) if m1 == 12 else (y1, m1 + 1)
+    return out
+
+
 # ── パーサ ──────────────────────────────────────────────────────────────────
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hansoku", description=__doc__)
@@ -816,6 +903,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("creatives-list", help="制作物ギャラリーの一覧を表示する").set_defaults(
         func=cmd_creatives_list
     )
+
+    ac = sub.add_parser(
+        "actual-cost",
+        help="実原価（前月棚卸＋当月仕入−当月棚卸）が店×月でどれだけ出せているかを見る",
+    )
+    ac.add_argument("--month-from", dest="month_from", default="2026-02", help="開始 YYYY-MM")
+    ac.add_argument("--month-to", dest="month_to", default="2026-08", help="終了 YYYY-MM")
+    ac.add_argument("--store", help="店舗コード（既定は稼働店すべて）")
+    ac.set_defaults(func=cmd_actual_cost)
 
     sub.add_parser("stores", help="店舗マスタを表示する").set_defaults(func=cmd_stores)
     return parser
