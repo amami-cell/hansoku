@@ -253,6 +253,12 @@ def main() -> int:
                 detail_m = recent[-2] if len(recent) >= 2 else (recent[-1] if recent else "")
             if detail_m:
                 items = _nest_zero_subs(_items_for(detail_m), rules)
+                dtotal = sum(p["sales"] for p in items)
+                dcats = _categories_for_month(items, rules, dtotal)
+                print(f"\n== [{detail_m}] 品目区分の売上構成（合計{round(dtotal):,}円）==")
+                for c in dcats:
+                    print(f"  {c['name']}: {c['sales']:,}円 ({c['count']}品 / "
+                          f"{round(c['share']*100,1)}%)")
                 others_all = sorted(
                     [(p["name"], round(p.get("sales") or 0), p.get("qty"), p.get("group"))
                      for p in items
