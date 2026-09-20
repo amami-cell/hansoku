@@ -185,6 +185,29 @@ await test("設定者・日付が振り返り表の目標欄に出る", () => {
   assert.ok(html.includes("店長A") && html.includes("tr-meta"), "設定者名と変更ログ行が表に出る");
 });
 
+console.log("目標フォームの詰め（妥当性チェック・現状比）");
+
+await test("目標の範囲チェック：原価率は0〜100%、その他は0以上", () => {
+  const { call, getEl } = loadForm(base);
+  getEl("pf-tg-cost_rate").value = "120";
+  assert.match(call("validateTargetInputs()"), /原価率.*0〜100/, "原価率120%は弾く");
+  getEl("pf-tg-cost_rate").value = "28"; getEl("pf-tg-sales").value = "-5";
+  assert.match(call("validateTargetInputs()"), /売上目標.*0以上/, "負の売上目標は弾く");
+  getEl("pf-tg-sales").value = "16000000";
+  assert.equal(call("validateTargetInputs()"), null, "妥当な値は通る");
+});
+
+await test("現状比：客単価↑は+で緑、原価率↓は−で緑（反転）", () => {
+  const { call, getEl } = loadForm(base);
+  call(`TG_CUR = { sales: 14000000, cost_rate: 30 };`);
+  getEl("pf-tg-sales").value = "16000000"; call(`updateTargetDiff("sales")`);
+  assert.equal(getEl("pf-tgdiff-sales").className, "pf-tg-diff good", "売上+14%は緑");
+  getEl("pf-tg-cost_rate").value = "28"; call(`updateTargetDiff("cost_rate")`);
+  assert.equal(getEl("pf-tgdiff-cost_rate").className, "pf-tg-diff good", "原価率−6.7%は緑（反転）");
+  getEl("pf-tg-cost_rate").value = "33"; call(`updateTargetDiff("cost_rate")`);
+  assert.equal(getEl("pf-tgdiff-cost_rate").className, "pf-tg-diff bad", "原価率+10%は赤");
+});
+
 await test("目標未入力の販促だけならスコアボードは非表示", () => {
   const { call } = loadForm({ ...base, campaigns: [
     { id: "x", stores: ["1160"], title: "目標なし", kind: "osusume", start: "2026-11-01", end: "2026-12-31" } ] });

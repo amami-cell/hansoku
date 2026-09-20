@@ -79,6 +79,7 @@ let API_OK = false;              // 目標APIが使えるか（本番=true）
 let SERVER_TARGETS = {};         // id → {value, by, at}（売上のみ・後方互換）
 let SERVER_TARGETS_M = {};       // id → { metric: {value, by, at} }（全指標）
 let GOALS = {};                  // id → 円（端末内フォールバック）
+let TG_CUR = {};                 // 目標フォームの現状（薄字）値。指標key→数値。「現状を入れる」と現状比に使う。
 
 function loadGoals() { try { return JSON.parse(localStorage.getItem("hansoku_goals") || "{}"); } catch (e) { return {}; } }
 function saveGoals() { try { localStorage.setItem("hansoku_goals", JSON.stringify(GOALS)); } catch (e) { /* 保存不可でも表示は続ける */ } }
@@ -1969,8 +1970,11 @@ function refreshTargetPlaceholders() {
   for (const mt of TARGET_METRICS) {
     const inp = g("pf-tg-" + mt.key); if (!inp) continue;
     const cur = currentTargetValue(mt.key, code, sm, em, openEnded);
+    TG_CUR[mt.key] = cur;   // 「現状を入れる」チップと現状比が使う
     inp.placeholder = cur == null ? "―（データなし）"
       : (mt.unit === "円" ? man(cur) + "万" : mt.unit === "%" ? cur + "%" : ten(cur) + mt.unit) + "（現状）";
+    const fill = document.querySelector(`[data-fillcur="${mt.key}"]`);
+    if (fill) fill.disabled = cur == null;   // 現状値が無ければコピー不可
     const help = g("pf-tghelp-" + mt.key);
     if (help) {
       const per = mt.daily
@@ -1978,7 +1982,23 @@ function refreshTargetPlaceholders() {
         : openEnded ? "開始〜直近の実績" : "前年同期の実績";
       help.textContent = cur == null ? "（現状値なし）" : `薄字＝${per}`;
     }
+    updateTargetDiff(mt.key);
   }
+}
+// 目標欄に値が入っているとき、現状（薄字）比を「+X%」で出す。原価率など↓良は色を反転。
+function updateTargetDiff(key) {
+  const out = document.getElementById("pf-tgdiff-" + key);
+  const inp = document.getElementById("pf-tg-" + key);
+  if (!out || !inp) return;
+  const mt = TARGET_METRICS.find(m => m.key === key);
+  const cur = TG_CUR[key];
+  const raw = (inp.value || "").replace(/[,，\s]/g, "");
+  const v = raw === "" ? null : Number(raw);
+  if (v == null || !isFinite(v) || cur == null || !cur) { out.textContent = ""; out.className = "pf-tg-diff"; return; }
+  const pct = (v - cur) / cur * 100;
+  const good = mt.higher ? pct >= 0 : pct <= 0;   // 客単価↑・原価率↓が良い
+  out.textContent = `現状比 ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+  out.className = "pf-tg-diff " + (Math.abs(pct) < 0.05 ? "flat" : good ? "good" : "bad");
 }
 function openPlanEditor(seed) {
   if (!PLANS_API_OK) { alert("販促の起票は本番（ログイン済み）でのみ使えます。"); return; }
@@ -2003,7 +2023,9 @@ function openPlanEditor(seed) {
     return `<div class="pf-tg">
       <span class="pf-tg-l">${esc(mt.label)}<span class="pf-tg-u">${esc(suf)}</span>${mt.higher ? "" : '<span class="pf-tg-rev" title="低いほど良い">↓良</span>'}</span>
       <input class="pf-in pf-tg-in" id="pf-tg-${mt.key}" type="number" inputmode="decimal" step="any" value="${saved != null ? saved : ""}">
+      <button type="button" class="pf-tg-fill" data-fillcur="${mt.key}" title="現状（薄字）の値を目標欄に入れる">現状</button>
       <span class="pf-tg-help" id="pf-tghelp-${mt.key}"></span>
+      <span class="pf-tg-diff" id="pf-tgdiff-${mt.key}"></span>
     </div>`;
   }).join("");
   ov.innerHTML = `<div class="crprev-bd" data-planclose></div>
@@ -2047,10 +2069,34 @@ function openPlanEditor(seed) {
   ["pf-store", "pf-start", "pf-end"].forEach(id => {
     const el = ov.querySelector("#" + id); if (el) el.addEventListener("change", refreshTargetPlaceholders);
   });
+  // 「現状を入れる」チップ：薄字の値を目標欄にコピー。
+  ov.querySelectorAll("[data-fillcur]").forEach(btn => btn.addEventListener("click", () => {
+    const k = btn.dataset.fillcur, cur = TG_CUR[k], inp = document.getElementById("pf-tg-" + k);
+    if (inp && cur != null) { inp.value = cur; updateTargetDiff(k); }
+  }));
+  // 目標を打つと「現状比 +X%」を即時表示（達成の妥当性が直感で分かる）。
+  TARGET_METRICS.forEach(mt => {
+    const inp = ov.querySelector("#pf-tg-" + mt.key);
+    if (inp) inp.addEventListener("input", () => updateTargetDiff(mt.key));
+  });
   refreshTargetPlaceholders();
   const t = ov.querySelector("#pf-title"); if (t) t.focus();
 }
 function lastDayOfMonth(ym) { const [y, m] = ym.split("-").map(Number); return new Date(y, m, 0).getDate(); }
+// 目標欄の妥当性チェック。原価率系は 0超100以下、その他は0以上。桁ミス・入力ミスを保存前に止める。
+function validateTargetInputs() {
+  for (const mt of TARGET_METRICS) {
+    const inp = document.getElementById("pf-tg-" + mt.key); if (!inp) continue;
+    const raw = (inp.value || "").replace(/[,，\s]/g, "");
+    if (raw === "") continue;
+    const v = Number(raw);
+    if (!isFinite(v)) return `「${mt.label}」の目標が数値ではありません。`;
+    const isRate = mt.key === "cost_rate" || mt.key === "food_cost_rate" || mt.key === "drink_cost_rate";
+    if (isRate) { if (v <= 0 || v > 100) return `「${mt.label}」は 0〜100% の範囲で入れてください（入力: ${v}）。`; }
+    else if (v < 0) return `「${mt.label}」の目標は0以上で入れてください。`;
+  }
+  return null;
+}
 async function savePlanFromForm(seed) {
   const g = id => document.getElementById(id);
   const msg = g("pf-msg");
@@ -2061,6 +2107,8 @@ async function savePlanFromForm(seed) {
   if (!code) return show("店舗を選んでください。");
   if (!title) return show("販促名を入れてください。");
   if (!sm) return show("開始月を入れてください。");
+  const tgErr = validateTargetInputs();
+  if (tgErr) return show(tgErr);
   // 終了月が空＝常設（終了日なし）。ご指定どおり確認ポップアップ→Yesで無期限に進む。
   let openEnded = false;
   if (!em) {
