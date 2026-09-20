@@ -2085,7 +2085,7 @@ function subsByQty(subs) {
 }
 // 内訳（サブ）は常に描画し、閉じているときはアコーディオン（高さ0）で畳んでおく。
 // こうすると開閉が CSS の高さアニメで滑らかに動く（再描画で一瞬パッと出さない）。
-function subRowsHtml(code, m, p, col) {
+function subRowsHtml(code, m, p, col, hits) {
   if (!p || !p.subs || !p.subs.length) return "";
   const k = subKey(code, m, p.name);
   const open = SUBS_OPEN.has(k);
@@ -2094,7 +2094,11 @@ function subRowsHtml(code, m, p, col) {
     const q = (s.qty != null) ? ` <span class="fw-pq">${ten(s.qty)}点</span>` : "";
     // 内訳サブは少額（+50円風味など）が多いので万ではなく円で出す（0万にならないように）
     const v = (s.sales > 0) ? yen(s.sales) : "";
-    return `<li class="fw-subitem"${cc}><span class="fw-pn">${esc(s.name)}</span>` +
+    // 販促マーク：この内訳（風味など）が販促の対象商品なら★＋バッジ。ジェラート風味は
+    // 親（TOジェラート等）に畳まれてサブになるため、トップ商品と同じく hits で拾う。
+    const on = subPromoHit(hits, s.name);
+    return `<li class="fw-subitem${on ? " promo" : ""}"${cc}>` +
+      `<span class="fw-pn">${on ? "★ " : ""}${esc(s.name)}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span>` +
       `<span class="fw-pv">${v}${q}</span></li>`;
   }).join("");
   return `<li class="fw-subwrap${open ? " open" : ""}" data-subwrap="${esc(k)}">` +
@@ -2226,7 +2230,7 @@ function panelContent(d) {
           const pOn = hits.items.has(p.name) || (on && isLimitedProduct(d.code, d.m, p.name));
           const q = (p.qty != null) ? ` <span class="fw-pq">${ten(p.qty)}点</span>` : "";
           html += `<li class="fw-subrow${pOn ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${pOn ? ' <span class="fw-pbadge">販促</span>' : ""}${subToggleCtrl(d.code, d.m, p)}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${ppct}%</span></span></li>`;
-          html += subRowsHtml(d.code, d.m, p, col);
+          html += subRowsHtml(d.code, d.m, p, col, hits);
         }
       } else {
         html += `<li class="fw-subrow" style="--cc:${col}"><span class="muted">商品明細なし</span></li>`;
@@ -2250,7 +2254,7 @@ function panelContent(d) {
     // 販促マーク：対象商品か、販促のある区分の“限定/おすすめ”商品だけ（GMは付けない）。
     const on = hits.items.has(p.name) || (catOn && isLimitedProduct(d.code, d.m, p.name));
     return `<li class="${on ? "promo" : ""}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${on ? ' <span class="fw-pbadge">販促</span>' : ""}${subToggleCtrl(d.code, d.m, p)}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`
-      + subRowsHtml(d.code, d.m, p);
+      + subRowsHtml(d.code, d.m, p, null, hits);
   }).join("") : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
   const qsub = totQty ? `・計${ten(totQty)}点` : "";
   return { key: panelKey(d), color: catColor(d.cat), title: `${d.cat}｜${mo}月`, tab: `${d.cat} ${mo}月`, sub: `${man(tot)}・${prods.length}品${qsub}`, list };
@@ -2717,12 +2721,15 @@ function campGelatoCompo(c) {
     /^ジェラート(ダブル|シングル|トリプル|チケット)/.test(n);
   for (const m of months) {
     for (const p of prodsInCat(code, m, "ジェラート")) {
-      const n = p.name || "", q = p.qty || 0;
-      if (/^TOジェラートシングル/.test(n)) single += q;
-      else if (/^TOジェラートダブル/.test(n)) dbl += q;
-      else if (/^TOジェラートトリプル/.test(n)) tri += q;
-      if (excluded(n)) continue;
-      flav[n] = (flav[n] || 0) + q;
+      // 風味は親（TOジェラート等）に畳まれてサブになるため、親＋サブを両方見る。
+      for (const r of [p, ...(p.subs || [])]) {
+        const n = r.name || "", q = r.qty || 0;
+        if (/^TOジェラートシングル/.test(n)) single += q;
+        else if (/^TOジェラートダブル/.test(n)) dbl += q;
+        else if (/^TOジェラートトリプル/.test(n)) tri += q;
+        if (excluded(n)) continue;
+        flav[n] = (flav[n] || 0) + q;
+      }
     }
   }
   const scoops = single * 1 + dbl * 2 + tri * 3;
@@ -3678,6 +3685,14 @@ function promoHitsForMonth(code, m) {
     for (const it of (c.items || [])) if (it) items.add(it);
   }
   return { cats, items };
+}
+// 内訳サブ（風味など）が販促の対象商品か。campaign の items はキーワード（部分一致）なので、
+// 完全一致に加えて「サブ名にキーワードを含む」も拾う（例 "ピスタチオ"）。
+function subPromoHit(hits, name) {
+  if (!hits || !name) return false;
+  if (hits.items.has(name)) return true;
+  for (const k of hits.items) if (k && name.includes(k)) return true;
+  return false;
 }
 // m から k か月前の "YYYY-MM"。
 function monthMinus(m, k) {
@@ -5048,10 +5063,12 @@ function renderProducts(code) {
     const tog = hasSubs ? subToggleCtrl(code, m, p) : "";
     let subs = "";
     if (hasSubs) {
+      const shits = promoHitsForMonth(code, m);
       const items = subsByQty(p.subs).map(s => {
         const q = (s.qty != null) ? `<span class="psub-q">${ten(s.qty)}点</span>` : "";
         const v = (s.sales > 0) ? `<span class="psub-v">${yen(s.sales)}</span>` : "";
-        return `<li class="prowsub"><span class="psub-n">${esc(s.name)}</span>${q}${v}</li>`;
+        const on = subPromoHit(shits, s.name);   // 内訳（風味など）が販促対象なら★
+        return `<li class="prowsub${on ? " promo" : ""}"><span class="psub-n">${on ? "★ " : ""}${esc(s.name)}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span>${q}${v}</li>`;
       }).join("");
       // 内訳は常に描画し、閉じているときは高さ0で畳む（開閉を高さアニメで滑らかに）。
       subs = `<li class="psubwrap${open ? " open" : ""}" data-subwrap="${esc(k)}">` +
