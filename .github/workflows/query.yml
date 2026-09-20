@@ -53,6 +53,18 @@ on:
         description: '中身を覗くタブ名（カンマ区切り。列構造の確認用）'
         required: false
         default: ''
+      audit_cost:
+        description: '集計の代わりに、損益（原価率）取込監査を全店で出す'
+        type: boolean
+        default: false
+      audit_from:
+        description: '損益監査の開始月 YYYY-MM（空=直近12ヶ月）'
+        required: false
+        default: ''
+      audit_to:
+        description: '損益監査の終了月 YYYY-MM（空=直近の完全月）'
+        required: false
+        default: ''
 
 # トークンは読み取りだけでよい（どのワークフローも push もコメントもしない）。
 permissions:
@@ -77,8 +89,22 @@ jobs:
       - name: 依存パッケージをインストール
         run: pip install -r requirements.txt
 
+      - name: 損益（原価率）取込監査
+        if: ${{ inputs.audit_cost }}
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AUDIT_FROM: ${{ inputs.audit_from }}
+          AUDIT_TO: ${{ inputs.audit_to }}
+        run: |
+          set -o pipefail
+          python scripts/audit_cost.py | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: 取り込み元シートのタブ一覧
-        if: ${{ inputs.inspect_sheet }}
+        if: ${{ inputs.inspect_sheet && !inputs.audit_cost }}
         env:
           HANSOKU_ENV: cloud
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
@@ -104,7 +130,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: 集計
-        if: ${{ !inputs.inspect_sheet }}
+        if: ${{ !inputs.inspect_sheet && !inputs.audit_cost }}
         env:
           HANSOKU_ENV: cloud
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
