@@ -84,6 +84,11 @@ def classify_category(name: str, rules: dict, group: str | None = None) -> str:
     group（FWの区分見出し。例 "20:テイクアウトジェラート"）が rules["groups"] に載っていれば
     そちらを優先する。全商品グリッドに出ない内訳（テイクアウトジェラートの風味選択など）は
     素の風味名だと商品名から区分を当てられないため、FW自身の区分見出しで束ねる。"""
+    # 商品名の完全一致で区分を上書き（最優先）。見出し/キーワードで誤爆する実売れ商品を個別に矯正。
+    # 例: "2000ミニパフェ＆スコーンタルトセット"（"パフェ"を含むが実体はフード）→ フード。
+    name_cat = (rules.get("name_category") or {}).get(name or "")
+    if name_cat:
+        return name_cat
     gmap = rules.get("groups") or {}
     if group:
         label = _group_label(group)
@@ -174,7 +179,11 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
     qty_rollup = set((rules or {}).get("sub_qty_rollup") or [])
     merge_cfg = (rules or {}).get("sub_merge_prefixes") or {}
     no_nest = tuple(str(s) for s in ((rules or {}).get("no_nest_contains") or []) if s)
-    if not zero_groups and not sub_exact and not sub_contains:
+    # 見出し→親（ただし売上0の選択キーだけ畳む）。実売れ商品が同居する見出し
+    # （例 08:アフタヌーンセットに2000セット本体やティーフリーが同居）で、0円キーだけを内訳化。
+    zero_only = (rules or {}).get("zero_groups_zero_only") or {}
+    small_cat = (rules or {}).get("sub_small_cat") or {}
+    if not zero_groups and not sub_exact and not sub_contains and not zero_only:
         return items
     by_name: dict[str, dict] = {}
     for it in items:
@@ -201,6 +210,11 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
             label = _group_label(group)
             if label in zero_groups:
                 parent_name = zero_groups[label]
+        # 2.5) 見出しの売上0キーだけ畳む（実売れ商品が同居する見出し用）。売上つきはトップに残す。
+        if parent_name is None and group and zero_only and not ((it.get("sales") or 0) > 0):
+            label = _group_label(group)
+            if label in zero_only:
+                parent_name = zero_only[label]
         # 3) それでも決まらず、未マップ見出し かつ 売上0 ＝ 真の0円選択だけ「その他の内訳」へ。
         #    未マップ見出しでも売上のある実売れ商品（13:紅茶=レモン, 14:アルコール等）は
         #    トップに残す＝品目区分で正しく分類する（groups で上書き可）。
@@ -239,7 +253,29 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
         for p in tops:
             if p.get("name") in qty_rollup and p.get("subs"):
                 p["qty"] = sum((s.get("qty") or 0) for s in p["subs"])
+    # 指定の親は、各サブに小カテゴリ(scat)を付ける（内訳を タルト・スコーン/紅茶/… で束ねて表示）。
+    if small_cat:
+        for p in tops:
+            cfg = small_cat.get(p.get("name"))
+            if cfg and p.get("subs"):
+                for s in p["subs"]:
+                    s["scat"] = _small_cat_of(s.get("name"), cfg)
+                p["scat_order"] = list(cfg.get("order") or [])
     return tops
+
+
+def _small_cat_of(name: str | None, cfg: dict) -> str:
+    """サブ名を小カテゴリに割り当てる。cfg["rules"] を上から見て最初に当たった cat。
+    どれにも当たらなければ cfg["fallback"]（無ければ ""）。rule: {cat, contains:[...] , prefix:[...]}。"""
+    nm = name or ""
+    for rule in cfg.get("rules", []):
+        for kw in rule.get("prefix", []):
+            if kw and nm.startswith(kw):
+                return rule["cat"]
+        for kw in rule.get("contains", []):
+            if kw and kw in nm:
+                return rule["cat"]
+    return cfg.get("fallback", "")
 
 
 def _merge_subs(subs: list[dict], strip_prefixes) -> list[dict]:

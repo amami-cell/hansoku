@@ -2085,21 +2085,37 @@ function subsByQty(subs) {
 }
 // 内訳（サブ）は常に描画し、閉じているときはアコーディオン（高さ0）で畳んでおく。
 // こうすると開閉が CSS の高さアニメで滑らかに動く（再描画で一瞬パッと出さない）。
+// サブを小カテゴリ(scat)で束ねる。scat が無ければ 1グループ（見出しなし）。
+// 並びは parent.scat_order 優先→その他は後ろ。各グループ内は出品数（点数）降順。
+function groupSubs(subs, order) {
+  if (!subs || !subs.some(s => s.scat)) return [["", subsByQty(subs || [])]];
+  const by = {};
+  for (const s of subs) (by[s.scat || ""] = by[s.scat || ""] || []).push(s);
+  const ord = (order && order.length) ? order.slice() : [];
+  const seen = new Set(ord);
+  const rest = Object.keys(by).filter(k => !seen.has(k)).sort();
+  const out = [];
+  for (const lab of ord.concat(rest)) if (by[lab] && by[lab].length) out.push([lab, subsByQty(by[lab])]);
+  return out;
+}
 function subRowsHtml(code, m, p, col, hits) {
   if (!p || !p.subs || !p.subs.length) return "";
   const k = subKey(code, m, p.name);
   const open = SUBS_OPEN.has(k);
   const cc = col ? ` style="--cc:${col}"` : "";
-  const items = subsByQty(p.subs).map(s => {
-    const q = (s.qty != null) ? ` <span class="fw-pq">${ten(s.qty)}点</span>` : "";
-    // 内訳サブは少額（+50円風味など）が多いので万ではなく円で出す（0万にならないように）
-    const v = (s.sales > 0) ? yen(s.sales) : "";
-    // 販促マーク：この内訳（風味など）が販促の対象商品なら★＋バッジ。ジェラート風味は
-    // 親（TOジェラート等）に畳まれてサブになるため、トップ商品と同じく hits で拾う。
-    const on = subPromoHit(hits, s.name);
-    return `<li class="fw-subitem${on ? " promo" : ""}"${cc}>` +
-      `<span class="fw-pn">${on ? "★ " : ""}${esc(s.name)}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span>` +
-      `<span class="fw-pv">${v}${q}</span></li>`;
+  const items = groupSubs(p.subs, p.scat_order).map(([lab, ss]) => {
+    const head = lab ? `<li class="fw-subhead"${cc}>${esc(lab)}</li>` : "";
+    return head + ss.map(s => {
+      const q = (s.qty != null) ? ` <span class="fw-pq">${ten(s.qty)}点</span>` : "";
+      // 内訳サブは少額（+50円風味など）が多いので万ではなく円で出す（0万にならないように）
+      const v = (s.sales > 0) ? yen(s.sales) : "";
+      // 販促マーク：この内訳（風味など）が販促の対象商品なら★＋バッジ。ジェラート風味は
+      // 親（TOジェラート等）に畳まれてサブになるため、トップ商品と同じく hits で拾う。
+      const on = subPromoHit(hits, s.name);
+      return `<li class="fw-subitem${on ? " promo" : ""}"${cc}>` +
+        `<span class="fw-pn">${on ? "★ " : ""}${esc(s.name)}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span>` +
+        `<span class="fw-pv">${v}${q}</span></li>`;
+    }).join("");
   }).join("");
   return `<li class="fw-subwrap${open ? " open" : ""}" data-subwrap="${esc(k)}">` +
     `<div class="subacc"><div class="subacc-in"><ul class="fw-subs">${items}</ul></div></div></li>`;
@@ -5064,11 +5080,14 @@ function renderProducts(code) {
     let subs = "";
     if (hasSubs) {
       const shits = promoHitsForMonth(code, m);
-      const items = subsByQty(p.subs).map(s => {
-        const q = (s.qty != null) ? `<span class="psub-q">${ten(s.qty)}点</span>` : "";
-        const v = (s.sales > 0) ? `<span class="psub-v">${yen(s.sales)}</span>` : "";
-        const on = subPromoHit(shits, s.name);   // 内訳（風味など）が販促対象なら★
-        return `<li class="prowsub${on ? " promo" : ""}"><span class="psub-n">${on ? "★ " : ""}${esc(s.name)}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span>${q}${v}</li>`;
+      const items = groupSubs(p.subs, p.scat_order).map(([lab, ss]) => {
+        const head = lab ? `<li class="prowsubhead">${esc(lab)}</li>` : "";
+        return head + ss.map(s => {
+          const q = (s.qty != null) ? `<span class="psub-q">${ten(s.qty)}点</span>` : "";
+          const v = (s.sales > 0) ? `<span class="psub-v">${yen(s.sales)}</span>` : "";
+          const on = subPromoHit(shits, s.name);   // 内訳（風味など）が販促対象なら★
+          return `<li class="prowsub${on ? " promo" : ""}"><span class="psub-n">${on ? "★ " : ""}${esc(s.name)}${on ? ' <span class="fw-pbadge">販促</span>' : ""}</span>${q}${v}</li>`;
+        }).join("");
       }).join("");
       // 内訳は常に描画し、閉じているときは高さ0で畳む（開閉を高さアニメで滑らかに）。
       subs = `<li class="psubwrap${open ? " open" : ""}" data-subwrap="${esc(k)}">` +
