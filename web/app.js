@@ -1654,6 +1654,53 @@ function campaignSummary(c, acc) {
   };
 }
 
+// 販促に入っている目標（指標別）を、当期実績・達成率つきで集める。振り返り表と同じ計算。
+function campTargetItems(c) {
+  const codes = (c.stores || []).filter(hasData);
+  const code = codes.length ? codes : (c.stores || []);
+  const sm = c.start.slice(0, 7), em = campEndM(c), oe = !!c.open_ended;
+  const items = [];
+  for (const mt of TARGET_METRICS) {
+    const target = targetMetricOf(c, mt.key);
+    if (target == null) continue;
+    const actual = actualTargetValue(mt.key, code, sm, em, oe);
+    items.push({ mt, target, actual, ach: targetAchievement(mt, target, actual) });
+  }
+  return items;
+}
+// 目標スコアボード：目標を入れた販促の達成率を一望（横断）。at-risk（低達成）を上に。
+function renderTargetBoard() {
+  const withT = (DATA.campaigns || []).filter(goalEligible)
+    .map(c => ({ c, items: campTargetItems(c) }))
+    .filter(x => x.items.length);
+  if (!withT.length) return "";
+  const worst = x => Math.min(...x.items.map(i => (i.ach ? i.ach.rate : 9999)));
+  withT.sort((a, b) => {
+    const la = campStatus(a.c).k === "live" ? 0 : 1, lb = campStatus(b.c).k === "live" ? 0 : 1;
+    if (la !== lb) return la - lb;
+    return worst(a) - worst(b);
+  });
+  const rows = withT.map(({ c, items }) => {
+    const codes = (c.stores || []).filter(hasData);
+    const store = codes.length === 1 ? storeName(codes[0]) : (codes.length ? `${codes.length}店` : "—");
+    const st = campStatus(c);
+    const chips = items.map(({ mt, target, actual, ach }) => {
+      const cls = ach ? (ach.good ? "good" : "bad") : "muted";
+      const val = ach ? ach.rate + "%" : "―";
+      return `<span class="tb-chip ${cls}" title="${esc(mt.label)}：目標 ${fmtMetricVal(mt, target)} ／ 実績 ${fmtMetricVal(mt, actual)}${mt.higher ? "" : "（低いほど達成）"}">${esc(mt.label)} ${val}</span>`;
+    }).join("");
+    return `<li data-camp="${c.id}">
+      <div class="tb-top"><span class="cstat ${st.k}">${st.label}</span>
+        <b class="tb-name">${esc(c.title)}</b><span class="tb-store">${esc(store)}</span></div>
+      <div class="tb-chips">${chips}</div></li>`;
+  }).join("");
+  return `<section class="block">
+    <div class="bhead"><h2>目標スコアボード</h2>
+      <span class="bnote">目標を入れた販促の達成率を一望（達成=緑／原価率は低いほど達成）　${withT.length}件・未達を上に</span></div>
+    <div class="panel"><ul class="tblist">${rows}</ul></div>
+  </section>`;
+}
+
 function renderCampaigns() {
   const isRatio = METRIC === "cost_rate";
   // 状態順（実施中→予定→終了）→ 同状態内は前年比の良い順（データ無しは後ろ）
@@ -1763,6 +1810,7 @@ function renderCampaigns() {
     : `<div class="empty">施策がまだ登録されていません。</div>`;
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
+    ${renderTargetBoard()}
     <section class="block">
       <div class="bhead"><h2>施策の効果</h2>
         <span class="bnote">${METRIC_LABELS[METRIC]}・確定月の全店合算／前年同月比　${withEff.length ? `前年比プラス ${plus}/${withEff.length}` : ""}</span></div>
