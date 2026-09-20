@@ -53,7 +53,8 @@ def test_実原価が入るなら金額と率が揃う(payload):
             assert {"food", "drink", "total"} <= set(v)
             assert v["total"] == v["food"] + v["drink"]
             # 売上が無い月は率を出さない（0%にすると「達成」に見える）
-            assert v["rate"] is None or v["rate"] > 0
+            # 率は cost_rate と同じ分数。パーセントで入れると画面が100倍で出す。
+            assert v["rate"] is None or 0 < v["rate"] < 1
 
 
 def test_施策は空でも成立する(payload):

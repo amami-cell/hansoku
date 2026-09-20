@@ -399,6 +399,71 @@ test("行ごとに対象月を持つ（店で直近確定月が違う）", () =>
   assert.equal(by["1015"].kt, 4000);
 });
 
+// ── 実原価（棚卸・仕入から。理論原価率とは別物）──────────────────────────
+console.log("実原価（actual_cost）");
+
+// 1069 は理論原価率が無い（FWのABC部門が紐付いていない）店。実原価だけがある。
+// 1006 は両方ある店。差（不明ロス）が出せる。
+const acBase = () => ({
+  ...base,
+  months: ["2026-06", "2026-07"],
+  stores: [
+    { code: "1006", name: "A店", region: "大阪", neighbors: [] },
+    { code: "1069", name: "ひよこ飯店", region: "大阪", neighbors: [] },
+  ],
+  monthly: {
+    1006: { "2026-07": { sales: 10000000 } },
+    1069: { "2026-07": { sales: 5000000 } },
+  },
+  covers: { 1006: { "2026-07": 2000 }, 1069: { "2026-07": 1000 } },
+  cost_rate: { 1006: { "2026-07": 0.30 } },          // 1069 には無い
+  actual_cost: {
+    1006: { "2026-07": { food: 2400000, drink: 800000, total: 3200000, rate: 0.32 } },
+    1069: { "2026-07": { food: 1500000, drink: 500000, total: 2000000, rate: 0.40 } },
+  },
+  departments_monthly: {}, products_monthly: {},
+});
+
+test("actual_cost が無い画面でも落ちない（キーごと欠けた古いJSON）", () => {
+  const ctx = loadApp(base);                      // base に actual_cost は無い
+  assert.equal(call(ctx, `acRateAt("1006","2026-01")`), undefined);
+  assert.equal(call(ctx, `latestActualCost("1006")`), null);
+});
+
+test("実原価率は指標として選べる（率なので期間合計にしない）", () => {
+  const ctx = loadApp(acBase());
+  assert.equal(call(ctx, `isRatioMetric("actual_cost_rate")`), true);
+  assert.equal(call(ctx, `METRIC = "actual_cost_rate"; valueAt("1069","2026-07")`), 0.40);
+  // 理論原価率とは別の入れ物から読む（混ざっていたら 1069 は undefined のはず）
+  assert.equal(call(ctx, `METRIC = "cost_rate"; valueAt("1069","2026-07")`), undefined);
+});
+
+test("crossProfit：理論が無い店は実原価で粗利率を出し、根拠を gpSrc に残す", () => {
+  const ctx = loadApp(acBase());
+  const by = Object.fromEntries(call(ctx, `crossProfit()`).map(r => [r.code, r]));
+  assert.equal(by["1006"].gpSrc, "理論");
+  assert.ok(Math.abs(by["1006"].gp - 0.70) < 1e-9, "理論がある店は理論のまま（1-0.30）");
+  assert.equal(by["1069"].gpSrc, "実原価", "理論が無い店は実原価で埋める");
+  assert.ok(Math.abs(by["1069"].gp - 0.60) < 1e-9, "1-0.40");
+});
+
+test("店舗詳細：実原価カードと、理論との差＝不明ロスが出る", () => {
+  const ctx = loadApp(acBase());
+  const html = call(ctx, `renderProfitability("1006")`);
+  assert.ok(html.includes("実原価率（2026-07）"), "実原価率のカード");
+  assert.ok(html.includes("32.0%"), "実原価率の値");
+  assert.ok(html.includes("不明ロス（2026-07）"), "理論と実原価の差");
+  assert.ok(html.includes("+2.0"), "32.0% − 30.0% = +2.0pt");
+});
+
+test("店舗詳細：理論が無い店でも実原価だけで節が出る（不明ロスは出さない）", () => {
+  const ctx = loadApp(acBase());
+  const html = call(ctx, `renderProfitability("1069")`);
+  assert.ok(html.includes("実原価率（2026-07）"), "実原価だけでも節を出す");
+  assert.ok(html.includes("40.0%"), "実原価率の値");
+  assert.ok(!html.includes("不明ロス"), "理論が無い月に差は出さない");
+});
+
 // ── 制作物カード（多形式・アップロード統合）──────────────────────────────
 test("制作物カード：画像はサムネ、PDFは種別バッジ、Excelは表バッジ", () => {
   const ctx = loadApp({ ...base, campaigns: [] });

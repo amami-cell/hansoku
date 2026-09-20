@@ -44,7 +44,8 @@ class Test実原価が計算できる:
         assert got["food"] == 900        # 100 + 1000 - 200
         assert got["drink"] == 270       # 50 + 300 - 80
         assert got["total"] == 1170
-        assert got["rate"] == 23.4       # 1170 / 5000
+        # cost_rate と同じ分数で持つ（画面が同じ pct() で出せるように）
+        assert got["rate"] == 0.234      # 1170 / 5000
 
     def test_年をまたぐ(self):
         w = wh(
