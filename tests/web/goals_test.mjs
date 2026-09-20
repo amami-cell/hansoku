@@ -208,6 +208,19 @@ await test("現状比：客単価↑は+で緑、原価率↓は−で緑（反�
   assert.equal(getEl("pf-tgdiff-cost_rate").className, "pf-tg-diff bad", "原価率+10%は赤");
 });
 
+await test("スコアボードの担当者フィルタで絞れる", () => {
+  const { call } = loadForm(base);
+  call(`SERVER_TARGETS_M={"a@2026":{sales:{value:16000000}},"b@2026":{sales:{value:17000000}}};
+    DATA.campaigns=[
+      {id:"a",stores:["1160"],title:"Aの販促",kind:"osusume",start:"2026-11-01",end:"2026-12-31",owner:"田中"},
+      {id:"b",stores:["1160"],title:"Bの販促",kind:"osusume",start:"2026-11-01",end:"2026-12-31",owner:"佐藤"}];`);
+  let h = call(`BOARD_OWNER="all"; renderTargetBoard()`);
+  assert.ok(h.includes("Aの販促") && h.includes("Bの販促") && h.includes("担当者") && h.includes("田中"), "全員＝両方＋担当者バー");
+  h = call(`BOARD_OWNER="田中"; renderTargetBoard()`);
+  assert.ok(h.includes("Aの販促") && !h.includes("Bの販促"), "田中で絞るとAだけ");
+  call(`BOARD_OWNER="all"`);   // 後続テストに影響させない
+});
+
 await test("目標未入力の販促だけならスコアボードは非表示", () => {
   const { call } = loadForm({ ...base, campaigns: [
     { id: "x", stores: ["1160"], title: "目標なし", kind: "osusume", start: "2026-11-01", end: "2026-12-31" } ] });

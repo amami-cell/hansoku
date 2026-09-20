@@ -73,6 +73,7 @@ let PROMO_SORT = "effect";         // この店の販促の並び（effect=効�
 let PROMO_FILTER = "all";          // この店の販促の状態フィルタ（all / live / done）
 let STORE_LIST_SORT = "region";    // 店舗一覧の並び（region / budget / yoy / sales）
 let CAMP_FILTER = { status: "all", kind: "all" };   // 施策の効果ビューの絞り込み
+let BOARD_OWNER = "all";          // 目標スコアボードの担当者フィルタ（all or 担当者名）
 // 販促の目標（施策id→円）。本番は Neon（/api/targets）に共有保存、
 // プレビュー等 API が無い所では端末内（localStorage）に保存する。
 let API_OK = false;              // 目標APIが使えるか（本番=true）
@@ -1173,6 +1174,8 @@ function render() {
       CAMP_FILTER = { ...CAMP_FILTER, [dim]: val };
       render(); syncHash();
     }));
+  app.querySelectorAll("[data-boardowner]").forEach(el =>
+    el.addEventListener("click", () => { BOARD_OWNER = el.dataset.boardowner; render(); }));
   app.querySelectorAll("[data-sharecopy]").forEach(el =>
     el.addEventListener("click", async e => {
       e.stopPropagation();
@@ -1701,10 +1704,20 @@ function campTargetItems(c) {
 }
 // 目標スコアボード：目標を入れた販促の達成率を一望（横断）。at-risk（低達成）を上に。
 function renderTargetBoard() {
-  const withT = (DATA.campaigns || []).filter(goalEligible)
+  const all = (DATA.campaigns || []).filter(goalEligible)
     .map(c => ({ c, items: campTargetItems(c) }))
     .filter(x => x.items.length);
-  if (!withT.length) return "";
+  if (!all.length) return "";
+  // 担当者フィルタ。owner 未設定は「担当者なし」に束ねる。
+  const ownerOf = c => (c.owner || "").trim() || "（担当者なし）";
+  const owners = [...new Set(all.map(x => ownerOf(x.c)))].sort();
+  const showOwnerFilter = owners.length > 1;
+  if (BOARD_OWNER !== "all" && !owners.includes(BOARD_OWNER)) BOARD_OWNER = "all";
+  const withT = BOARD_OWNER === "all" ? all : all.filter(x => ownerOf(x.c) === BOARD_OWNER);
+  const chip = (val, label) => `<button class="fchip${BOARD_OWNER === val ? " on" : ""}" data-boardowner="${esc(val)}">${esc(label)}</button>`;
+  const ownerBar = showOwnerFilter
+    ? `<div class="fbar"><span class="flabel">担当者</span>${chip("all", "すべて")}${owners.map(o => chip(o, o)).join("")}</div>`
+    : "";
   const worst = x => Math.min(...x.items.map(i => (i.ach ? i.ach.rate : 9999)));
   withT.sort((a, b) => {
     const la = campStatus(a.c).k === "live" ? 0 : 1, lb = campStatus(b.c).k === "live" ? 0 : 1;
@@ -1720,15 +1733,19 @@ function renderTargetBoard() {
       const val = ach ? ach.rate + "%" : "―";
       return `<span class="tb-chip ${cls}" title="${esc(mt.label)}：目標 ${fmtMetricVal(mt, target)} ／ 実績 ${fmtMetricVal(mt, actual)}${mt.higher ? "" : "（低いほど達成）"}">${esc(mt.label)} ${val}</span>`;
     }).join("");
+    const owner = (c.owner || "").trim();
     return `<li data-camp="${c.id}">
       <div class="tb-top"><span class="cstat ${st.k}">${st.label}</span>
-        <b class="tb-name">${esc(c.title)}</b><span class="tb-store">${esc(store)}</span></div>
+        <b class="tb-name">${esc(c.title)}</b><span class="tb-store">${esc(store)}</span>
+        ${owner ? `<span class="tb-owner">👤 ${esc(owner)}</span>` : ""}</div>
       <div class="tb-chips">${chips}</div></li>`;
   }).join("");
+  const empty = `<div class="empty">この担当者の目標つき販促はありません。</div>`;
   return `<section class="block">
     <div class="bhead"><h2>目標スコアボード</h2>
       <span class="bnote">目標を入れた販促の達成率を一望（達成=緑／原価率は低いほど達成）　${withT.length}件・未達を上に</span></div>
-    <div class="panel"><ul class="tblist">${rows}</ul></div>
+    ${ownerBar}
+    <div class="panel">${withT.length ? `<ul class="tblist">${rows}</ul>` : empty}</div>
   </section>`;
 }
 
