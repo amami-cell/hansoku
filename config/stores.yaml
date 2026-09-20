@@ -62,8 +62,6 @@ stores:
     brand_name: "ひよこ飯店"
     is_shared_facility: false
     active: true
-    # FW側で商品に部門が紐付いていないため、ABCの部門は常に0件。
-    abc_dept: false
   - store_code: "1097"
     store_name: "ARATA"
     yomi: ["あらた"]
@@ -119,8 +117,6 @@ stores:
     brand_name: "料理と酒 たいだい"
     is_shared_facility: false
     active: true
-    # FW側で商品に部門が紐付いていないため、ABCの部門は常に0件。
-    abc_dept: false
   # 韓国料理「ケジョン」を改装して Italian Bar NagaGutsu になった。
   # 2026-04 は改装期間で売上 ¥195,818。2026-05 から NagaGutsu の数字。
   # それ以前のABC・売上は旧店（ケジョン）のもので、またぐ前年比は別業態の比較になる。
