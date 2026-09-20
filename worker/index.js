@@ -353,13 +353,17 @@ async function handlePlans(request, env, who) {
     start_date DATE NOT NULL, end_date DATE NOT NULL, goal BIGINT,
     note TEXT NOT NULL DEFAULT '', source_id TEXT NOT NULL DEFAULT '',
     set_by TEXT NOT NULL DEFAULT '', set_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
+  // 追加カラム（既存テーブルにも冪等に足す）: 担当者・終了日未定（常設）フラグ。
+  await sql`ALTER TABLE promo_plans ADD COLUMN IF NOT EXISTS owner TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE promo_plans ADD COLUMN IF NOT EXISTS open_ended BOOLEAN NOT NULL DEFAULT false`;
 
   if (request.method === "GET") {
-    const rows = await sql`SELECT id, store_code, title, kind, bucket, start_date, end_date, goal, note, source_id, set_by, set_at FROM promo_plans ORDER BY start_date`;
+    const rows = await sql`SELECT id, store_code, title, kind, bucket, start_date, end_date, goal, note, source_id, owner, open_ended, set_by, set_at FROM promo_plans ORDER BY start_date`;
     const plans = rows.map((r) => ({
       id: r.id, store_code: r.store_code, title: r.title, kind: r.kind || "dev",
       bucket: r.bucket || "", start: String(r.start_date).slice(0, 10), end: String(r.end_date).slice(0, 10),
       goal: r.goal == null ? null : Number(r.goal), note: r.note || "", source_id: r.source_id || "",
+      owner: r.owner || "", open_ended: !!r.open_ended,
       by: r.set_by || "", at: r.set_at,
     }));
     return json({ plans });
@@ -391,19 +395,25 @@ async function handlePlans(request, env, who) {
     const end = typeof body.end === "string" ? body.end.slice(0, 10) : "";
     const note = typeof body.note === "string" ? body.note.slice(0, 2000).trim() : "";
     const source_id = typeof body.source_id === "string" ? body.source_id.slice(0, 128) : "";
+    const owner = typeof body.owner === "string" ? body.owner.trim().slice(0, 120) : "";
+    const openEnded = body.open_ended === true;
     const goal = (body.goal == null || body.goal === "") ? null : Math.max(0, Math.round(Number(body.goal) || 0));
     const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    // 終了日未定（常設）は end を start と同じにして open_ended で表す（列は NOT NULL のため）。
+    const endStore = openEnded ? start : end;
     if (!store_code || !title) return json({ error: "missing", detail: "店舗と販促名は必須です" }, 400);
-    if (!dateRe.test(start) || !dateRe.test(end) || end < start) return json({ error: "bad-date", detail: "期間（開始・終了）が不正です" }, 400);
+    if (!dateRe.test(start)) return json({ error: "bad-date", detail: "開始日が不正です" }, 400);
+    if (!openEnded && (!dateRe.test(end) || end < start)) return json({ error: "bad-date", detail: "期間（開始・終了）が不正です" }, 400);
     await sql`
-      INSERT INTO promo_plans (id, store_code, title, kind, bucket, start_date, end_date, goal, note, source_id, set_by, set_at)
-      VALUES (${id}, ${store_code}, ${title}, ${kind}, ${bucket}, ${start}, ${end}, ${goal}, ${note}, ${source_id}, ${email}, now())
+      INSERT INTO promo_plans (id, store_code, title, kind, bucket, start_date, end_date, goal, note, source_id, owner, open_ended, set_by, set_at)
+      VALUES (${id}, ${store_code}, ${title}, ${kind}, ${bucket}, ${start}, ${endStore}, ${goal}, ${note}, ${source_id}, ${owner}, ${openEnded}, ${email}, now())
       ON CONFLICT (id) DO UPDATE SET
         store_code = EXCLUDED.store_code, title = EXCLUDED.title, kind = EXCLUDED.kind,
         bucket = EXCLUDED.bucket, start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
-        goal = EXCLUDED.goal, note = EXCLUDED.note, set_by = EXCLUDED.set_by, set_at = now()`;
+        goal = EXCLUDED.goal, note = EXCLUDED.note, owner = EXCLUDED.owner,
+        open_ended = EXCLUDED.open_ended, set_by = EXCLUDED.set_by, set_at = now()`;
     await logAudit(env, email, "plan.set", id, title);
-    return json({ ok: true, plan: { id, store_code, title, kind, bucket, start, end, goal, note, source_id, by: email } });
+    return json({ ok: true, plan: { id, store_code, title, kind, bucket, start, end: endStore, goal, note, source_id, owner, open_ended: openEnded, by: email } });
   }
 
   return json({ error: "method" }, 405);

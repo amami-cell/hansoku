@@ -1280,6 +1280,16 @@ textarea.pf-in{resize:vertical;line-height:1.5;}
 .pf-row{display:flex;gap:10px;}
 .pf-row .pf-l{flex:1;}
 .pf-msg{font-size:12px;color:var(--critical-ink);background:var(--warn-soft);border-radius:7px;padding:6px 10px;}
+.pf-hint{font-size:10.5px;font-weight:600;color:var(--sub);margin-left:6px;}
+.pf-tg-head{font-size:12px;font-weight:800;color:var(--ink-2);margin-top:4px;border-top:1px solid var(--line);padding-top:10px;}
+.pf-tg-grid{display:flex;flex-direction:column;gap:7px;}
+.pf-tg{display:grid;grid-template-columns:1fr 128px;grid-template-areas:"l in" "help help";gap:2px 8px;align-items:center;}
+.pf-tg-l{grid-area:l;font-size:12.5px;font-weight:600;color:var(--ink-2);display:flex;align-items:center;gap:5px;}
+.pf-tg-u{font-size:10.5px;color:var(--sub);font-weight:500;}
+.pf-tg-rev{font-size:9.5px;font-weight:700;color:var(--gold,#a9722a);background:color-mix(in srgb,var(--gold,#a9722a) 15%,transparent);border-radius:4px;padding:0 4px;}
+.pf-tg-in{grid-area:in;text-align:right;font-variant-numeric:tabular-nums;}
+.pf-tg-in::placeholder{color:var(--muted,#9c968b);font-size:12px;}
+.pf-tg-help{grid-area:help;font-size:10px;color:var(--sub);}
 .pf-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:4px;}
 .pf-del{font:inherit;font-size:12px;color:var(--critical-ink);background:none;border:1px solid color-mix(in srgb,var(--critical-ink) 35%,var(--line));border-radius:8px;padding:7px 12px;cursor:pointer;}
 .pf-cancel{font:inherit;font-size:13px;color:var(--ink-2);background:none;border:0;padding:7px 12px;cursor:pointer;}

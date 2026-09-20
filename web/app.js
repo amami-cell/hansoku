@@ -76,7 +76,8 @@ let CAMP_FILTER = { status: "all", kind: "all" };   // 施策の効果ビュー�
 // 販促の目標（施策id→円）。本番は Neon（/api/targets）に共有保存、
 // プレビュー等 API が無い所では端末内（localStorage）に保存する。
 let API_OK = false;              // 目標APIが使えるか（本番=true）
-let SERVER_TARGETS = {};         // id → {value, by, at}（サーバ値）
+let SERVER_TARGETS = {};         // id → {value, by, at}（売上のみ・後方互換）
+let SERVER_TARGETS_M = {};       // id → { metric: {value, by, at} }（全指標）
 let GOALS = {};                  // id → 円（端末内フォールバック）
 
 function loadGoals() { try { return JSON.parse(localStorage.getItem("hansoku_goals") || "{}"); } catch (e) { return {}; } }
@@ -89,7 +90,70 @@ async function fetchServerTargets() {
     if (!res.ok || !ct.includes("application/json")) return;   // プレビューはHTMLが返る→端末内保存へ
     const data = await res.json();
     if (data && data.targets) { SERVER_TARGETS = data.targets; API_OK = true; }
+    if (data && data.targets_by_metric) SERVER_TARGETS_M = data.targets_by_metric;
   } catch (e) { /* API 無し → 端末内保存で動く */ }
+}
+
+// ── 目標の指標（販促入力フォームで設定する項目）───────────────────────────
+// 現システムで「振り返り数値」を出せるものだけ。人件費率/販管費/診断スコアはデータ源が
+// 無いので載せない。higherBetter=false（原価率）は達成色を反転（低いほど良い）。
+const TARGET_METRICS = [
+  { key: "sales", label: "売上目標", unit: "円", higher: true },
+  { key: "covers", label: "客数", unit: "人", higher: true },
+  { key: "avg_check", label: "客単価", unit: "円", higher: true },
+  { key: "cost_rate", label: "原価率", unit: "%", higher: false },
+  { key: "food_cost_rate", label: "フード原価率", unit: "%", higher: false },
+  { key: "drink_cost_rate", label: "ドリンク原価率", unit: "%", higher: false },
+  { key: "hour_sales", label: "時間帯売上", unit: "円", higher: true, daily: true },
+  { key: "hour_covers", label: "時間帯集客", unit: "人", higher: true, daily: true },
+  { key: "hour_avg_check", label: "時間帯客単価", unit: "円", higher: true, daily: true },
+];
+const shiftYear = (ym, d) => { if (!ym) return ""; const [y, m] = ym.split("-"); return `${+y + d}-${m}`; };
+// 期間の月一覧（既存 monthRange を使う。範囲不正なら空/単月）。
+const monthsBetween = (a, b) => (a && b && b >= a) ? monthRange(a, b) : (a ? [a] : []);
+const _msales = (code, m) => (((DATA.monthly || {})[code] || {})[m] || {}).sales;
+const _mcovers = (code, m) => ((DATA.covers || {})[code] || {})[m];
+const _mcost = (code, m) => ((DATA.cost_rate || {})[code] || {})[m];
+function _latestMonth(code) {
+  const ks = Object.keys((DATA.monthly || {})[code] || {}); ks.sort();
+  return ks.length ? ks[ks.length - 1] : "";
+}
+// 販促の「現状/参考」値（薄字）。通常＝前年同期の実績、常設（終了日なし）＝開始〜直近の実績。
+// 時間帯は代表日の1日ぶん（期間に依らない）。取れないものは null（画面では「―」）。
+function currentTargetValue(metric, code, startYM, endYM, openEnded) {
+  if (!code || !startYM) return null;
+  if (metric === "hour_sales" || metric === "hour_covers" || metric === "hour_avg_check") {
+    const per = (DATA.hourly || {})[code]; if (!per) return null;
+    let s = 0, c = 0;
+    for (const h of Object.keys(per)) { s += (per[h] || {}).sales || 0; c += (per[h] || {}).covers || 0; }
+    if (metric === "hour_sales") return s || null;
+    if (metric === "hour_covers") return c || null;
+    return c ? Math.round(s / c) : null;
+  }
+  const months = openEnded
+    ? monthsBetween(startYM, _latestMonth(code))
+    : monthsBetween(shiftYear(startYM, -1), shiftYear(endYM || startYM, -1));
+  if (!months.length) return null;
+  let sales = 0, covers = 0, costNum = 0, costDen = 0, sN = 0, cN = 0;
+  for (const m of months) {
+    const sv = _msales(code, m), cv = _mcovers(code, m), cr = _mcost(code, m);
+    if (typeof sv === "number") { sales += sv; sN++; }
+    if (typeof cv === "number") { covers += cv; cN++; }
+    if (typeof sv === "number" && typeof cr === "number") { costNum += sv * cr; costDen += sv; }
+  }
+  if (metric === "sales") return sN ? Math.round(sales) : null;
+  if (metric === "covers") return cN ? Math.round(covers) : null;
+  if (metric === "avg_check") return (covers > 0 && sN) ? Math.round(sales / covers) : null;
+  if (metric === "cost_rate") return costDen ? +(costNum / costDen).toFixed(1) : null;
+  return null; // food/drink 原価率は現状データ源なし
+}
+// 保存済みの目標（指標別）。サーバ値（本番）→ 端末内フォールバック。
+function targetMetricOf(c, metric) {
+  const k = campKey(c);
+  const byM = (SERVER_TARGETS_M[k] || SERVER_TARGETS_M[c.id]);
+  if (byM && byM[metric] && typeof byM[metric].value === "number") return byM[metric].value;
+  if (metric === "sales") { const v = targetOf(c); if (v != null) return v; }
+  return null;
 }
 
 // 目標とメモは施策の「回」にぶら下がる。鍵は id@開始年（例 r1006-osusume@2026）。
@@ -1706,6 +1770,7 @@ function planToCamp(p) {
     id: p.id, stores: [p.store_code], scope_all: false, title: p.title,
     kind: p.kind || "dev", bucket: p.bucket || undefined,
     start: p.start, end: p.end, planned: true, plan_goal: p.goal, plan_note: p.note || "",
+    open_ended: !!p.open_ended, owner: p.owner || "",
   };
 }
 function applyPlans() {
@@ -1779,10 +1844,30 @@ async function uploadCreative(file, campaign, store) {
 // 販促プランの起票・編集モーダル。seed で初期値（複製元 or 既存プラン）を渡す。
 // 保存は /api/plans（ログイン必須）。開放モードや未ログインでは呼ばれない。
 const PLAN_KIND_OPTS = ["osusume", "lunch", "bounenkai", "gm", "dev", "closure"];
+// 目標グリッドの薄字（現状値）を、いま選ばれている店舗・期間で計算し直して placeholder に出す。
+function refreshTargetPlaceholders() {
+  const g = id => document.getElementById(id);
+  const code = g("pf-store") ? g("pf-store").value : "";
+  const sm = g("pf-start") ? g("pf-start").value : "";
+  const em = g("pf-end") ? g("pf-end").value : "";
+  const openEnded = !em;
+  for (const mt of TARGET_METRICS) {
+    const inp = g("pf-tg-" + mt.key); if (!inp) continue;
+    const cur = currentTargetValue(mt.key, code, sm, em, openEnded);
+    inp.placeholder = cur == null ? "―（データなし）"
+      : (mt.unit === "円" ? man(cur) + "万" : mt.unit === "%" ? cur + "%" : ten(cur) + mt.unit) + "（現状）";
+    const help = g("pf-tghelp-" + mt.key);
+    if (help) {
+      const per = mt.daily ? "時間帯データの代表日・1日ぶん"
+        : openEnded ? "開始〜直近の実績" : "前年同期の実績";
+      help.textContent = cur == null ? "（現状値なし）" : `薄字＝${per}`;
+    }
+  }
+}
 function openPlanEditor(seed) {
   if (!PLANS_API_OK) { alert("販促の起票は本番（ログイン済み）でのみ使えます。"); return; }
   const s = seed || {};
-  const code = s.store_code;
+  const code = s.store_code || "";
   const cats = (catRules(code) && catRules(code).categories || []).map(c => c.name);
   const ym = d => (d ? String(d).slice(0, 7) : "");
   let ov = document.getElementById("planedit");
@@ -1792,11 +1877,28 @@ function openPlanEditor(seed) {
   const kindOpts = PLAN_KIND_OPTS.map(k => `<option value="${k}"${(s.kind || "osusume") === k ? " selected" : ""}>${esc(kindOf(k).label)}</option>`).join("");
   const bucketOpts = ['<option value="">（指定なし）</option>']
     .concat(cats.map(n => `<option value="${esc(n)}"${s.bucket === n ? " selected" : ""}>${esc(n)}</option>`)).join("");
+  const storeOpts = (DATA.stores || []).map(st =>
+    `<option value="${esc(st.code)}"${st.code === code ? " selected" : ""}>${esc(st.name)}（${esc(st.code)}）</option>`).join("");
+  // 目標グリッド：この販促に紐づく既存目標があれば value に入れる（seed.__camp があるとき）。
+  const camp = s.__camp || (s.id ? { id: bareId(s.id), start: s.start, key: campKey({ id: s.id, start: s.start }) } : null);
+  const tgRows = TARGET_METRICS.map(mt => {
+    const saved = camp ? targetMetricOf(camp, mt.key) : null;
+    const suf = mt.unit === "円" ? "円" : mt.unit === "%" ? "％" : mt.unit;
+    return `<div class="pf-tg">
+      <span class="pf-tg-l">${esc(mt.label)}<span class="pf-tg-u">${esc(suf)}</span>${mt.higher ? "" : '<span class="pf-tg-rev" title="低いほど良い">↓良</span>'}</span>
+      <input class="pf-in pf-tg-in" id="pf-tg-${mt.key}" type="number" inputmode="decimal" step="any" value="${saved != null ? saved : ""}">
+      <span class="pf-tg-help" id="pf-tghelp-${mt.key}"></span>
+    </div>`;
+  }).join("");
   ov.innerHTML = `<div class="crprev-bd" data-planclose></div>
     <div class="crprev-box planbox" role="dialog" aria-modal="true">
       <div class="crprev-bar"><span class="crprev-title">${s.id ? "販促プランを編集" : "販促プランを起票"}</span>
         <button class="crprev-x" type="button" data-planclose aria-label="閉じる">×</button></div>
       <div class="planform">
+        <div class="pf-row">
+          <label class="pf-l">店舗<select class="pf-in" id="pf-store">${storeOpts}</select></label>
+          <label class="pf-l">販促担当者<input class="pf-in" id="pf-owner" type="text" value="${esc(s.owner || ME.name || "")}" placeholder="氏名"></label>
+        </div>
         <label class="pf-l">販促名<input class="pf-in" id="pf-title" type="text" value="${esc(s.title || "")}" placeholder="例：秋のパフェフェア"></label>
         <div class="pf-row">
           <label class="pf-l">種類<select class="pf-in" id="pf-kind">${kindOpts}</select></label>
@@ -1804,9 +1906,11 @@ function openPlanEditor(seed) {
         </div>
         <div class="pf-row">
           <label class="pf-l">開始月<input class="pf-in" id="pf-start" type="month" value="${esc(ym(s.start))}"></label>
-          <label class="pf-l">終了月<input class="pf-in" id="pf-end" type="month" value="${esc(ym(s.end))}"></label>
+          <label class="pf-l">終了月<span class="pf-hint">空欄＝常設</span><input class="pf-in" id="pf-end" type="month" value="${esc(s.open_ended ? "" : ym(s.end))}"></label>
         </div>
-        <label class="pf-l">目標（円・任意）<input class="pf-in" id="pf-goal" type="number" inputmode="numeric" value="${s.goal != null ? s.goal : ""}" placeholder="例：1500000"></label>
+        <label class="pf-l">販促物（PDF・画像）<input class="pf-in" id="pf-pdf" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*,application/pdf"></label>
+        <div class="pf-tg-head">目標数値（入れた項目だけ保存。薄字＝現状の参考値）</div>
+        <div class="pf-tg-grid">${tgRows}</div>
         <label class="pf-l">メモ（任意）<textarea class="pf-in" id="pf-note" rows="2" placeholder="狙い・段取りなど">${esc(s.note || "")}</textarea></label>
         <div class="pf-msg" id="pf-msg" hidden></div>
         <div class="pf-actions">
@@ -1820,21 +1924,35 @@ function openPlanEditor(seed) {
     </div>`;
   document.body.appendChild(ov);
   ov.addEventListener("click", e => { if (e.target.hasAttribute("data-planclose")) ov.remove(); });
-  ov.querySelector("#pf-save").addEventListener("click", () => savePlanFromForm(s, code));
+  ov.querySelector("#pf-save").addEventListener("click", () => savePlanFromForm(s));
   const del = ov.querySelector("[data-plandelete]");
   if (del) del.addEventListener("click", () => deletePlan(del.dataset.plandelete));
+  // 店舗・期間を変えたら薄字（現状値）を計算し直す。
+  ["pf-store", "pf-start", "pf-end"].forEach(id => {
+    const el = ov.querySelector("#" + id); if (el) el.addEventListener("change", refreshTargetPlaceholders);
+  });
+  refreshTargetPlaceholders();
   const t = ov.querySelector("#pf-title"); if (t) t.focus();
 }
 function lastDayOfMonth(ym) { const [y, m] = ym.split("-").map(Number); return new Date(y, m, 0).getDate(); }
-async function savePlanFromForm(seed, code) {
+async function savePlanFromForm(seed) {
   const g = id => document.getElementById(id);
   const msg = g("pf-msg");
   const show = m => { if (msg) { msg.textContent = m; msg.hidden = false; } };
   const title = (g("pf-title").value || "").trim();
+  const code = g("pf-store") ? g("pf-store").value : (seed.store_code || "");
   const sm = g("pf-start").value, em = g("pf-end").value;
+  if (!code) return show("店舗を選んでください。");
   if (!title) return show("販促名を入れてください。");
-  if (!sm || !em) return show("開始月と終了月を入れてください。");
-  if (em < sm) return show("終了月は開始月より後にしてください。");
+  if (!sm) return show("開始月を入れてください。");
+  // 終了月が空＝常設（終了日なし）。ご指定どおり確認ポップアップ→Yesで無期限に進む。
+  let openEnded = false;
+  if (!em) {
+    if (!window.confirm("終了日が未入力です。無し（常設）で進めますか？")) return;
+    openEnded = true;
+  } else if (em < sm) {
+    return show("終了月は開始月より後にしてください。");
+  }
   const payload = {
     id: seed.id || "",
     store_code: code,
@@ -1842,8 +1960,10 @@ async function savePlanFromForm(seed, code) {
     kind: g("pf-kind").value,
     bucket: g("pf-bucket").value,
     start: `${sm}-01`,
-    end: `${em}-${String(lastDayOfMonth(em)).padStart(2, "0")}`,
-    goal: g("pf-goal").value === "" ? null : Number(g("pf-goal").value),
+    end: openEnded ? `${sm}-01` : `${em}-${String(lastDayOfMonth(em)).padStart(2, "0")}`,
+    open_ended: openEnded,
+    owner: (g("pf-owner").value || "").trim(),
+    goal: null,   // 目標は下の目標グリッド（sales）で保存する
     note: (g("pf-note").value || "").trim(),
     source_id: seed.source_id || "",
   };
@@ -1853,16 +1973,49 @@ async function savePlanFromForm(seed, code) {
     if (res.status === 401) return show("保存にはログインが必要です。");
     if (!res.ok) { const d = await res.json().catch(() => ({})); return show(d.detail || "保存に失敗しました。"); }
     const data = await res.json();
+    let plan = null;
     if (data && data.plan) {
-      const i = PLANS.findIndex(p => p.id === data.plan.id);
-      if (i >= 0) PLANS[i] = data.plan; else PLANS.push(data.plan);
+      plan = data.plan;
+      const i = PLANS.findIndex(p => p.id === plan.id);
+      if (i >= 0) PLANS[i] = plan; else PLANS.push(plan);
       applyPlans();
+    }
+    // 目標（指標別）を保存。鍵は施策キー（id@開始年）。空欄は削除扱い。
+    if (plan) {
+      const key = campKey(planToCamp(plan));
+      await saveTargetsFromForm(key);
+      // 販促物PDF/画像があれば添付（プラン保存後、確定した id にひも付け）。
+      const pf = g("pf-pdf"); const file = pf && pf.files && pf.files[0];
+      if (file) { try { await uploadCreative(file, plan.id, code); } catch (e) { /* 添付失敗は握りつぶさず後述メッセージ */ } }
     }
     const ov = document.getElementById("planedit"); if (ov) ov.remove();
     render();
   } catch (e) {
     show("保存に失敗しました（通信エラー）。");
   } finally { if (saveBtn) { saveBtn.disabled = false; } }
+}
+// 目標グリッドの各指標をサーバ保存（/api/targets）。値ありは upsert、空欄は削除。
+async function saveTargetsFromForm(key) {
+  for (const mt of TARGET_METRICS) {
+    const inp = document.getElementById("pf-tg-" + mt.key); if (!inp) continue;
+    const raw = (inp.value || "").replace(/[,，\s]/g, "");
+    const target = raw === "" ? null : Number(raw);
+    if (target !== null && !Number.isFinite(target)) continue;
+    try {
+      const res = await fetch("/api/targets", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: key, metric: mt.key, target }),
+      });
+      if (res.ok) {
+        SERVER_TARGETS_M[key] = SERVER_TARGETS_M[key] || {};
+        if (target === null) { delete SERVER_TARGETS_M[key][mt.key]; if (mt.key === "sales") delete SERVER_TARGETS[key]; }
+        else {
+          SERVER_TARGETS_M[key][mt.key] = { value: target, by: "自分", at: new Date().toISOString() };
+          if (mt.key === "sales") SERVER_TARGETS[key] = { value: target, by: "自分", at: new Date().toISOString() };
+        }
+      }
+    } catch (e) { /* 1指標の失敗で全体を止めない */ }
+  }
 }
 async function deletePlan(id) {
   if (!id) return;
