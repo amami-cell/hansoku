@@ -2034,12 +2034,19 @@ function openPlanEditor(seed) {
     `<option value="${esc(st.code)}"${st.code === code ? " selected" : ""}>${esc(st.name)}（${esc(st.code)}）</option>`).join("");
   // 目標グリッド：この販促に紐づく既存目標があれば value に入れる（seed.__camp があるとき）。
   const camp = s.__camp || (s.id ? { id: bareId(s.id), start: s.start, key: campKey({ id: s.id, start: s.start }) } : null);
+  // 複製起票では、複製元の目標を初期値として引き継ぐ（seed.__seedTargets）。既存プランの
+  // 保存済み目標があればそちらを優先。どちらも「入れた項目だけ保存」なので後で消せる。
+  const seedT = s.__seedTargets || null;
+  let inherited = 0;
   const tgRows = TARGET_METRICS.map(mt => {
     const saved = camp ? targetMetricOf(camp, mt.key) : null;
+    const seedVal = (saved == null && seedT && seedT[mt.key] != null) ? seedT[mt.key] : null;
+    if (seedVal != null) inherited += 1;
+    const val = saved != null ? saved : (seedVal != null ? seedVal : "");
     const suf = mt.unit === "円" ? "円" : mt.unit === "%" ? "％" : mt.unit;
     return `<div class="pf-tg">
       <span class="pf-tg-l">${esc(mt.label)}<span class="pf-tg-u">${esc(suf)}</span>${mt.higher ? "" : '<span class="pf-tg-rev" title="低いほど良い">↓良</span>'}</span>
-      <input class="pf-in pf-tg-in" id="pf-tg-${mt.key}" type="number" inputmode="decimal" step="any" value="${saved != null ? saved : ""}">
+      <input class="pf-in pf-tg-in" id="pf-tg-${mt.key}" type="number" inputmode="decimal" step="any" value="${val !== "" ? val : ""}">
       <button type="button" class="pf-tg-fill" data-fillcur="${mt.key}" title="現状（薄字）の値を目標欄に入れる">現状</button>
       <span class="pf-tg-help" id="pf-tghelp-${mt.key}"></span>
       <span class="pf-tg-diff" id="pf-tgdiff-${mt.key}"></span>
@@ -2064,7 +2071,7 @@ function openPlanEditor(seed) {
           <label class="pf-l">終了月<span class="pf-hint">空欄＝常設</span><input class="pf-in" id="pf-end" type="month" value="${esc(s.open_ended ? "" : ym(s.end))}"></label>
         </div>
         <label class="pf-l">販促物（PDF・画像）<input class="pf-in" id="pf-pdf" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*,application/pdf"></label>
-        <div class="pf-tg-head">目標数値（入れた項目だけ保存。薄字＝現状の参考値）</div>
+        <div class="pf-tg-head">目標数値（入れた項目だけ保存。薄字＝現状の参考値）${inherited ? `<span class="pf-tg-inherit">複製元から${inherited}件引き継ぎ（要確認）</span>` : ""}</div>
         <div class="pf-tg-grid">${tgRows}</div>
         <label class="pf-l">メモ（任意）<textarea class="pf-in" id="pf-note" rows="2" placeholder="狙い・段取りなど">${esc(s.note || "")}</textarea></label>
         <div class="pf-msg" id="pf-msg" hidden></div>
@@ -2215,10 +2222,14 @@ function duplicatePlan(campId, code) {
   const c = (DATA.campaigns || []).find(x => x.id === campId);
   if (!c) { openPlanEditor({ store_code: code }); return; }
   const plus1y = d => { if (!d) return ""; const [y, m, dd] = String(d).slice(0, 10).split("-"); return `${+y + 1}-${m}-${dd}`; };
+  // 複製元の目標（指標別）を初期値として引き継ぐ。新起票は別キーなので value に流し込む。
+  const seedTargets = {};
+  for (const mt of TARGET_METRICS) { const v = targetMetricOf(c, mt.key); if (v != null) seedTargets[mt.key] = v; }
   openPlanEditor({
     store_code: code, title: c.title, kind: c.kind || "osusume", bucket: c.bucket || "",
     start: plus1y(c.start), end: plus1y(c.end || c.start), goal: (isPlan(c) ? c.plan_goal : targetOf(c)) || null,
     note: "", source_id: c.id,
+    __seedTargets: Object.keys(seedTargets).length ? seedTargets : null,
   });
 }
 

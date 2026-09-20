@@ -17,6 +17,7 @@ const src = fs.readFileSync(path.join(ROOT, "web/app.js"), "utf8");
 function loadForm(data) {
   const byId = {};
   const CAP = { plans: [], targets: [] };
+  const created = [];
   let seq = 0;
   const mkEl = (id) => ({
     id: id || "", _html: "", className: "", style: {}, files: [], value: "",
@@ -34,8 +35,9 @@ function loadForm(data) {
   const sandbox = {
     console, Math, Date, JSON, Intl, Number, String, Object, Array, setTimeout,
     document: {
-      getElementById: getEl, createElement: () => mkEl(), body: { appendChild() {} },
-      documentElement: mkEl(), addEventListener() {}, querySelectorAll: () => [],
+      getElementById: getEl, createElement: () => { const e = mkEl(); created.push(e); return e; },
+      body: { appendChild() {} },
+      documentElement: mkEl(), addEventListener() {}, querySelector: () => mkEl(), querySelectorAll: () => [],
     },
     window: { prompt: () => null, confirm: () => true, matchMedia: () => ({ matches: false }), addEventListener() {}, scrollTo() {} },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
@@ -57,7 +59,7 @@ function loadForm(data) {
   const ctx = vm.createContext(sandbox);
   vm.runInContext(src, ctx, { filename: "app.js" });
   vm.runInContext(`DATA=${JSON.stringify(data)}; PLANS=[]; PLANS_API_OK=true; ME={name:"テスト担当"}; BASE_CAMPAIGNS=null; render=function(){};`, ctx);
-  return { ctx, byId, CAP, getEl, call: (e) => vm.runInContext(e, ctx) };
+  return { ctx, byId, CAP, getEl, call: (e) => vm.runInContext(e, ctx), lastOverlay: () => created[created.length - 1] };
 }
 
 const base = {
@@ -219,6 +221,18 @@ await test("スコアボードの担当者フィルタで絞れる", () => {
   h = call(`BOARD_OWNER="田中"; renderTargetBoard()`);
   assert.ok(h.includes("Aの販促") && !h.includes("Bの販促"), "田中で絞るとAだけ");
   call(`BOARD_OWNER="all"`);   // 後続テストに影響させない
+});
+
+await test("複製起票：複製元の目標が初期値として引き継がれる", () => {
+  const h = loadForm(base);
+  h.call(`SERVER_TARGETS_M = {"src@2025":{sales:{value:16000000}, cost_rate:{value:28}}};
+    DATA.campaigns=[{id:"src",stores:["1160"],title:"昨年の秋パフェ",kind:"osusume",start:"2025-11-01",end:"2025-12-31"}];`);
+  h.call(`duplicatePlan("src","1160")`);
+  const html = h.lastOverlay().innerHTML || "";
+  assert.ok(html.includes("複製元から") && html.includes("引き継ぎ"), "引き継ぎ注記が出る");
+  assert.ok(html.includes('value="16000000"'), "売上目標が初期値に入る");
+  assert.ok(html.includes('value="28"'), "原価率目標が初期値に入る");
+  assert.ok(html.includes("昨年の秋パフェ"), "販促名も複製される");
 });
 
 await test("目標未入力の販促だけならスコアボードは非表示", () => {
