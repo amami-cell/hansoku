@@ -99,3 +99,22 @@ class Test売上が無い月は率を出さない:
         got = actual_cost_by_month(w, months=["2026-08"])["1069"]["2026-08"]
         # 0除算を0%にすると lower_better の原価率で「達成」に見えてしまう
         assert got["rate"] is None and got["total"] == 1170
+
+
+class Test月の並び:
+    """cli の actual-cost が使う月リスト。年またぎで止まらないこと。"""
+
+    def test_年をまたいで続く(self):
+        from hansoku.cli import _month_range
+
+        assert _month_range("2025-11", "2026-02") == ["2025-11", "2025-12", "2026-01", "2026-02"]
+
+    def test_同じ月なら1件(self):
+        from hansoku.cli import _month_range
+
+        assert _month_range("2026-08", "2026-08") == ["2026-08"]
+
+    def test_逆順なら空(self):
+        from hansoku.cli import _month_range
+
+        assert _month_range("2026-08", "2026-07") == []
