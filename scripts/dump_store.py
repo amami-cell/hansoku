@@ -110,9 +110,18 @@ def main() -> int:
             )
         )
         qby_m: dict[str, dict] = {}
+        # 画面(export)と同じく、点数は (店,月,商品名) で見出し跨ぎ合算、見出しは最後の値を採る。
+        import re as _re0
+        qsum_by_m: dict[str, dict] = {}   # m -> name -> 合算点数
+        glast_by_m: dict[str, dict] = {}  # m -> name -> FW見出し("NN:名前")
         for r in qrows:
             m = r["date"].strftime("%Y-%m")
-            qby_m.setdefault(m, {})[r["product_name"]] = (round(r["value"]), r["product_category"])
+            nm = r["product_name"]
+            qby_m.setdefault(m, {})[nm] = (round(r["value"]), r["product_category"])
+            qsum_by_m.setdefault(m, {})[nm] = qsum_by_m.setdefault(m, {}).get(nm, 0) + r["value"]
+            cat = r.get("product_category")
+            if cat and _re0.match(r"^\s*\d+\s*[:：]", str(cat)):
+                glast_by_m.setdefault(m, {})[nm] = str(cat)
         # 対象月: MONTHS 指定があればそれ、無ければ最新の商品月。
         zmonths = [m.strip() for m in os.environ.get("MONTHS", "").split(",") if m.strip()]
         if not zmonths and pby_m:
@@ -189,64 +198,61 @@ def main() -> int:
             for name, (q, v) in items_hd:
                 print(f"    {name}: 累計{v:,}円 / {q:,}点")
 
-        # 画面と同じパイプライン（サブ畳み→品目区分・group適用）を再現して、各月の
-        # 「その他」区分に実際に何が残るかを出す。区分立て（アルコール等）の効果確認用。
+        # 画面(export)と同じパイプライン（同名×別見出しの売上行を保持し、点数は名前で合算・
+        # サブ畳み→合算→品目区分）を忠実に再現。各月の区分結果と、指定月の中身を出す。
         try:
             from hansoku.web.export import _categories_for_month, _nest_zero_subs
         except Exception as e:  # noqa: BLE001
             _nest_zero_subs = None
             print(f"\n（品目区分パイプライン読込に失敗: {e}）")
+
+        def _items_for(m: str) -> list[dict]:
+            """export と同じ組み立て: 売上行(name×見出し)ごとに1件＋点数のみ商品。"""
+            out: list[dict] = []
+            seen: set[str] = set()
+            qsum = qsum_by_m.get(m, {})
+            glast = glast_by_m.get(m, {})
+            for name, sval, _cat in pby_m.get(m, []):
+                seen.add(name)
+                q = qsum.get(name)
+                out.append({"name": name, "sales": round(sval), "rank": None,
+                            "qty": round(q) if q else None, "group": glast.get(name)})
+            for name, q in qsum.items():        # 売上行の無い点数のみ商品
+                if name in seen or not q:
+                    continue
+                out.append({"name": name, "sales": 0, "rank": None,
+                            "qty": round(q), "group": glast.get(name)})
+            return out
+
         if rules and _nest_zero_subs is not None:
             other_name = rules.get("other", "その他")
-            months_all = sorted(set(pby_m) | set(qby_m))
+            months_all = sorted(set(pby_m) | set(qsum_by_m))
             recent = months_all[-4:]
             print(f"\n== 品目区分の最終結果（画面と同じ集計・直近{len(recent)}ヶ月）==")
             for m in recent:
-                items: list[dict] = []
-                smap = {n: v for n, v, c in pby_m.get(m, [])}
-                qmap = qby_m.get(m, {})
-                names = set(smap) | set(qmap)
-                for name in names:
-                    sval = smap.get(name, 0)
-                    q, grp = qmap.get(name, (0, None))
-                    items.append({"name": name, "sales": sval, "rank": None,
-                                  "qty": round(q) if q else None, "group": grp})
-                items = _nest_zero_subs(items, rules)
+                items = _nest_zero_subs(_items_for(m), rules)
                 total = sum(p["sales"] for p in items)
                 cats = _categories_for_month(items, rules, total)
                 line = "  ".join(f"{c['name']}={c['sales']:,}円({c['count']}品)" for c in cats)
                 print(f"\n  [{m}] 合計{round(total):,}円")
                 print(f"    {line}")
-                # その他の中身（トップに残った売上つき商品）を列挙
                 others = sorted(
-                    [(p["name"], round(p["sales"]))
-                     for p in items
+                    [(p["name"], round(p["sales"])) for p in items
                      if classify_category(p.get("name", ""), rules, p.get("group")) == other_name
-                     and (p.get("sales") or 0) > 0],
-                    key=lambda x: -x[1])
+                     and (p.get("sales") or 0) > 0], key=lambda x: -x[1])
                 if others:
-                    print(f"    └ その他の売上つき中身 {len(others)}件:")
-                    for name, val in others:
-                        print(f"        {name}: {val:,}円")
+                    print(f"    └ その他の売上つき中身 {len(others)}件: "
+                          + ", ".join(f"{n}={v:,}円" for n, v in others))
                 else:
-                    print("    └ その他に売上つき商品なし（0円）")
+                    print("    └ その他に売上つき商品なし（売上0）")
 
-            # 詳細ダンプ: 代表1ヶ月（既定は直近の完全月）について
-            #  (A) その他に落ちる全商品（売上0含む）を列挙
-            #  (B) 各メイン商品に畳んだサブ（0円内訳）を親ごとに一覧
+            # 詳細ダンプ: DETAIL_MONTH（既定=直近の完全月）について
+            #  (A) その他に入る全商品（売上0含む）、(B) 各メインに畳んだサブ一覧。
             detail_m = os.environ.get("DETAIL_MONTH", "").strip()
             if not detail_m:
                 detail_m = recent[-2] if len(recent) >= 2 else (recent[-1] if recent else "")
             if detail_m:
-                items = []
-                smap = {n: v for n, v, c in pby_m.get(detail_m, [])}
-                qmap = qby_m.get(detail_m, {})
-                for name in set(smap) | set(qmap):
-                    q, grp = qmap.get(name, (0, None))
-                    items.append({"name": name, "sales": smap.get(name, 0), "rank": None,
-                                  "qty": round(q) if q else None, "group": grp})
-                items = _nest_zero_subs(items, rules)
-
+                items = _nest_zero_subs(_items_for(detail_m), rules)
                 others_all = sorted(
                     [(p["name"], round(p.get("sales") or 0), p.get("qty"), p.get("group"))
                      for p in items
@@ -261,12 +267,14 @@ def main() -> int:
                 parents = [p for p in items if p.get("subs")]
                 parents.sort(key=lambda p: -(p.get("sales") or 0))
                 nsub = sum(len(p["subs"]) for p in parents)
-                print(f"\n== [{detail_m}] 各メイン商品に割り振ったサブ（0円内訳）"
+                print(f"\n== [{detail_m}] 各メイン商品に割り振ったサブ"
                       f"{len(parents)}メイン・計{nsub}サブ ==")
                 for p in parents:
                     tag = "（表示専用の束ね親）" if p.get("synthetic") else ""
+                    q = p.get("qty")
+                    qtxt = f" / 数量{q:,}点" if q else ""
                     subs = sorted(p["subs"], key=lambda s: -(s.get("qty") or 0))
-                    print(f"\n  ■ {p['name']}  売上{round(p.get('sales') or 0):,}円 / "
+                    print(f"\n  ■ {p['name']}  売上{round(p.get('sales') or 0):,}円{qtxt} / "
                           f"サブ{len(subs)}件{tag}")
                     for s in subs:
                         sv = round(s.get("sales") or 0)

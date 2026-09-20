@@ -15,6 +15,10 @@ on:
         description: "正体を追う商品名（カンマ区切り・部分一致）"
         required: false
         default: ""
+      detail_month:
+        description: "詳細（その他の中身・サブ一覧）を出す月 YYYY-MM（空=直近の完全月）"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -41,6 +45,7 @@ jobs:
           STORE: ${{ github.event.inputs.store }}
           MONTHS: ${{ github.event.inputs.months }}
           PROBE_NAME: ${{ github.event.inputs.probe }}
+          DETAIL_MONTH: ${{ github.event.inputs.detail_month }}
         run: |
           set -o pipefail
           python scripts/dump_store.py | tee -a "$GITHUB_STEP_SUMMARY"

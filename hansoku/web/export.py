@@ -172,6 +172,7 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
     sub_exact = (rules or {}).get("sub_products") or {}
     sub_contains = (rules or {}).get("sub_products_contains") or {}
     qty_rollup = set((rules or {}).get("sub_qty_rollup") or [])
+    merge_cfg = (rules or {}).get("sub_merge_prefixes") or {}
     if not zero_groups and not sub_exact and not sub_contains:
         return items
     by_name: dict[str, dict] = {}
@@ -184,15 +185,15 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
     for it in items:
         group = it.get("group")
         parent_name: str | None = None
-        # 1) マップ済みFW見出し → 親メインへ。
-        if group and zero_groups:
+        # 1) 商品名でのサブ指定（完全一致→部分一致）を最優先。マップ済み見出しや
+        #    「その他の内訳」送りより先に判定する（例 "P・…"→"Pドリンク", "ICE"→その他の内訳,
+        #    "ペアリングリキュール…"→ペアリング）。見出しでの束ねを名前で上書きできる。
+        parent_name = _match_sub_parent(it.get("name"), sub_exact, sub_contains)
+        # 2) 次にマップ済みFW見出し → 親メインへ。
+        if parent_name is None and group and zero_groups:
             label = _group_label(group)
             if label in zero_groups:
                 parent_name = zero_groups[label]
-        # 2) 商品名でのサブ指定（完全一致→部分一致）。見出しの有無に関わらず優先し、
-        #    未マップ見出しの「その他の内訳」送りより先に判定する（例 "P・…"→"Pドリンク"）。
-        if parent_name is None:
-            parent_name = _match_sub_parent(it.get("name"), sub_exact, sub_contains)
         # 3) それでも決まらず、未マップ見出し かつ 売上0 ＝ 真の0円選択だけ「その他の内訳」へ。
         #    未マップ見出しでも売上のある実売れ商品（13:紅茶=レモン, 14:アルコール等）は
         #    トップに残す＝品目区分で正しく分類する（groups で上書き可）。
@@ -219,12 +220,50 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
         if s > 0:                       # 売上のあるサブだけ親の売上に足す（点数は足さない）
             parent["sales"] = (parent.get("sales") or 0) + s
     tops.extend(synthetic.values())     # 新設した親をトップに加える
+    # 指定の親は、サブを正規化名で合算する（例 "TOシングル ピスタチオ" と "ピスタチオ" を
+    # 1つに＝数量・売上を合計）。接頭辞違いの同一風味をまとめて見せる。
+    if merge_cfg:
+        for p in tops:
+            pfx = merge_cfg.get(p.get("name"))
+            if pfx and p.get("subs"):
+                p["subs"] = _merge_subs(p["subs"], pfx)
     # 指定の親は 点数＝サブ点数の合計 を数量として持たせる（合計出数を1メインで見せる）。
     if qty_rollup:
         for p in tops:
             if p.get("name") in qty_rollup and p.get("subs"):
                 p["qty"] = sum((s.get("qty") or 0) for s in p["subs"])
     return tops
+
+
+def _merge_subs(subs: list[dict], strip_prefixes) -> list[dict]:
+    """サブを正規化名で合算する。接頭辞（例 "TOシングル "）を落とした名前をキーに、
+    数量・売上・原価・粗利を合計。表示名は正規化名。並びは初出順。"""
+    prefixes = [p for p in (strip_prefixes or []) if p]
+
+    def norm(n: str | None) -> str:
+        s = (n or "").strip()
+        for p in prefixes:
+            if s.startswith(p):
+                return s[len(p):].strip()
+        return s
+
+    order: list[str] = []
+    groups: dict[str, dict] = {}
+    for s in subs:
+        key = norm(s.get("name"))
+        g = groups.get(key)
+        if g is None:
+            g = {"name": key, "qty": None, "sales": 0}
+            groups[key] = g
+            order.append(key)
+        q = s.get("qty")
+        if q is not None:
+            g["qty"] = (g["qty"] or 0) + q
+        g["sales"] = (g.get("sales") or 0) + (s.get("sales") or 0)
+        for k in ("cost", "gross"):
+            if k in s:
+                g[k] = (g.get(k) or 0) + s[k]
+    return [groups[k] for k in order]
 
 
 def load_lunch(path: Path | None = None) -> list[dict]:

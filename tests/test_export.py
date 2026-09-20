@@ -116,6 +116,57 @@ def test_商品名サブ指定は未マップ見出しのその他内訳より�
     assert classify_category(p["name"], rules) == "ドリンク"  # ドリンク部門に入る
 
 
+def test_サブを接頭辞正規化で合算する():
+    """sub_merge_prefixes に載る親は "TOシングル X" と "X" を1つに合算（数量・売上とも）。"""
+    rules = {
+        "other": "その他",
+        "zero_groups": {
+            "テイクアウトジェラート": "TOジェラート（風味・全TO共通）",
+            "TOシングル": "TOジェラート（風味・全TO共通）",
+        },
+        "sub_merge_prefixes": {"TOジェラート（風味・全TO共通）": ["TOシングル "]},
+        "categories": [{"name": "ジェラート", "keywords": ["TOジェラート"]}],
+    }
+    items = [
+        {"name": "ピスタチオ", "sales": 14200, "qty": 284, "group": "20:テイクアウトジェラート"},
+        {"name": "TOシングル ピスタチオ", "sales": 2550, "qty": 51, "group": "22:TOシングル"},
+        {"name": "クッキー＆バニラ", "sales": 0, "qty": 237, "group": "20:テイクアウトジェラート"},
+        {"name": "TOシングル クッキー＆バニラ", "sales": 0, "qty": 78, "group": "22:TOシングル"},
+    ]
+    parent = _nest_zero_subs(items, rules)[0]
+    subs = {s["name"]: s for s in parent["subs"]}
+    assert set(subs) == {"ピスタチオ", "クッキー＆バニラ"}       # TOシングルは前置きを剥がして合算
+    assert subs["ピスタチオ"]["qty"] == 335                      # 284+51
+    assert subs["ピスタチオ"]["sales"] == 16750                  # 14200+2550
+    assert subs["クッキー＆バニラ"]["qty"] == 315                # 237+78
+
+
+def test_ICE_HOTはその他へ_ペアリングは指定親へ():
+    """商品名サブ指定は見出しマップより優先。ICE/HOT→その他の内訳、ペアリングリキュール→
+    指定の親（数量ロールアップ無しなら親の点数はNone）。"""
+    rules = {
+        "other": "その他",
+        "zero_groups": {"400ドリンク": "【セット400円紅茶】"},
+        "sub_products": {
+            "ICE": "その他の内訳", "HOT": "その他の内訳",
+            "ペアリングリキュール無し": "ペアリング", "ペアリングリキュール有り": "ペアリング",
+        },
+        "categories": [{"name": "パフェ", "keywords": ["ペアリング"]},
+                       {"name": "紅茶", "keywords": ["紅茶"]}],
+    }
+    items = [
+        {"name": "ICE", "sales": 0, "qty": 279, "group": "32:400ドリンク"},
+        {"name": "HOT", "sales": 1, "qty": 146, "group": "32:400ドリンク"},
+        {"name": "ペアリングリキュール無し", "sales": 0, "qty": 1506, "group": "32:400ドリンク"},
+    ]
+    tops = {t["name"]: t for t in _nest_zero_subs(items, rules)}
+    assert "その他の内訳" in tops and "ペアリング" in tops
+    assert {s["name"] for s in tops["その他の内訳"]["subs"]} == {"ICE", "HOT"}
+    assert classify_category("その他の内訳", rules) == "その他"
+    assert tops["ペアリング"]["qty"] is None                     # 数量ロールアップ指定なし＝内訳キーのみ
+    assert classify_category("ペアリング", rules) == "パフェ"
+
+
 def test_zero_groupsが無い店は素通し():
     """zero_groups の無い店は変換しない（内訳もトップにそのまま並ぶ・後方互換）。"""
     items = [
