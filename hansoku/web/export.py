@@ -165,10 +165,13 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
     - サブは親の `subs`（{name, qty, sales, cost?, gross?}）に入れ、トップ階層からは外す。
     - 売上ロールアップ: サブに売上があれば親の「売上」にのみ +計上（点数は足さない＝二重計上回避）。
     - FW見出しはあるが未マップの見出しは暫定「その他の内訳」に集約（zero_groups がある店のみ）。
+    - rules["sub_qty_rollup"]（親名の一覧）に載る親は、点数(qty)＝サブ点数の合計を表示する
+      （例: "Pドリンク" ＝ 練習打ち等 "P・…" の合計出数を1メインの数量として出す）。
     返り値は畳んだあとのトップ階層の商品リスト。"""
     zero_groups = (rules or {}).get("zero_groups") or {}
     sub_exact = (rules or {}).get("sub_products") or {}
     sub_contains = (rules or {}).get("sub_products_contains") or {}
+    qty_rollup = set((rules or {}).get("sub_qty_rollup") or [])
     if not zero_groups and not sub_exact and not sub_contains:
         return items
     by_name: dict[str, dict] = {}
@@ -181,18 +184,22 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
     for it in items:
         group = it.get("group")
         parent_name: str | None = None
+        # 1) マップ済みFW見出し → 親メインへ。
         if group and zero_groups:
             label = _group_label(group)
             if label in zero_groups:
-                parent_name = zero_groups[label]     # マップ済み見出し→親メインへ
-            elif not ((it.get("sales") or 0) > 0):
-                # 未マップ見出し かつ 売上0 ＝ 真の0円選択のみ「その他の内訳」へ。
-                parent_name = ZERO_SUB_OTHER_PARENT
-            # 未マップ見出しでも売上のある実売れ商品（13:紅茶=レモン, 14:アルコール=大人の
-            # レモンティー等）はトップに残す＝品目区分で正しく分類する（groups で上書き可）。
+                parent_name = zero_groups[label]
+        # 2) 商品名でのサブ指定（完全一致→部分一致）。見出しの有無に関わらず優先し、
+        #    未マップ見出しの「その他の内訳」送りより先に判定する（例 "P・…"→"Pドリンク"）。
         if parent_name is None:
-            # 見出し無し（or zero_groups 無し）は商品名でサブ判定。
             parent_name = _match_sub_parent(it.get("name"), sub_exact, sub_contains)
+        # 3) それでも決まらず、未マップ見出し かつ 売上0 ＝ 真の0円選択だけ「その他の内訳」へ。
+        #    未マップ見出しでも売上のある実売れ商品（13:紅茶=レモン, 14:アルコール等）は
+        #    トップに残す＝品目区分で正しく分類する（groups で上書き可）。
+        if parent_name is None and group and zero_groups:
+            label = _group_label(group)
+            if label not in zero_groups and not ((it.get("sales") or 0) > 0):
+                parent_name = ZERO_SUB_OTHER_PARENT
         if parent_name is None:
             tops.append(it)   # メイン商品（サブでない）はそのまま
             continue
@@ -212,6 +219,11 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
         if s > 0:                       # 売上のあるサブだけ親の売上に足す（点数は足さない）
             parent["sales"] = (parent.get("sales") or 0) + s
     tops.extend(synthetic.values())     # 新設した親をトップに加える
+    # 指定の親は 点数＝サブ点数の合計 を数量として持たせる（合計出数を1メインで見せる）。
+    if qty_rollup:
+        for p in tops:
+            if p.get("name") in qty_rollup and p.get("subs"):
+                p["qty"] = sum((s.get("qty") or 0) for s in p["subs"])
     return tops
 
 

@@ -90,6 +90,32 @@ def test_未マップ見出しでも売上のある実売れ商品はトップ�
     assert [s["name"] for s in other["subs"]] == ["P・コーラ"]
 
 
+def test_商品名サブ指定は未マップ見出しのその他内訳より優先される():
+    """P・… のように未マップ見出し(11:ソフトドリンク)＋売上0でも、sub_products_contains に
+    親指定があれば「その他の内訳」ではなくその親（例 Pドリンク）へ畳む。"""
+    rules = {
+        "other": "その他",
+        "zero_groups": {"テイクアウトジェラート": "TOジェラート（風味・全TO共通）"},
+        "sub_products_contains": {"P・": "Pドリンク"},
+        "sub_qty_rollup": ["Pドリンク"],
+        "categories": [{"name": "ドリンク", "keywords": ["ドリンク"]}],
+    }
+    items = [
+        {"name": "P・アップルソーダ", "sales": 0, "rank": None, "qty": 10, "group": "11:ソフトドリンク"},
+        {"name": "P・アイスコーヒー", "sales": 0, "rank": None, "qty": 16, "group": "11:ソフトドリンク"},
+        {"name": "P・パインソーダ", "sales": 0, "rank": None, "qty": 13, "group": "11:ソフトドリンク"},
+    ]
+    tops = _nest_zero_subs(items, rules)
+    assert [t["name"] for t in tops] == ["Pドリンク"]      # その他の内訳ではなくPドリンクへ
+    p = tops[0]
+    assert p["synthetic"] is True
+    assert p["sales"] == 0
+    assert p["qty"] == 39                                   # 合計出数 = 10+16+13（sub_qty_rollup）
+    assert [s["name"] for s in p["subs"]] == [
+        "P・アップルソーダ", "P・アイスコーヒー", "P・パインソーダ"]
+    assert classify_category(p["name"], rules) == "ドリンク"  # ドリンク部門に入る
+
+
 def test_zero_groupsが無い店は素通し():
     """zero_groups の無い店は変換しない（内訳もトップにそのまま並ぶ・後方互換）。"""
     items = [
