@@ -93,6 +93,7 @@ def actual_cost_by_month(
     見たかった差が消える。別の指標として持つこと。
 
     返り値: {store_code: {"YYYY-MM": {"food":…, "drink":…, "total":…, "rate":…}}}
+    food / drink / total は円、rate は cost_rate と同じ**分数**（0.234 = 23.4%）。
     材料が1つでも欠けた店×月は入れない（0として計算すると、棚卸を取り込めて
     いない月が「原価0円」や「仕入まるごとが原価」に化ける）。
     """
@@ -153,7 +154,9 @@ def actual_cost_by_month(
                 "total": round(total),
                 # 売上が無い月は率を出さない。0除算を0%にすると、
                 # lower_better の原価率で「達成」に見えてしまう。
-                "rate": round(total / sales * 100, 4) if sales else None,
+                # **単位は cost_rate と同じ分数（0.234 = 23.4%）。** 隣に並べる
+                # 指標と単位が違うと、片方だけ100倍された値が画面に出る。
+                "rate": round(total / sales, 4) if sales else None,
             }
     return out
 
