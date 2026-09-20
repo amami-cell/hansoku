@@ -118,25 +118,25 @@ function _latestMonth(code) {
   const ks = Object.keys((DATA.monthly || {})[code] || {}); ks.sort();
   return ks.length ? ks[ks.length - 1] : "";
 }
-// 販促の「現状/参考」値（薄字）。通常＝前年同期の実績、常設（終了日なし）＝開始〜直近の実績。
-// 時間帯は代表日の1日ぶん（期間に依らない）。取れないものは null（画面では「―」）。
-function currentTargetValue(metric, code, startYM, endYM, openEnded) {
-  if (!code || !startYM) return null;
+// 指標を、指定の月群にわたって計算（時間帯は代表日の1日ぶん＝月群に依らない）。
+// code は文字列（1店）でも配列（複数店を合算）でもよい。原価率・客単価は売上加重で合算。
+function _metricOverMonths(metric, code, months) {
+  const codes = Array.isArray(code) ? code : [code];
   if (metric === "hour_sales" || metric === "hour_covers" || metric === "hour_avg_check") {
-    const per = (DATA.hourly || {})[code]; if (!per) return null;
-    let s = 0, c = 0;
-    for (const h of Object.keys(per)) { s += (per[h] || {}).sales || 0; c += (per[h] || {}).covers || 0; }
+    let s = 0, c = 0, any = false;
+    for (const cd of codes) {
+      const per = (DATA.hourly || {})[cd]; if (!per) continue; any = true;
+      for (const h of Object.keys(per)) { s += (per[h] || {}).sales || 0; c += (per[h] || {}).covers || 0; }
+    }
+    if (!any) return null;
     if (metric === "hour_sales") return s || null;
     if (metric === "hour_covers") return c || null;
     return c ? Math.round(s / c) : null;
   }
-  const months = openEnded
-    ? monthsBetween(startYM, _latestMonth(code))
-    : monthsBetween(shiftYear(startYM, -1), shiftYear(endYM || startYM, -1));
-  if (!months.length) return null;
+  if (!months || !months.length) return null;
   let sales = 0, covers = 0, costNum = 0, costDen = 0, sN = 0, cN = 0;
-  for (const m of months) {
-    const sv = _msales(code, m), cv = _mcovers(code, m), cr = _mcost(code, m);
+  for (const cd of codes) for (const m of months) {
+    const sv = _msales(cd, m), cv = _mcovers(cd, m), cr = _mcost(cd, m);
     if (typeof sv === "number") { sales += sv; sN++; }
     if (typeof cv === "number") { covers += cv; cN++; }
     if (typeof sv === "number" && typeof cr === "number") { costNum += sv * cr; costDen += sv; }
@@ -146,6 +146,26 @@ function currentTargetValue(metric, code, startYM, endYM, openEnded) {
   if (metric === "avg_check") return (covers > 0 && sN) ? Math.round(sales / covers) : null;
   if (metric === "cost_rate") return costDen ? +(costNum / costDen).toFixed(1) : null;
   return null; // food/drink 原価率は現状データ源なし
+}
+// 販促の「現状/参考」値（薄字）。通常＝前年同期、常設（終了日なし）＝開始〜直近の実績。
+function currentTargetValue(metric, code, startYM, endYM, openEnded) {
+  if (!code || !startYM) return null;
+  const months = openEnded
+    ? monthsBetween(startYM, _latestMonth(code))
+    : monthsBetween(shiftYear(startYM, -1), shiftYear(endYM || startYM, -1));
+  return _metricOverMonths(metric, code, months);
+}
+// 販促の「実績」値（振り返り）。当年の販促期間（常設＝開始〜直近）で集計。
+function actualTargetValue(metric, code, startYM, endYM, openEnded) {
+  if (!code || !startYM) return null;
+  const end = openEnded ? _latestMonth(code) : (endYM || startYM);
+  return _metricOverMonths(metric, code, monthsBetween(startYM, end));
+}
+// 達成率と色。higher=true は 実績/目標、false（原価率）は 目標/実績（低いほど良い）。
+function targetAchievement(mt, target, actual) {
+  if (target == null || actual == null || !isFinite(target) || target === 0) return null;
+  const rate = mt.higher ? (actual / target * 100) : (target / actual * 100);
+  return { rate: Math.round(rate), good: rate >= 100 };
 }
 // 保存済みの目標（指標別）。サーバ値（本番）→ 端末内フォールバック。
 function targetMetricOf(c, metric) {
@@ -3055,6 +3075,7 @@ function renderCampaign(id) {
       <div class="panel">${overall}</div>
     </section>
 
+    ${renderTargetReview(c)}
     ${renderReview(c)}
     ${campPeriodActual(c)}
     ${campGelatoCompo(c)}
@@ -3324,6 +3345,61 @@ function needsReview(c) {
   return campStatus(c).k === "done" && !memoOf(c) && !(proposalFor(c.id) && proposalFor(c.id).next);
 }
 
+// 目標 vs 実績（入力フォームで立てた「販促×指標」の目標を、当期実績と並べる）。
+// 原価率・フード/ドリンク原価率は「低いほど良い」ので達成色を反転（達成=緑）。
+function fmtMetricVal(mt, v) {
+  if (v == null) return "―";
+  if (mt.unit === "%") return (+v).toFixed(1) + "%";
+  if (mt.unit === "人") return ten(v) + "人";
+  if (mt.key === "sales" || mt.key === "hour_sales") return man(v) + "円";
+  return ten(v) + "円"; // 客単価・時間帯客単価
+}
+function renderTargetReview(c) {
+  // 目標が1つでも入っている指標だけを対象に。
+  const set = TARGET_METRICS.map(mt => ({ mt, target: targetMetricOf(c, mt.key) }))
+    .filter(x => x.target != null);
+  if (!set.length) {
+    if (!goalEligible(c)) return "";
+    return `<section class="block">
+      <div class="bhead"><h2>目標の振り返り</h2><span class="bnote">目標を入れると実績と並べて達成率が出ます</span></div>
+      <div class="panel"><div class="cmemo muted">
+        まだ目標が未設定です。スケジュールの「＋販促を登録／編集」から
+        売上・客数・客単価・原価率などの目標を入力すると、ここに実績と達成率が並びます。
+      </div></div></section>`;
+  }
+  const codes = (c.stores || []).filter(hasData);
+  const code = codes.length ? codes : (c.stores || []);
+  const sm = c.start.slice(0, 7), em = campEndM(c);
+  const openEnded = !!c.open_ended;
+  const storeNote = codes.length === 1 ? storeName(codes[0])
+    : codes.length ? `対象 ${codes.length}店 合算` : "実績データなし";
+  const periodNote = openEnded ? `${sm}〜${em}（継続中）` : (sm === em ? sm : `${sm}〜${em}`);
+
+  const rows = set.map(({ mt, target }) => {
+    const actual = actualTargetValue(mt.key, code, sm, em, openEnded);
+    const ach = targetAchievement(mt, target, actual);
+    const dir = mt.higher ? "" : `<span class="tr-dir" title="低いほど良い">↓が良い</span>`;
+    const rateHtml = ach
+      ? `<span class="tr-rate ${ach.good ? "good" : "bad"}">${ach.rate}%${ach.good ? " ✓" : ""}</span>`
+      : `<span class="tr-rate muted">―</span>`;
+    return `<tr>
+      <td class="tr-l">${esc(mt.label)}${dir}</td>
+      <td class="tr-v">${fmtMetricVal(mt, target)}</td>
+      <td class="tr-v">${fmtMetricVal(mt, actual)}</td>
+      <td class="tr-a">${rateHtml}</td></tr>`;
+  }).join("");
+
+  return `<section class="block">
+    <div class="bhead"><h2>目標の振り返り</h2>
+      <span class="bnote">${esc(storeNote)}・${esc(periodNote)}　達成=緑（原価率は低いほど達成）</span></div>
+    <div class="panel">
+      <table class="trtbl">
+        <thead><tr><th class="tr-l">指標</th><th class="tr-v">目標</th><th class="tr-v">実績</th><th class="tr-a">達成率</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="tr-note">実績は販促期間の確定月で集計（時間帯は代表日の1日ぶん）。達成率は 客数・売上・客単価＝実績/目標、原価率＝目標/実績。</div>
+    </div></section>`;
+}
 function renderReview(c) {
   const v = campVerdict(c);
   const memo = memoOf(c);

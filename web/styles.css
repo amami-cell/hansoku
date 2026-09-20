@@ -901,6 +901,23 @@ html{overflow-anchor:none;}
 .rvnext.muted{background:none;border:none;color:var(--ink-3);padding:0;}
 .rvby{margin-top:6px;font-size:11px;color:var(--ink-3);}
 
+/* 目標の振り返り（目標 vs 実績・達成率） */
+.trtbl{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;}
+.trtbl th{font-size:11px;font-weight:700;color:var(--ink-3);text-align:right;
+  padding:4px 8px;border-bottom:1px solid var(--line);letter-spacing:.03em;}
+.trtbl th.tr-l{text-align:left;}
+.trtbl td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;color:var(--ink);}
+.trtbl td.tr-l{text-align:left;font-weight:600;color:var(--ink);}
+.trtbl tr:last-child td{border-bottom:none;}
+.trtbl .tr-v{color:var(--ink-2);}
+.tr-dir{margin-left:6px;font-size:10.5px;font-weight:600;color:var(--ink-3);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;}
+.tr-rate{font-weight:700;}
+.tr-rate.good{color:var(--good-ink);}
+.tr-rate.bad{color:var(--warning-ink);}
+.tr-rate.muted{color:var(--ink-3);font-weight:400;}
+.tr-note{margin-top:9px;font-size:11px;color:var(--ink-3);line-height:1.6;}
+
 /* 部門構成（コース/ランチ/アラカルト/飲み放題/食べ放題） */
 .dlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;}
 .drow{display:grid;grid-template-columns:78px 1fr auto auto;align-items:center;
