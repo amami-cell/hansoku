@@ -171,6 +171,24 @@ def main() -> int:
             if not hit:
                 print("  （該当なし）")
 
+        # FW区分見出し（"NN:名前"）別の商品一覧。区分（アルコール/紅茶 等）を立てる材料。
+        # qty行の product_category が見出しのものだけ拾い、見出し→商品→累計点/累計円で集約。
+        byhd: dict[str, dict[str, list]] = {}
+        import re as _re
+        for m, dd in qby_m.items():
+            smap = {n: v for n, v, c in pby_m.get(m, [])}
+            for name, (qty, grp) in dd.items():
+                if grp and _re.match(r"^\s*\d+\s*[:：]", str(grp)):
+                    a = byhd.setdefault(str(grp), {}).setdefault(name, [0, 0])
+                    a[0] += qty
+                    a[1] += smap.get(name, 0)
+        print(f"\n== FW区分見出し別 商品一覧（{len(byhd)}見出し・全期間集約）==")
+        for hd in sorted(byhd):
+            items_hd = sorted(byhd[hd].items(), key=lambda x: -x[1][1])
+            print(f"  【{hd}】{len(items_hd)}品")
+            for name, (q, v) in items_hd:
+                print(f"    {name}: 累計{v:,}円 / {q:,}点")
+
         # MONTHS 環境変数で指定した月の商品上位を出す（例: 前年の秋の商品を洗い出す）。
         want = [m.strip() for m in os.environ.get("MONTHS", "").split(",") if m.strip()]
         for m in want:
