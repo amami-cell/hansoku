@@ -918,6 +918,29 @@ def build(
     ):
         hourly_month = row["date"].strftime("%Y-%m")
 
+    # 時間帯別を「月別」に分けて持つ（各月の代表日1日ぶん＝月初に焼いてある）。
+    # 時間帯目標を「販促期間内の1日平均（前年同期）」で振り返れるようにするための材料。
+    # 上の hourly は全月合算（ピーク形の把握用）なので、こちらは月で割って別に持つ。
+    hourly_by_month: dict[str, dict[str, dict[str, dict[str, int]]]] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_HOUR,
+            metrics=[METRIC_SALES, METRIC_COVERS],
+            store_codes=master.active_codes,
+            group_by=("store_code", "date", "hour", "metric"),
+        )
+    ):
+        m = row["date"].strftime("%Y-%m")
+        h = str(int(row["hour"]))
+        hval = row["value"] / NET_DIVISOR if row["metric"] in NET_ADJUST_METRICS else row["value"]
+        (
+            hourly_by_month.setdefault(row["store_code"], {})
+            .setdefault(m, {})
+            .setdefault(h, {})
+        )[row["metric"]] = round(hval)
+
     # 全店（グループ全体）の売れ筋。ABC分析は既定で「全店」集計なので、擬似店舗
     # コード "_group" に入れてある。おすすめ料理候補としてTOPページに出す。
     # ここも「直近1ヶ月」の表なので、月ごとに拾って最新月だけを出す
@@ -1084,6 +1107,8 @@ def build(
         # 店舗の時間帯別 売上・客数（FW時間帯別売上）。時間帯別販促の検討に使う。
         "hourly": hourly,
         "hourly_month": hourly_month,
+        # 時間帯別を月別に（各月の代表日1日ぶん）。時間帯目標の期間内1日平均に使う。
+        "hourly_by_month": hourly_by_month,
         # 店舗の売れ筋商品 上位（FW ABC分析・店舗別）。今は空でも可（全店を使う）。
         "products": products,
         # 全店（グループ全体）の売れ筋商品 上位。おすすめ料理候補としてTOPに出す。

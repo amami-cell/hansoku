@@ -151,6 +151,27 @@ await test("常設で起票：目標が採番後IDのキーで保存され、再
   assert.ok(boardBad.includes("秋の実地テスト販促"), "スコアボードに新施策が出る");
 });
 
+console.log("時間帯目標（月別プロファイル→期間内1日平均）");
+
+await test("時間帯売上/集客は対象月の1日平均（A/V）、前年同期は前年の1日平均", () => {
+  const d = { ...base, hourly_by_month: { "1160": {
+    // 当期2ヶ月：1日あたり 売上 (100+80)=180k / (120+90)=210k → 平均195k、客数 (200+150)=350 / (240+180)=420 → 平均385
+    "2026-07": { "12": { sales: 100000, covers: 200 }, "13": { sales: 80000, covers: 150 } },
+    "2026-08": { "12": { sales: 120000, covers: 240 }, "13": { sales: 90000, covers: 180 } },
+    // 前年同期：1日 売上 (90+70)=160k、客数 (180+140)=320
+    "2025-07": { "12": { sales: 90000, covers: 180 }, "13": { sales: 70000, covers: 140 } },
+    "2025-08": { "12": { sales: 90000, covers: 180 }, "13": { sales: 70000, covers: 140 } } } } };
+  const { call } = loadForm(d);
+  // 当期（2026-07..08）の1日平均売上＝(180k+210k)/2=195k
+  const act = call(`actualTargetValue("hour_sales","1160","2026-07","2026-08",false)`);
+  assert.equal(act, 195000, "当期の時間帯売上は1日平均（合算でなく）");
+  const cov = call(`actualTargetValue("hour_covers","1160","2026-07","2026-08",false)`);
+  assert.equal(cov, 385, "当期の時間帯集客は1日平均");
+  // 薄字＝前年同期（2025-07..08）の1日平均売上＝160k
+  const ref = call(`currentTargetValue("hour_sales","1160","2026-07","2026-08",false)`);
+  assert.equal(ref, 160000, "前年同期の時間帯売上1日平均");
+});
+
 await test("目標未入力の販促だけならスコアボードは非表示", () => {
   const { call } = loadForm({ ...base, campaigns: [
     { id: "x", stores: ["1160"], title: "目標なし", kind: "osusume", start: "2026-11-01", end: "2026-12-31" } ] });

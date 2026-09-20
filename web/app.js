@@ -133,20 +133,40 @@ function _latestMonth(code) {
   const ks = Object.keys((DATA.monthly || {})[code] || {}); ks.sort();
   return ks.length ? ks[ks.length - 1] : "";
 }
-// 指標を、指定の月群にわたって計算（時間帯は代表日の1日ぶん＝月群に依らない）。
+// 指標を、指定の月群にわたって計算。時間帯は月群内の「1日平均（A/V）」を返す。
 // code は文字列（1店）でも配列（複数店を合算）でもよい。原価率・客単価は売上加重で合算。
 function _metricOverMonths(metric, code, months) {
   const codes = Array.isArray(code) ? code : [code];
   if (metric === "hour_sales" || metric === "hour_covers" || metric === "hour_avg_check") {
-    let s = 0, c = 0, any = false;
+    // 時間帯は「1日平均（A/V）」。月別プロファイル（各月＝代表日1日ぶん）を、
+    // 対象月ぶん集めて日数で割る。前年同期なら前年の月群が渡る＝前年の1日平均になる。
+    const bm = DATA.hourly_by_month || {};
+    let s = 0, c = 0, days = 0;
+    const ms = (months && months.length) ? months : null;
+    for (const cd of codes) {
+      const per = bm[cd]; if (!per) continue;
+      const keys = ms ? ms.filter(m => per[m]) : Object.keys(per);
+      for (const m of keys) {
+        const prof = per[m]; let ms_ = 0, mc = 0;
+        for (const h of Object.keys(prof)) { ms_ += (prof[h] || {}).sales || 0; mc += (prof[h] || {}).covers || 0; }
+        s += ms_; c += mc; days += 1;
+      }
+    }
+    if (days > 0) {
+      if (metric === "hour_sales") return Math.round(s / days) || null;
+      if (metric === "hour_covers") return Math.round(c / days) || null;
+      return c ? Math.round(s / c) : null;   // 客単価は日数が相殺
+    }
+    // フォールバック：月別が無い（旧データ）なら、全月合算スナップショットを1件として使う。
+    let fs = 0, fc = 0, any = false;
     for (const cd of codes) {
       const per = (DATA.hourly || {})[cd]; if (!per) continue; any = true;
-      for (const h of Object.keys(per)) { s += (per[h] || {}).sales || 0; c += (per[h] || {}).covers || 0; }
+      for (const h of Object.keys(per)) { fs += (per[h] || {}).sales || 0; fc += (per[h] || {}).covers || 0; }
     }
     if (!any) return null;
-    if (metric === "hour_sales") return s || null;
-    if (metric === "hour_covers") return c || null;
-    return c ? Math.round(s / c) : null;
+    if (metric === "hour_sales") return fs || null;
+    if (metric === "hour_covers") return fc || null;
+    return fc ? Math.round(fs / fc) : null;
   }
   if (!months || !months.length) return null;
   let sales = 0, covers = 0, costNum = 0, costDen = 0, sN = 0, cN = 0;
@@ -1945,7 +1965,8 @@ function refreshTargetPlaceholders() {
       : (mt.unit === "円" ? man(cur) + "万" : mt.unit === "%" ? cur + "%" : ten(cur) + mt.unit) + "（現状）";
     const help = g("pf-tghelp-" + mt.key);
     if (help) {
-      const per = mt.daily ? "時間帯データの代表日・1日ぶん"
+      const per = mt.daily
+        ? (openEnded ? "開始〜直近の時間帯1日平均（A/V）" : "前年同期の時間帯1日平均（A/V）")
         : openEnded ? "開始〜直近の実績" : "前年同期の実績";
       help.textContent = cur == null ? "（現状値なし）" : `薄字＝${per}`;
     }
@@ -3470,7 +3491,7 @@ function renderTargetReview(c) {
         <thead><tr><th class="tr-l">指標</th><th class="tr-v">目標</th><th class="tr-v">実績</th><th class="tr-a">達成率</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <div class="tr-note">実績は販促期間の確定月で集計（時間帯は代表日の1日ぶん）。達成率は 客数・売上・客単価＝実績/目標、原価率＝目標/実績。</div>
+      <div class="tr-note">実績は販促期間の確定月で集計（時間帯は期間内の1日平均＝A/V）。達成率は 客数・売上・客単価＝実績/目標、原価率＝目標/実績。</div>
     </div></section>`;
 }
 function renderReview(c) {
