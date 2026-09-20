@@ -148,6 +148,7 @@ def actual_cost_by_month(
                 continue
             total = parts["food"] + parts["drink"]
             sales = cur.get((code, METRIC_SALES))
+            rate = round(total / sales, 4) if sales else None
             out.setdefault(code, {})[month] = {
                 "food": round(parts["food"]),
                 "drink": round(parts["drink"]),
@@ -156,9 +157,36 @@ def actual_cost_by_month(
                 # lower_better の原価率で「達成」に見えてしまう。
                 # **単位は cost_rate と同じ分数（0.234 = 23.4%）。** 隣に並べる
                 # 指標と単位が違うと、片方だけ100倍された値が画面に出る。
-                "rate": round(total / sales, 4) if sales else None,
+                "rate": rate,
+                # 材料が揃っていても、値そのものが信用できない月がある。
+                # 消さずに印を付けて渡す（消すと元データの誤りに気づけない）。
+                "suspect": _actual_cost_suspect(rate),
             }
     return out
+
+
+# 実原価率として現実的な範囲。これを外れたら計算ではなく**元データを疑う**。
+# 実測（2026-02〜08、24店）では、動いている店はどこも 20〜35% に収まっており、
+# 外れたのは次の2種類だけだった。
+#   1151 NagaGutsu 2026-04 … 342.9%（翌月は 18.0%）
+#       棚卸を1ヶ月ぶん取り違えた形。誤差は当月に＋、翌月に−で2回出る
+#   1743 すさび湯 新宿東口 2026-05 … 0.6%（翌月 12.9%、その後 25.7%）
+#       開店直後で在庫を積んでいる時期。原価として読むと嘘になる
+# 幅は広めに取る。狭めると「本当に原価が跳ねた月」まで隠してしまい、
+# いちばん見たい月が消える。
+ACTUAL_COST_RATE_MIN = 0.10
+ACTUAL_COST_RATE_MAX = 0.60
+
+
+def _actual_cost_suspect(rate: float | None) -> str | None:
+    """信用できない実原価率に理由を付ける。問題なければ None。"""
+    if rate is None:
+        return None
+    if rate > ACTUAL_COST_RATE_MAX:
+        return "率が高すぎる（棚卸の取り違え・単位違いの疑い）"
+    if rate < ACTUAL_COST_RATE_MIN:
+        return "率が低すぎる（棚卸の取り違え・開店直後の在庫積みの疑い）"
+    return None
 
 
 def _prev_month(month: str) -> str:

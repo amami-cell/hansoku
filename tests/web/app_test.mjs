@@ -456,6 +456,49 @@ test("店舗詳細：実原価カードと、理論との差＝不明ロスが�
   assert.ok(html.includes("+2.0"), "32.0% − 30.0% = +2.0pt");
 });
 
+// 材料が揃っていても値が嘘の月がある（実測で 342.9% の月があった）。
+// 消さずに「要確認」で出し、順位づけや穴埋めには使わない。
+const acSuspect = () => {
+  const d = acBase();
+  d.actual_cost = {
+    1006: {
+      "2026-06": { food: 2400000, drink: 800000, total: 3200000, rate: 0.32 },
+      "2026-07": { food: 9000000, drink: 100000, total: 9100000, rate: 3.429,
+                   suspect: "率が高すぎる（棚卸の取り違え・単位違いの疑い）" },
+    },
+    1069: {
+      "2026-07": { food: 1500000, drink: 500000, total: 2000000, rate: 0.40 },
+    },
+  };
+  d.monthly[1006]["2026-06"] = { sales: 9000000 };
+  d.cost_rate = { 1006: { "2026-07": 0.30 } };
+  return d;
+};
+
+test("要確認の月は指標として読まない（342.9%が順位に混ざらない）", () => {
+  const ctx = loadApp(acSuspect());
+  assert.equal(call(ctx, `METRIC = "actual_cost_rate"; valueAt("1006","2026-07")`), undefined,
+    "印の付いた月は率として出さない");
+  assert.equal(call(ctx, `valueAt("1006","2026-06")`), 0.32, "ふつうの月はそのまま");
+});
+
+test("要確認の月は粗利率の穴埋めにも使わない（ひとつ前の正常な月に下がる）", () => {
+  const ctx = loadApp(acSuspect());
+  const by = Object.fromEntries(call(ctx, `crossProfit()`).map(r => [r.code, r]));
+  // 1006 は理論があるので理論のまま。1069 は実原価（印なし）で埋まる
+  assert.equal(by["1006"].gpSrc, "理論");
+  assert.equal(by["1069"].gpSrc, "実原価");
+});
+
+test("店舗詳細：要確認の月は数字を出したうえで理由を書く（黙って消さない）", () => {
+  const ctx = loadApp(acSuspect());
+  const html = call(ctx, `renderProfitability("1006")`);
+  assert.ok(html.includes("要確認"), "要確認の印");
+  assert.ok(html.includes("棚卸の取り違え"), "理由をそのまま出す");
+  assert.ok(html.includes("342.9%"), "値も見せる（消すと元データの誤りに気づけない）");
+  assert.ok(!html.includes("不明ロス"), "信用できない月に理論との差は出さない");
+});
+
 test("店舗詳細：理論が無い店でも実原価だけで節が出る（不明ロスは出さない）", () => {
   const ctx = loadApp(acBase());
   const html = call(ctx, `renderProfitability("1069")`);

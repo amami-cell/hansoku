@@ -675,11 +675,17 @@ def cmd_actual_cost(args: argparse.Namespace) -> int:
     print(f"実原価が出せている店×月（{months[0]} 〜 {months[-1]}）")
     print(f"{'店':<22}" + "".join(f"{m[2:]:>8}" for m in months))
     missing: dict[str, int] = {}
+    suspect: list[str] = []
     for code in sorted(codes):
         cells = []
         for month in months:
             v = got.get(code, {}).get(month)
-            if v and v.get("rate") is not None:
+            if v and v.get("suspect"):
+                # 消さずに印を付ける。消すと元データの誤りに気づけない。
+                cells.append(f"{v['rate'] * 100:>6.1f}%!")
+                suspect.append(f"{code} {name_of.get(code, '')} {month} "
+                               f"{v['rate'] * 100:.1f}% … {v['suspect']}")
+            elif v and v.get("rate") is not None:
                 cells.append(f"{v['rate'] * 100:>7.1f}%")
             elif v:
                 cells.append("   円のみ")   # 原価は出たが売上が無く率にできない
@@ -700,7 +706,14 @@ def cmd_actual_cost(args: argparse.Namespace) -> int:
         print(f"{label:<22}" + "".join(cells))
 
     filled = sum(1 for c in codes for m in months if got.get(c, {}).get(m))
-    print(f"\n出せた店×月: {filled} / {len(codes) * len(months)}")
+    print(f"\n出せた店×月: {filled} / {len(codes) * len(months)}"
+          f"（うち要確認 {len(suspect)}）")
+    if suspect:
+        print("要確認（! 印。値は出すが、原価として読まないこと）:")
+        for line in suspect:
+            print(f"  {line}")
+        print("  ※ 棚卸を1ヶ月ぶん取り違えると、当月に＋・翌月に−で2回出る。"
+              "隣り合う月をセットで見ること。")
     if missing:
         print("出せなかった理由（欠けている材料の延べ数）:")
         for label, n in sorted(missing.items(), key=lambda kv: -kv[1]):
