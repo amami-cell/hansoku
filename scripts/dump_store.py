@@ -231,6 +231,49 @@ def main() -> int:
                 else:
                     print("    └ その他に売上つき商品なし（0円）")
 
+            # 詳細ダンプ: 代表1ヶ月（既定は直近の完全月）について
+            #  (A) その他に落ちる全商品（売上0含む）を列挙
+            #  (B) 各メイン商品に畳んだサブ（0円内訳）を親ごとに一覧
+            detail_m = os.environ.get("DETAIL_MONTH", "").strip()
+            if not detail_m:
+                detail_m = recent[-2] if len(recent) >= 2 else (recent[-1] if recent else "")
+            if detail_m:
+                items = []
+                smap = {n: v for n, v, c in pby_m.get(detail_m, [])}
+                qmap = qby_m.get(detail_m, {})
+                for name in set(smap) | set(qmap):
+                    q, grp = qmap.get(name, (0, None))
+                    items.append({"name": name, "sales": smap.get(name, 0), "rank": None,
+                                  "qty": round(q) if q else None, "group": grp})
+                items = _nest_zero_subs(items, rules)
+
+                others_all = sorted(
+                    [(p["name"], round(p.get("sales") or 0), p.get("qty"), p.get("group"))
+                     for p in items
+                     if classify_category(p.get("name", ""), rules, p.get("group")) == other_name],
+                    key=lambda x: (-x[1], -(x[2] or 0)))
+                print(f"\n== [{detail_m}] その他に入る全商品（売上0含む・{len(others_all)}件）==")
+                if not others_all:
+                    print("  （なし）")
+                for name, val, qty, grp in others_all:
+                    print(f"  {name}: {val:,}円 / {qty or 0:,}点 [{grp or '見出し無し'}]")
+
+                parents = [p for p in items if p.get("subs")]
+                parents.sort(key=lambda p: -(p.get("sales") or 0))
+                nsub = sum(len(p["subs"]) for p in parents)
+                print(f"\n== [{detail_m}] 各メイン商品に割り振ったサブ（0円内訳）"
+                      f"{len(parents)}メイン・計{nsub}サブ ==")
+                for p in parents:
+                    tag = "（表示専用の束ね親）" if p.get("synthetic") else ""
+                    subs = sorted(p["subs"], key=lambda s: -(s.get("qty") or 0))
+                    print(f"\n  ■ {p['name']}  売上{round(p.get('sales') or 0):,}円 / "
+                          f"サブ{len(subs)}件{tag}")
+                    for s in subs:
+                        sv = round(s.get("sales") or 0)
+                        sq = s.get("qty") or 0
+                        extra = f" / 売上{sv:,}円" if sv else ""
+                        print(f"      ・{s.get('name')}: {sq:,}点{extra}")
+
         # MONTHS 環境変数で指定した月の商品上位を出す（例: 前年の秋の商品を洗い出す）。
         want = [m.strip() for m in os.environ.get("MONTHS", "").split(",") if m.strip()]
         for m in want:
