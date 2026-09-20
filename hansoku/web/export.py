@@ -1003,6 +1003,39 @@ def build(
         for r in master.regions
     ]
 
+    # 原価率（損益）が「なぜ出ないか」を店ごとに判定する。画面で「―」を素で出さず、
+    # 理由（新レジ未接続／新店・反映待ち／FW未反映／直近のみ）を添えるための材料。
+    def _ym_minus(ym: str, k: int) -> str:
+        y, m = int(ym[:4]), int(ym[5:7])
+        idx = y * 12 + (m - 1) - k
+        return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
+
+    cost_status: dict[str, dict] = {}
+    for s in master.active:
+        c = s.store_code
+        cr_months = sorted(cost_rates.get(c, {}).keys())
+        sales_months = sorted(monthly.get(c, {}).keys())
+        n = len(cr_months)
+        latest_cr = cr_months[-1] if cr_months else None
+        latest_sales = sales_months[-1] if sales_months else None
+        has_recent = bool(set(sales_months[-2:]) & set(cr_months)) if sales_months else False
+        if not sales_months:
+            continue  # 売上自体が無い店は has_actuals=false 側で扱う
+        if has_recent and n >= 1:
+            continue  # 直近に原価率あり＝正常。理由は出さない。
+        # 開店が直近4ヶ月以内なら「新店」
+        opened_ym = (s.opened or "")[:7]
+        is_new = bool(opened_ym) and latest_sales is not None and opened_ym >= _ym_minus(latest_sales, 4)
+        if s.pos and s.pos != "fw":
+            status = "pos"       # 新Uレジ/ダイニー等。FW共有シート経路外。
+        elif is_new:
+            status = "new"       # 開店後の損益がまだ共有シートに載っていない。
+        elif n == 0:
+            status = "none"      # FW店だが損益が1件も無い（店長会資料DL未反映）。
+        else:
+            status = "partial"   # 一部月のみ（FW側に過去分が無く直近だけ）。
+        cost_status[c] = {"status": status, "months": n, "latest": latest_cr}
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "period": {"from": date_from.isoformat(), "to": date_to.isoformat()},
@@ -1041,6 +1074,9 @@ def build(
         ],
         "monthly": monthly,
         "cost_rate": cost_rates,
+        # 原価率（損益）が出ない店の理由。{code:{status,months,latest}}。
+        # status: pos=新レジ未接続 / new=新店・反映待ち / none=FW未反映 / partial=直近のみ。
+        "cost_status": cost_status,
         # 店舗の月次売上予算（FW月別予算登録）。まだ取り込み前は空。
         "budget": budget,
         # 店舗の月次客数（FW月別日別売上推移）。集客の前年比・前月比に使う。空でも可。

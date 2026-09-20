@@ -1546,6 +1546,10 @@ table.bqtbl tbody tr:hover{background:color-mix(in srgb,var(--ink-1) 6%,transpar
   background:color-mix(in srgb,var(--ink-1) 8%,transparent);color:var(--ink-2);}
 .pf-gp.up{color:var(--good-ink);background:color-mix(in srgb,var(--good-ink) 12%,transparent);}
 .pf-gp.warn{color:var(--warning-ink);background:color-mix(in srgb,var(--warning-ink) 12%,transparent);}
+/* 原価率が出ない理由バッジ（「―」を素で出さない）。控えめな注意色。 */
+.pf-cr{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;white-space:nowrap;
+  color:var(--ink-3);background:color-mix(in srgb,var(--ink-1) 7%,transparent);
+  border:1px dashed var(--line-strong);}
 
 /* 収益性ランキングのワースト（原価改善の狙い目） */
 .xpworst{background:color-mix(in srgb,var(--warning-ink) 7%,transparent);}

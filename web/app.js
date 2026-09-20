@@ -114,6 +114,21 @@ const monthsBetween = (a, b) => (a && b && b >= a) ? monthRange(a, b) : (a ? [a]
 const _msales = (code, m) => (((DATA.monthly || {})[code] || {})[m] || {}).sales;
 const _mcovers = (code, m) => ((DATA.covers || {})[code] || {})[m];
 const _mcost = (code, m) => ((DATA.cost_rate || {})[code] || {})[m];
+// 原価率（損益）が出ない理由。export の cost_status（{code:{status,months,latest}}）から。
+// 「―」を素で出さず、なぜ出ないか（新レジ未接続／新店・反映待ち／FW未反映／直近のみ）を添える。
+const COST_REASON = {
+  pos: { label: "新レジ未接続", tip: "新Uレジ/ダイニーはFW共有シート経路の外です。取込配管の対応待ち。" },
+  new: { label: "新店・反映待ち", tip: "開店後の損益（店長会資料DL）が共有シートに載れば自動で入ります。" },
+  none: { label: "FW未反映", tip: "店長会資料DL（損益）が共有シートにまだ出ていません。" },
+  partial: { label: "直近のみ", tip: "FW側に過去分が無く、直近の月だけ原価率が出せます。" },
+};
+function costReason(code) {
+  const cs = (DATA.cost_status || {})[code];
+  if (!cs) return null;
+  const r = COST_REASON[cs.status];
+  if (!r) return null;
+  return { label: r.label, tip: r.tip, status: cs.status, months: cs.months || 0, latest: cs.latest || null };
+}
 function _latestMonth(code) {
   const ks = Object.keys((DATA.monthly || {})[code] || {}); ks.sort();
   return ks.length ? ks[ks.length - 1] : "";
@@ -1569,10 +1584,12 @@ function renderList() {
       ? `<span class="budg ${br.rate >= 100 ? "up" : "down"}" title="${br.m} の 実績÷予算">予算 ${br.rate.toFixed(0)}%</span>`
       : "";
     const pf = storeProfit(code);
-    const profLine = (pf.kt != null || pf.gp != null)
+    const cr = pf.gp == null ? costReason(code) : null;
+    const profLine = (pf.kt != null || pf.gp != null || cr)
       ? `<div class="sprof">
           ${pf.kt != null ? `<span class="pf pf-kt" title="直近確定月の 売上÷客数">客単 ${yen(pf.kt)}</span>` : ""}
           ${pf.gp != null ? `<span class="pf pf-gp ${pf.gp >= 0.65 ? "up" : pf.gp < 0.60 ? "warn" : ""}" title="100−FW理論原価率（ロス・棚卸差異は含まない）">理論粗利 ${pct(pf.gp)}</span>` : ""}
+          ${cr ? `<span class="pf pf-cr" title="${esc(cr.tip)}">原価率 ${esc(cr.label)}</span>` : ""}
         </div>`
       : "";
     return `
@@ -3375,17 +3392,23 @@ function renderTargetReview(c) {
     : codes.length ? `対象 ${codes.length}店 合算` : "実績データなし";
   const periodNote = openEnded ? `${sm}〜${em}（継続中）` : (sm === em ? sm : `${sm}〜${em}`);
 
+  const isCostMetric = k => k === "cost_rate" || k === "food_cost_rate" || k === "drink_cost_rate";
   const rows = set.map(({ mt, target }) => {
     const actual = actualTargetValue(mt.key, code, sm, em, openEnded);
     const ach = targetAchievement(mt, target, actual);
     const dir = mt.higher ? "" : `<span class="tr-dir" title="低いほど良い">↓が良い</span>`;
+    // 原価率の実績が出ない店は「―」で終わらせず、理由（新レジ未接続など）を添える。
+    const cr = (actual == null && isCostMetric(mt.key) && codes.length === 1) ? costReason(codes[0]) : null;
+    const actHtml = cr
+      ? `<span class="pf-cr" title="${esc(cr.tip)}">${esc(cr.label)}</span>`
+      : fmtMetricVal(mt, actual);
     const rateHtml = ach
       ? `<span class="tr-rate ${ach.good ? "good" : "bad"}">${ach.rate}%${ach.good ? " ✓" : ""}</span>`
       : `<span class="tr-rate muted">―</span>`;
     return `<tr>
       <td class="tr-l">${esc(mt.label)}${dir}</td>
       <td class="tr-v">${fmtMetricVal(mt, target)}</td>
-      <td class="tr-v">${fmtMetricVal(mt, actual)}</td>
+      <td class="tr-v">${actHtml}</td>
       <td class="tr-a">${rateHtml}</td></tr>`;
   }).join("");
 
@@ -3739,7 +3762,8 @@ function renderCross() {
           <span class="xpname">${esc(x.name)}<small>${esc(x.brand_name || "")}</small>${isWorst ? '<span class="xptag">原価改善の狙い目</span>' : ""}</span>
           <span class="xpbar"><span class="xpfill" style="width:${Math.max(4, Math.round(x.kt / maxKt * 100))}%"></span></span>
           <span class="xpkt">${yen(x.kt)}<small>客単価${x.ktM ? "・" + x.ktM : ""}</small></span>
-          <span class="xpgp ${gpCls}">${x.gp != null ? pct(x.gp) : "—"}<small>理論粗利率${x.gpM ? "・" + x.gpM : ""}</small></span>
+          <span class="xpgp ${gpCls}">${x.gp != null ? pct(x.gp) + `<small>理論粗利率${x.gpM ? "・" + x.gpM : ""}</small>`
+            : (() => { const cr = costReason(x.code); return cr ? `<span class="pf-cr" title="${esc(cr.tip)}">${esc(cr.label)}</span><small>原価率が出ません</small>` : `—<small>理論粗利率</small>`; })()}</span>
           ${aim}
         </li>`;
       }).join("");
