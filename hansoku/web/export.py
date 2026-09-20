@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from ..analytics import RATIO_METRICS, ratio
+from ..analytics import RATIO_METRICS, actual_cost_by_month, ratio
 from ..db.warehouse import AggregateQuery, Warehouse
 from ..model import (
     DEPT_BUCKETS,
@@ -634,6 +634,14 @@ def build(
             if value.value:
                 cost_rates.setdefault(value.store_code, {})[month] = round(value.value, 4)
 
+    # 実原価（前月棚卸 + 当月仕入 − 当月棚卸）。インフォマートの棚卸・仕入から出す。
+    # FWのABC部門に依存しないので、**部門が紐付いていない店・月でも原価が出る**
+    # （1069 ひよこ飯店 / 1137 たいだい の 2026-07 以前がこれ）。
+    # cost_rate（理論原価率）とは別物。その差が不明ロスなので、混ぜてはいけない。
+    actual_cost = actual_cost_by_month(
+        warehouse, months=sorted(months), store_codes=master.active_codes
+    )
+
     # FW ABC（部門・商品）の月次シリーズ。毎月ABCを取り込むと月ごとに積み上がり、
     # 施策詳細で ケーキ/ジェラート/パフェ・食べ放題・宴会コース を月ごとに並べられる。
     store_categories = load_store_categories()
@@ -708,6 +716,9 @@ def build(
         ],
         "monthly": monthly,
         "cost_rate": cost_rates,
+        # 実原価（金額と率）。理論原価率(cost_rate)と並べると差＝不明ロスが見える。
+        # {店コード: {"YYYY-MM": {food, drink, total, rate}}}
+        "actual_cost": actual_cost,
         # 店舗の月次売上予算（FW月別予算登録）。まだ取り込み前は空。
         "budget": budget,
         # 店舗の月次客数（FW月別日別売上推移）。集客の前年比・前月比に使う。空でも可。
