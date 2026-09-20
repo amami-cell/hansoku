@@ -399,7 +399,9 @@ function campStatus(c) {
 // 目標数値は「2026年10月分」から運用する。過ぎた（10月前に終わる）施策には
 // 目標を出さない。終了日未定（GM/ランチ変更など継続）は対象に含める。
 const GOAL_START = "2026-10-01";
-const goalEligible = c => !c.end || c.end >= GOAL_START;
+// 目標は2026年10月分から。すでに終わった施策には出さない。ただし常設（終了日なし）は
+// 開始が古くても“継続中”なので、目標の対象に含める（end=開始月で保存される点に注意）。
+const goalEligible = c => c.open_ended || !c.end || c.end >= GOAL_START;
 
 // 効果を見る期間の終わり。終了日未定なら「今」まで（＝直近確定月まで見る）。
 const campEndM = c => (c.open_ended ? CURRENT_MONTH : (c.end || c.start).slice(0, 7));
