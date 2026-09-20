@@ -917,6 +917,8 @@ html{overflow-anchor:none;}
 .tr-rate.bad{color:var(--warning-ink);}
 .tr-rate.muted{color:var(--ink-3);font-weight:400;}
 .tr-note{margin-top:9px;font-size:11px;color:var(--ink-3);line-height:1.6;}
+/* 目標の変更ログ（誰がいつ設定したか）。目標セルの下に控えめに。 */
+.tr-meta{margin-top:2px;font-size:10px;font-weight:400;color:var(--ink-3);white-space:nowrap;}
 
 /* 目標スコアボード（施策の効果ビュー上部・横断の達成率一覧） */
 .tblist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}

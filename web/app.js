@@ -210,6 +210,14 @@ function targetMetricOf(c, metric) {
   if (metric === "sales") { const v = targetOf(c); if (v != null) return v; }
   return null;
 }
+// 目標を「誰がいつ」設定したか（変更ログ）。サーバ値のセル {value, by, at} を返す。
+function targetMetaOf(c, metric) {
+  const byM = (SERVER_TARGETS_M[campKey(c)] || SERVER_TARGETS_M[c.id]);
+  const cell = byM && byM[metric];
+  return (cell && (cell.by || cell.at)) ? { by: cell.by || "", at: cell.at || "" } : null;
+}
+// 変更ログ用の短い日付（YYYY-MM-DD / ISO どちらでも 年-月-日 に丸める）。
+const shortYmd = s => { const m = String(s || "").match(/(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[1]}/${+m[2]}/${+m[3]}` : ""; };
 
 // 目標とメモは施策の「回」にぶら下がる。鍵は id@開始年（例 r1006-osusume@2026）。
 // id だけだと、来年の秋おすすめが今年の目標・メモを上書きしてしまう。
@@ -3476,9 +3484,14 @@ function renderTargetReview(c) {
     const rateHtml = ach
       ? `<span class="tr-rate ${ach.good ? "good" : "bad"}">${ach.rate}%${ach.good ? " ✓" : ""}</span>`
       : `<span class="tr-rate muted">―</span>`;
+    // 目標の変更ログ（誰がいつ）。あれば目標セルの下に控えめに出す。
+    const meta = targetMetaOf(c, mt.key);
+    const metaHtml = meta
+      ? `<div class="tr-meta">${esc(meta.by || "—")}${meta.at ? "・" + shortYmd(meta.at) : ""}</div>`
+      : "";
     return `<tr>
       <td class="tr-l">${esc(mt.label)}${dir}</td>
-      <td class="tr-v">${fmtMetricVal(mt, target)}</td>
+      <td class="tr-v">${fmtMetricVal(mt, target)}${metaHtml}</td>
       <td class="tr-v">${actHtml}</td>
       <td class="tr-a">${rateHtml}</td></tr>`;
   }).join("");
