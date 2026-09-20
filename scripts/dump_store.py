@@ -201,7 +201,10 @@ def main() -> int:
         # 画面(export)と同じパイプライン（同名×別見出しの売上行を保持し、点数は名前で合算・
         # サブ畳み→合算→品目区分）を忠実に再現。各月の区分結果と、指定月の中身を出す。
         try:
-            from hansoku.web.export import _categories_for_month, _nest_zero_subs
+            from hansoku.web.export import (
+                ZERO_SUB_OTHER_PARENT as ZERO_OTHER_NAME,
+                _categories_for_month, _nest_zero_subs,
+            )
         except Exception as e:  # noqa: BLE001
             _nest_zero_subs = None
             print(f"\n（品目区分パイプライン読込に失敗: {e}）")
@@ -287,6 +290,41 @@ def main() -> int:
                         sq = s.get("qty") or 0
                         extra = f" / 売上{sv:,}円" if sv else ""
                         print(f"      ・{s.get('name')}: {sq:,}点{extra}")
+
+            # 監査: AUDIT_FROM〜AUDIT_TO（既定 2025-01〜2026-08）の全月で、割り振り切れずに
+            # 「その他」へ落ちる商品を洗い出す。相談材料。
+            af = os.environ.get("AUDIT_FROM", "2025-01")
+            at = os.environ.get("AUDIT_TO", "2026-08")
+            amonths = [m for m in months_all if af <= m <= at]
+            if amonths:
+                sell_other: dict[str, list] = {}   # 売上つきでその他に落ちた実売れ（本当の未割当）
+                zero_other: dict[str, list] = {}   # その他の内訳（0円キー）に集まった名前
+                for m in amonths:
+                    its = _nest_zero_subs(_items_for(m), rules)
+                    for p in its:
+                        cat = classify_category(p.get("name", ""), rules, p.get("group"))
+                        if cat != other_name:
+                            continue
+                        if p.get("name") == ZERO_OTHER_NAME:
+                            for s in (p.get("subs") or []):
+                                a = zero_other.setdefault(s.get("name"), [0, 0])
+                                a[0] += s.get("qty") or 0
+                                a[1] += round(s.get("sales") or 0)
+                        else:
+                            a = sell_other.setdefault(p.get("name"), [0, 0, p.get("group")])
+                            a[0] += round(p.get("sales") or 0)
+                            a[1] += p.get("qty") or 0
+                print(f"\n== 監査 {af}〜{at}：その他に落ちた“売上つき”商品（＝要割り振り）"
+                      f"{len(sell_other)}種 ==")
+                if not sell_other:
+                    print("  （なし＝売上のある商品は全て区分に割り振り済み）")
+                for name, (sv, q, grp) in sorted(sell_other.items(), key=lambda x: -x[1][0]):
+                    print(f"  {name}: 累計{sv:,}円 / {q:,}点 [{grp or '見出し無し'}]")
+                print(f"\n== 監査 {af}〜{at}：その他の内訳（0円キー）に集約された名前"
+                      f"{len(zero_other)}種（相談用）==")
+                for name, (q, sv) in sorted(zero_other.items(), key=lambda x: -x[1][0]):
+                    extra = f" / 売上{sv:,}円" if sv else ""
+                    print(f"  {name}: 累計{q:,}点{extra}")
 
         # MONTHS 環境変数で指定した月の商品上位を出す（例: 前年の秋の商品を洗い出す）。
         want = [m.strip() for m in os.environ.get("MONTHS", "").split(",") if m.strip()]

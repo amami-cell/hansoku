@@ -173,6 +173,7 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
     sub_contains = (rules or {}).get("sub_products_contains") or {}
     qty_rollup = set((rules or {}).get("sub_qty_rollup") or [])
     merge_cfg = (rules or {}).get("sub_merge_prefixes") or {}
+    no_nest = tuple(str(s) for s in ((rules or {}).get("no_nest_contains") or []) if s)
     if not zero_groups and not sub_exact and not sub_contains:
         return items
     by_name: dict[str, dict] = {}
@@ -184,6 +185,12 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
     synthetic: dict[str, dict] = {}
     for it in items:
         group = it.get("group")
+        # 0) 見出しが zero_groups でも「畳まずトップに残す」商品（例: セット券見出しに紛れ込む
+        #    "ジェラートドリンク…" は実売れの飲料なので、区分（ドリンク）で単品表示する）。
+        nm0 = it.get("name") or ""
+        if no_nest and any(s in nm0 for s in no_nest):
+            tops.append(it)
+            continue
         parent_name: str | None = None
         # 1) 商品名でのサブ指定（完全一致→部分一致）を最優先。マップ済み見出しや
         #    「その他の内訳」送りより先に判定する（例 "P・…"→"Pドリンク", "ICE"→その他の内訳,
