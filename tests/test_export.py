@@ -60,8 +60,8 @@ def test_親が実在しなければ表示専用の親ノードを作る():
     assert classify_category(parent["name"], ZERO_RULES) == "ジェラート"
 
 
-def test_未マップの見出しはその他の内訳に集約される():
-    """zero_groups に無い見出しのサブは暫定「その他の内訳」にまとめる。"""
+def test_未マップの見出しでも売上0のみその他の内訳に集約される():
+    """zero_groups に無い見出しでも、売上0の真の0円選択だけを「その他の内訳」にまとめる。"""
     items = [
         {"name": "P・コーラ", "sales": 0, "rank": None, "qty": 15, "group": "11:ソフトドリンク"},
         {"name": "P・ジンジャー", "sales": 0, "rank": None, "qty": 7, "group": "11:ソフトドリンク"},
@@ -71,6 +71,23 @@ def test_未マップの見出しはその他の内訳に集約される():
     assert tops[0]["name"] == "その他の内訳"
     assert tops[0]["synthetic"] is True
     assert len(tops[0]["subs"]) == 2
+
+
+def test_未マップ見出しでも売上のある実売れ商品はトップに残る():
+    """13:紅茶=レモン / 14:アルコール=大人のレモンティー のような、FW見出しを持つが
+    売上のある実商品は畳まず、トップ階層に残す（品目区分で正しく分類するため）。"""
+    items = [
+        {"name": "大人のレモンティー", "sales": 12000, "rank": None, "qty": 16, "group": "14:アルコール"},
+        {"name": "レモン", "sales": 300, "rank": None, "qty": 10, "group": "13:紅茶"},
+        {"name": "P・コーラ", "sales": 0, "rank": None, "qty": 15, "group": "11:ソフトドリンク"},
+    ]
+    tops = _nest_zero_subs(items, ZERO_RULES)
+    names = [t["name"] for t in tops]
+    assert "大人のレモンティー" in names        # 売上あり→トップに残る
+    assert "レモン" in names
+    assert "その他の内訳" in names              # 売上0の P・コーラ だけ集約
+    other = next(t for t in tops if t["name"] == "その他の内訳")
+    assert [s["name"] for s in other["subs"]] == ["P・コーラ"]
 
 
 def test_zero_groupsが無い店は素通し():

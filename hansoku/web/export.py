@@ -182,8 +182,14 @@ def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
         group = it.get("group")
         parent_name: str | None = None
         if group and zero_groups:
-            # FW見出しを持つサブ：見出しから親を決める（未マップは その他の内訳）。
-            parent_name = zero_groups.get(_group_label(group), ZERO_SUB_OTHER_PARENT)
+            label = _group_label(group)
+            if label in zero_groups:
+                parent_name = zero_groups[label]     # マップ済み見出し→親メインへ
+            elif not ((it.get("sales") or 0) > 0):
+                # 未マップ見出し かつ 売上0 ＝ 真の0円選択のみ「その他の内訳」へ。
+                parent_name = ZERO_SUB_OTHER_PARENT
+            # 未マップ見出しでも売上のある実売れ商品（13:紅茶=レモン, 14:アルコール=大人の
+            # レモンティー等）はトップに残す＝品目区分で正しく分類する（groups で上書き可）。
         if parent_name is None:
             # 見出し無し（or zero_groups 無し）は商品名でサブ判定。
             parent_name = _match_sub_parent(it.get("name"), sub_exact, sub_contains)
