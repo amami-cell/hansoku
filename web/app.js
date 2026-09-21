@@ -2445,7 +2445,12 @@ function fwinDrag(win, handle) {
 // ── 商品内訳／部門別の小パネル（PC=浮く小窓・複数/自由リサイズ／携帯=下シート＋タブ）──
 // kind:"cat"=区分の商品内訳（点数・構成比）／"month"=その月の部門別一覧（区分ごと）。
 // 販促に関わる区分・商品は色付け（promo クラス）。desc={kind,code,m,cat}
-const isMobile = () => !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches);
+// 「携帯として下シートで開く」判定。幅だけで見ると、PCの画面を半分にしただけでも
+// 携帯扱いになってしまう。実機の携帯（細い幅 かつ 指タッチ＝ホバー無し）だけを携帯とし、
+// PCはウインドウを細くしても常にPC用の浮く小窓で統一する。
+const isMobile = () => !!(window.matchMedia
+  && window.matchMedia("(max-width: 640px)").matches
+  && window.matchMedia("(hover: none) and (pointer: coarse)").matches);
 const panelKey = d => d.kind === "month" ? `M:${d.code}:${d.m}` : `${d.code}:${d.m}:${d.cat}`;
 // ── 0円サブ（選択メニュー内訳）の畳み表示 ────────────────────────────────────
 // 親メイン商品の行に付ける開閉ボタン（既定＝畳む）と、開いたときの内訳（サブ）行。
@@ -2698,18 +2703,32 @@ function renderWindowBody(win) {
   const c = panelContent(win._desc);
   win.innerHTML = `<div class="fw-head"><span class="fw-dot" style="background:${c.color}"></span>` +
     `<span class="fw-ti">${esc(c.title)}</span><span class="fw-sub">${c.sub}</span>` +
-    `<button class="fw-sz" aria-label="大きさを切替">⤢</button>` +
+    `<button class="fw-sz" aria-label="縦を画面いっぱいに広げる／戻す">⤢</button>` +
+    `<button class="fw-full" aria-label="全画面表示">⛶</button>` +
     `<button class="fw-x" aria-label="閉じる">×</button></div>` +
     panelCtrl() +
     `<ul class="fw-list">${c.list}</ul>`;
-  win.querySelector(".fw-x").addEventListener("click", () => win.remove());
-  const SIZES = ["", "fw-lg", "fw-xl"];
+  win.querySelector(".fw-x").addEventListener("click", () => {
+    if (document.fullscreenElement === win && document.exitFullscreen) document.exitFullscreen();
+    win.remove();
+  });
+  // ⤢＝縦を画面いっぱいまで伸ばす／既定サイズに戻す。横幅はそのまま（どのカテゴリでも
+  // 縦は画面ぶん使い切る）。一覧がそれより長ければ中でスクロールする。
   win.querySelector(".fw-sz").addEventListener("click", e => {
     e.stopPropagation();
-    const cur = SIZES.findIndex(s => s && win.classList.contains(s));
-    win.style.width = ""; win.style.height = "";
-    win.classList.remove("fw-lg", "fw-xl");
-    const next = SIZES[(cur + 1 + 1) % SIZES.length]; if (next) win.classList.add(next);
+    const tall = win.classList.toggle("fw-tall");
+    win.style.height = "";                       // クラス側の高さを使う（手動リサイズをリセット）
+    win.style.top = tall ? "8px" : win.style.top; // 上端に寄せて縦を使い切る
+    fwinFront(win);
+  });
+  // ⛶＝全画面（別タブで開いたときのイメージ）。対応ブラウザは Fullscreen API、
+  // 使えないときは擬似全画面（画面いっぱいの固定オーバーレイ）にフォールバックする。
+  win.querySelector(".fw-full").addEventListener("click", e => {
+    e.stopPropagation();
+    if (document.fullscreenElement === win) { document.exitFullscreen && document.exitFullscreen(); return; }
+    if (win.classList.contains("fw-full-fb")) { win.classList.remove("fw-full-fb"); return; }
+    if (win.requestFullscreen) win.requestFullscreen().catch(() => win.classList.add("fw-full-fb"));
+    else win.classList.add("fw-full-fb");
     fwinFront(win);
   });
   fwinDrag(win, win.querySelector(".fw-head"));
