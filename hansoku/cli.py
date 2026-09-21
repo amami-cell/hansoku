@@ -21,6 +21,7 @@ from .db import AggregateQuery, get_appdb, get_warehouse
 from .ingest.fw_sheet import TAB_TO_METRIC, ingest
 from .ingest.infomart_sheet import ingest as infomart_ingest
 from .ingest.pos_sheet import ingest as pos_ingest
+from .ingest.pos_sheet import looks_broken as pos_looks_broken
 from .ingest.sheets_client import FixtureSheetReader, GoogleSheetReader
 from .model import GRAIN_MONTH, GRAINS
 from .settings import load_settings
@@ -212,7 +213,9 @@ def cmd_ingest_pos(args: argparse.Namespace) -> int:
         )
         return 1
     print(report.summary())
-    return 0 if report.ok else 1
+    # report.ok では判定しない。よその会社の店があるのは正常で、
+    # それで赤くすると「データは入ったのにジョブは失敗」になる。
+    return 1 if pos_looks_broken(report) else 0
 
 
 def cmd_sheet_tabs(args: argparse.Namespace) -> int:

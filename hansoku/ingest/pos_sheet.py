@@ -36,6 +36,19 @@ from .sheets_client import SheetReader
 SOURCE = "pos_sheet"
 TAB = "POS売上"
 
+
+def looks_broken(report: IngestReport) -> bool:
+    """**この取り込みにとっての異常**を判定する。
+
+    `IngestReport.ok` は使えない。あちらは `unknown_stores` が空であることを
+    求めるが、このタブにはよその会社の店が入るのが正常だから
+    （実測で15行中12行が他社）。タブが無い・行を読み飛ばした、を異常とする。
+
+    中断の判断と終了コードで**同じ関数を使う**こと。片方だけ直すと、
+    「データは入ったのにジョブは赤」になる（実際そうなった）。
+    """
+    return bool(report.tabs_missing or report.skipped)
+
 # 見出し名 → 指標。**原価はまだ入れない。**
 # 新Uレジの材料原価は「原価・販管費登録」への手入力が元で、実測（2026-08）では
 # 未登録のため 0 だった。取れていない値の経路を先に作っても確かめようがない。
@@ -153,7 +166,7 @@ def ingest(
     # 大量に入る（ダイニーのアカウントは90店舗ぶん見えている）ので、
     # unknown_stores があることは正常。他の取り込みと違って中断の理由にしない。
     # タブが無い・行を読み飛ばした、のほうが異常なのでそちらで判断する。
-    if strict and (report.tabs_missing or report.skipped):
+    if strict and looks_broken(report):
         raise RuntimeError("POS売上の取り込みに取りこぼしがあります:\n" + report.summary())
     if report.unknown_stores:
         print(f"[{TAB}] マスタに無い店 {len(report.unknown_stores)}件は飛ばしました"

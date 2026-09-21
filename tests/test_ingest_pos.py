@@ -132,3 +132,24 @@ class Test中断の判断:
 
         with _pytest.raises(RuntimeError):
             ingest(FixtureSheetReader({}), master, warehouse, strict=True)
+
+
+class Test終了コード:
+    """**中断の判断と終了コードで同じ基準を使う。** 片方だけ直すと
+    「データは入ったのにジョブは赤」になる（実際そうなった）。"""
+
+    def test_よその店だけなら異常ではない(self):
+        from hansoku.ingest.fw_sheet import IngestReport
+        from hansoku.ingest.pos_sheet import looks_broken
+
+        r = IngestReport(rows_read=15, rows_built=2, rows_loaded=2)
+        r.unknown_stores["喰人梅田東通り店"] = 1
+        assert not r.ok           # 既存の基準では「取りこぼしあり」
+        assert not looks_broken(r)  # この取り込みでは正常
+
+    def test_タブ欠落と読み飛ばしは異常(self):
+        from hansoku.ingest.fw_sheet import IngestReport
+        from hansoku.ingest.pos_sheet import looks_broken
+
+        assert looks_broken(IngestReport(tabs_missing=["POS売上"]))
+        assert looks_broken(IngestReport(skipped=["3行目: 年月が空"]))
