@@ -27,6 +27,8 @@ from hansoku.model import (
     METRIC_DRINK_THEORY_COST,
     METRIC_FOOD_SALES,
     METRIC_FOOD_THEORY_COST,
+    METRIC_PRODUCT_COST,
+    METRIC_PRODUCT_SALES,
 )
 from hansoku.settings import load_settings
 from hansoku.stores import StoreMaster
@@ -99,14 +101,38 @@ def main() -> None:
                     ym = r["date"].strftime("%Y-%m")
                     present[(r["store_code"], ym, metric)] = True
 
-        # 2) 実際に原価率が出せる (店, 月)。画面と同じ ratio() で判定。
+        # 2) 実際に原価率が出せる (店, 月)。画面と同じ判定：
+        #    理論原価（共有シート）で出せる月＋ABC原価金額で補完できる月。
         cr_months: dict[str, set[str]] = {c: set() for c in codes}
+        theory_months: dict[str, set[str]] = {c: set() for c in codes}
+        abc_months: dict[str, set[str]] = {c: set() for c in codes}
         for ym in months:
             ms = date(int(ym[:4]), int(ym[5:7]), 1)
             me = date(int(ym[:4]), int(ym[5:7]), 28)
             for mv in ratio(wh, "cost_rate", date_from=ms, date_to=me, store_codes=codes):
                 if mv.value:
                     cr_months.setdefault(mv.store_code, set()).add(ym)
+                    theory_months.setdefault(mv.store_code, set()).add(ym)
+        # ABC 原価金額での補完（理論が無い店・月を埋める。画面の cost_rate と同じ）。
+        abc_cost: dict[tuple[str, str], float] = {}
+        abc_sales: dict[tuple[str, str], float] = {}
+        for metric, acc in ((METRIC_PRODUCT_COST, abc_cost), (METRIC_PRODUCT_SALES, abc_sales)):
+            for r in wh.aggregate(
+                AggregateQuery(
+                    date_from=m_from, date_to=m_to, grain=GRAIN_MONTH,
+                    metrics=[metric], store_codes=codes,
+                    group_by=("store_code", "date"),
+                )
+            ):
+                if r.get("value"):
+                    acc[(r["store_code"], r["date"].strftime("%Y-%m"))] = r["value"]
+        for (c_code, ym), cost in abc_cost.items():
+            sales = abc_sales.get((c_code, ym))
+            if cost and sales and ym in months and ym not in cr_months.get(c_code, set()):
+                rate = cost / sales
+                if 0 < rate <= 1:
+                    cr_months.setdefault(c_code, set()).add(ym)
+                    abc_months.setdefault(c_code, set()).add(ym)
 
     # 3) 店ごとに分類して出力。
     done, partial, none_ = [], [], []
@@ -141,23 +167,30 @@ def main() -> None:
         print("- なし")
     print("")
 
+    def _src(code: str) -> str:
+        t, ab = len(theory_months.get(code, set())), len(abc_months.get(code, set()))
+        return f"（内訳 理論{t}／ABC補完{ab}）"
+
     print(f"## △ 一部の月しか出せない店（取りこぼし）… {len(partial)}店")
     if partial:
         for s, got in partial:
             missing = [ym for ym in months if ym not in got]
             print(f"- {s.store_code} {s.store_name}（{s.region or '—'}）… "
-                  f"取込 {len(got)}/{len(months)}ヶ月・欠け {len(missing)}ヶ月: {', '.join(missing)}")
+                  f"取込 {len(got)}/{len(months)}ヶ月{_src(s.store_code)}・欠け {len(missing)}ヶ月: {', '.join(missing)}")
     else:
         print("- なし")
     print("")
 
     print(f"## ✓ 全月そろっている店… {len(done)}店")
     for s, got in done:
-        print(f"- {s.store_code} {s.store_name}（{s.region or '—'}）")
+        print(f"- {s.store_code} {s.store_name}（{s.region or '—'}）{_src(s.store_code)}")
     print("")
 
+    tot_theory = sum(len(v) for v in theory_months.values())
+    tot_abc = sum(len(v) for v in abc_months.values())
     print("## まとめ")
     print(f"- 稼働 {len(master.active)}店中： 未取込 {len(none_)}／一部 {len(partial)}／全月 {len(done)}")
+    print(f"- 原価率が出せる(店×月)の内訳： 理論原価 {tot_theory} ／ ABC補完 {tot_abc}")
     print(f"- 対象期間: {a} 〜 {b}")
 
 
