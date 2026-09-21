@@ -1184,6 +1184,13 @@ function render() {
     }));
   app.querySelectorAll("[data-crurl]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); openCreativePreview(el.dataset.crurl, el.dataset.crmime, el.dataset.crtitle, el.dataset.cropen); }));
+  // 販促カルーセルは、開いたとき現在月のカードを中央に寄せる（前後の月が両端にチラ見え）。
+  app.querySelectorAll(".pcar").forEach(car => {
+    const now = car.querySelector(".pcar-mo.now") || car.querySelector(".pcar-mo");
+    if (!now) return;
+    const cr = car.getBoundingClientRect(), nr = now.getBoundingClientRect();
+    car.scrollLeft += (nr.left - cr.left) - (car.clientWidth - now.clientWidth) / 2;
+  });
   app.querySelectorAll("[data-cfilter]").forEach(el =>
     el.addEventListener("click", () => {
       const [dim, val] = el.dataset.cfilter.split(":");
@@ -1926,6 +1933,20 @@ async function fetchServerCreatives() {
 const allCreatives = () => (DATA.creatives || []).concat(UPLOADED_CREATIVES);
 // 施策に紐づく制作物（台帳＋アップロード両方）
 const creativesForCampaign = id => allCreatives().filter(cr => cr.campaign_id === id);
+// その店・その月（YYYY-MM）に掛かる制作物。＝その月に実施中の施策に紐づくPOP/PDFを集める。
+// 同じ制作物が複数施策にまたがっても1回だけ（id→urlで重複排除）。
+function creativesForMonth(code, m) {
+  const ids = new Set((DATA.campaigns || [])
+    .filter(c => (c.stores || []).includes(code) && c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m)
+    .map(c => c.id));
+  const seen = new Set(); const out = [];
+  for (const cr of allCreatives()) {
+    if (!ids.has(cr.campaign_id)) continue;
+    const key = cr.id || cr.url; if (seen.has(key)) continue;
+    seen.add(key); out.push(cr);
+  }
+  return out;
+}
 
 // ── 販促プラン（アプリ内で起票・複製する計画。/api/plans）───────────────────
 // 台帳(schedule.yaml)由来の「確定した販促」に、アプリで起票した「計画」を足して
@@ -4462,8 +4483,6 @@ function storeAnnualChart(code, year) {
   const camps = (DATA.campaigns || [])
     .filter(c => (c.stores || []).includes(code) && c.start.slice(0, 10) <= ye && (c.end || c.start).slice(0, 10) >= ys)
     .sort((a, b) => a.start < b.start ? -1 : 1);
-  const head = Array.from({ length: 12 }, (_, i) =>
-    `<button class="gmh" data-smonth="${code}:${year}-${String(i + 1).padStart(2, "0")}">${i + 1}</button>`).join("");
 
   // 販促を「対象区分」（パフェ/ケーキ/コラボ…）でまとめ、区分ごとに1レーン＝1行にする。
   // 帯の色も区分色でそろえる。同じ区分で“日付”が重なる販促があるときだけ、その区分に
@@ -4484,60 +4503,59 @@ function storeAnnualChart(code, year) {
     }
     return c;
   };
-  const makeBar = (c, col) => {
-    const st = campStatus(c);
-    const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
-    // 帯の位置は「分数月」（月内の日付も反映）。同じ月に接する2件が重なって見えない。
-    const monthFrac = (ds, end = false) => {
-      let dd = ds < ys ? ys : (ds > ye ? ye : ds);
-      const mo = +dd.slice(5, 7), day = +dd.slice(8, 10);
-      const dim = new Date(+dd.slice(0, 4), mo, 0).getDate();
-      return Math.min(1, Math.max(0, ((mo - 1) + (end ? day : day - 1) / dim) / 12));
-    };
-    const left = monthFrac(s) * 100;
-    const w = Math.max(1.2, (monthFrac(e, true) - monthFrac(s)) * 100);
-    const ef = storeCampEffect(c, code);
-    const mark = ef.mark || (VERDICT_MARK[campVerdict(c).tone] || "");
-    const tone = ef.mark ? ef.tone : campVerdict(c).tone;
-    // ホバー用（マウスを合わせると売上・昨対・前回比が出る）。
-    let tip = `${c.title}｜${campRange(c)}`;
-    if (ef.measured) {
-      tip += `｜${ef.label} ${man(ef.cur)}円・昨対${signed(ef.pct)}%`;
-      const prevOcc = campPrevOccurrence(c);
-      if (prevOcc) { const pb = campTargeted(prevOcc, code); if (pb && pb.cur) tip += `・前回${signed((ef.cur / pb.cur - 1) * 100)}%`; }
-    } else if (ef.state) { tip += `｜${ef.state}`; }
-    return `<button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${col}"
-      data-tip="${esc(tip)}">${mark ? `<span class="gvm ${tone}">${mark}</span>` : ""}<span class="gbt">${esc(c.title)}</span></button>`;
-  };
-  // 区分ごとにまとめる。並びは販促件数が多い区分を上に（同数は開始が早い順）。
+  // 区分ごとにまとめて色を割り当てる（凡例とカルーセルの販促チップで同じ色を使う）。
+  // 並びは販促件数が多い区分を上に（同数は開始が早い順）。
   const byCat = new Map();
   for (const c of camps) { const k = catOf(c); (byCat.get(k) || byCat.set(k, []).get(k)).push(c); }
   const catOrder = [...byCat.keys()].sort((a, b) =>
     (byCat.get(b).length - byCat.get(a).length) || (byCat.get(a)[0].start < byCat.get(b)[0].start ? -1 : 1));
   catOrder.forEach((cat, i) => { laneColor[cat] = assignColor(cat, i); });
-  const laneHtml = [];
-  for (const cat of catOrder) {
-    const col = laneColor[cat];
-    const list = byCat.get(cat).slice().sort((a, b) => a.start < b.start ? -1 : 1);
-    const sub = []; // この区分の中のサブレーン（“日付”が重なったときだけ増える）
-    for (const c of list) {
-      const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
-      let lane = sub.find(L => L.lastEnd < s);   // 前の帯の終了日より後に始まれば同じ行
-      if (!lane) { lane = { lastEnd: "", bars: [] }; sub.push(lane); }
-      lane.bars.push(makeBar(c, col)); if (e > lane.lastEnd) lane.lastEnd = e;
-    }
-    sub.forEach((L, idx) => {
-      const label = idx === 0 ? cat : `${cat}${idx + 1}`;
-      laneHtml.push(`<div class="grow"><div class="glabel gcat"><span class="kdot" style="background:${col}"></span>${esc(label)}</div><div class="gtrack">${L.bars.join("")}</div></div>`);
-    });
-  }
-  const rows = laneHtml.join("");
+
+  // POP・制作物のサムネ（画像／PDF1ページ目は画像、その他は種別バッジ）。押すと小窓プレビュー。
+  const popThumb = cr => {
+    const mime = cr.mime || "", isImg = mime.startsWith("image/"), isPdf = mime.includes("pdf");
+    const hasThumb = isPdf && cr.thumb, showImg = isImg || hasThumb;
+    const pvUrl = hasThumb ? cr.thumb : cr.url, pvMime = hasThumb ? "image/png" : mime;
+    const label = isPdf ? "PDF" : isImg ? "IMG" : ((cr.url || "").split(".").pop() || "資料").toUpperCase().slice(0, 4);
+    const view = `data-crurl="${pvUrl}" data-crmime="${esc(pvMime)}" data-crtitle="${esc(cr.title)}" data-cropen="${cr.url}"`;
+    return showImg
+      ? `<button type="button" class="poth" ${view} title="${esc(cr.title)}"><img src="${pvUrl}" alt="${esc(cr.title)}" loading="lazy"></button>`
+      : `<button type="button" class="poth poth-x" ${view} title="${esc(cr.title)}"><span class="cext">${label}</span></button>`;
+  };
+  // その月に実施中の販促チップ（色＝区分色・◎/△つき）。押すと施策詳細へ。
+  const campChip = c => {
+    const col = laneColor[catOf(c)] || "var(--ink-3)";
+    const st = campStatus(c);
+    const ef = storeCampEffect(c, code);
+    const mark = ef.mark || (VERDICT_MARK[campVerdict(c).tone] || "");
+    const tone = ef.mark ? ef.tone : campVerdict(c).tone;
+    return `<button type="button" class="pcar-camp ${st.k}" data-camp="${c.id}" style="--kc:${col}">` +
+      `<span class="pcc-dot"></span><span class="pcc-t">${esc(c.title)}</span>` +
+      `${mark ? `<span class="gvm ${tone}">${mark}</span>` : ""}<span class="pcc-r">${esc(campRange(c))}</span></button>`;
+  };
+  // 12ヶ月ぶんのカード。上＝その月のPOP、下＝その月の販促。横スクロールで前後の月が両端にチラ見え。
+  const months12 = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
+  const carCards = months12.map((m, i) => {
+    const inMonth = camps.filter(c => c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m)
+      .sort((a, b) => a.start < b.start ? -1 : 1);
+    const crs = creativesForMonth(code, m);
+    const cls = (m === CURRENT_MONTH ? " now" : "") + (m > CURRENT_MONTH ? " prov" : "");
+    const pops = crs.length
+      ? `<div class="pcar-pops">${crs.map(popThumb).join("")}</div>`
+      : `<div class="pcar-pops empty"><span class="pcar-none">POP・制作物なし</span></div>`;
+    const chips = inMonth.length
+      ? `<div class="pcar-camps">${inMonth.map(campChip).join("")}</div>`
+      : `<div class="pcar-camps empty"><span class="pcar-none">この月の販促なし</span></div>`;
+    return `<div class="pcar-mo${cls}" role="listitem">` +
+      `<button type="button" class="pcar-h" data-smonth="${code}:${m}">${i + 1}月<span class="pcar-yr">${year}</span></button>` +
+      `${pops}${chips}</div>`;
+  }).join("");
 
   // 凡例（その年に出ている種類）＋見方（誰が見ても操作が分かるように）
   const legend = catOrder.length
     ? `<div class="glegend">${catOrder.map(cc => `<span class="glg"><i style="background:${laneColor[cc]}"></i>${esc(cc)}</span>`).join("")}
         <span class="glg"><i class="gvm good">◎</i>効果あり</span><span class="glg"><i class="gvm warn">△</i>要改善</span></div>
-       <div class="ghelp">区分ごとに帯をまとめています（色＝品目区分）。同じ区分で期間が重なる販促は「パフェ2」のように行を分けます。<b>帯や販促名</b>を押すと詳細、<b>上の月番号</b>を押すとその月の詳細（構成比・POP）へ。◎/△は対象区分の前年比で自動判定。</div>`
+       <div class="ghelp">色＝品目区分。カードを<b>左右にスクロール</b>すると前後の月が両端にチラ見えします。上＝その月のPOP・制作物（押すと拡大）、下＝その月の販促（押すと詳細）。<b>◯月</b>を押すとその月の詳細（構成比・POP）へ。◎/△は対象区分の前年比で自動判定。</div>`
     : "";
 
   // 年サマリ（確定分の売上合計・前年比・予算達成の平均・販促◎/△）。チャートの頭に置いて、
@@ -4562,11 +4580,8 @@ function storeAnnualChart(code, year) {
   </div>`;
 
   return `${yearSummary}${storeYearMatrix(code, year)}
-    <div class="mmhd" style="margin-top:16px">販促 年間チャート<span class="mmhint">帯＝実施期間（横軸＝月）。◎効いた/△要改善。帯や販促名を押すと詳細、月番号を押すと月の詳細へ</span></div>
-    <div class="panel gantt">
-    <div class="grow ghead"><div class="glabel gh">区分</div><div class="gmonths">${head}</div></div>
-    ${camps.length ? rows : `<div class="empty">${year}年に走った販促はありません。</div>`}
-  </div>${legend}`;
+    <div class="mmhd" style="margin-top:16px">販促 年間チャート<span class="mmhint">横スクロールで月移動（前後の月が両端にチラ見え）。上＝その月のPOP・制作物、下＝その月の販促。押すと詳細へ。◎効いた/△要改善</span></div>
+    <div class="pcar" role="list">${carCards}</div>${legend}`;
 }
 
 // 月次の推移を「1行＝1ヶ月」の一覧にする。年間まとめではなく、月ごとの結果（売上・前年比・

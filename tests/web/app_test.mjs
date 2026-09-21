@@ -983,14 +983,16 @@ test("storeYearMatrix：品目構成比を『区分×月』の行で一覧に出
   assert.ok(html.includes("data-compocell"), "構成比の金額セルは押せる（商品内訳の小窓）");
 });
 
-test("storeAnnualChart：販促は年間チャート（帯）として見出し付きで出す", () => {
+test("storeAnnualChart：販促は月カルーセル（上POP・下販促）として見出し付きで出す", () => {
   const ctx = loadApp(annualData);
   const html = call(ctx, `storeAnnualChart("1160","2025")`);
   assert.ok(html.includes("販促 年間チャート"), "販促の年間チャート見出し");
-  assert.ok(html.includes('class="panel gantt"'), "帯（ガント）で表示");
-  assert.ok(html.includes('data-camp="snow"'), "販促の帯");
-  // 帯はネイティブ title ではなく、暗色ツールチップ用の data-tip（｜区切り）を持つ
-  assert.ok(/class="gbar[^"]*"[^>]*data-tip="[^"]*｜/.test(html), "帯に構造化ツールチップ(data-tip)");
+  assert.ok(html.includes('class="pcar"'), "月カルーセルで表示（横スクロール）");
+  assert.ok(/class="pcar-mo[^"]*"/.test(html), "月ごとのカード");
+  assert.ok(html.includes('data-camp="snow"'), "その月に実施中の販促チップ");
+  assert.ok(/data-smonth="1160:2025-09"/.test(html), "月見出しはその月の詳細へ飛べる");
+  // 制作物が無い月は「POP・制作物なし」のプレースホルダ（サムネ枠は上に置く設計）
+  assert.ok(html.includes("POP・制作物なし"), "POPが無い月はプレースホルダ");
 });
 
 test("renderStoreMonth：予算があれば売上カードに予算比ピル＋予算サブが出る（Steppy風）", () => {
