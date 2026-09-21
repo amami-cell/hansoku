@@ -32,20 +32,44 @@ class Test既知の差:
 class Test片方だけ0:
     """**以前はここを黙って飛ばしていた。** `if lo and ...` で 0 を弾いていたため、
     「取れていない口がある」といういちばん見たい形をこぼしていた。
-    実際 1766 の fw_sheet=0 / pos_sheet=実数 が一度も報告されなかった。"""
+    実際 1766 の fw_sheet=0 / pos_sheet=実数 が一度も報告されなかった。
 
-    def test_片方が0なら必ず出す(self):
+    ただし 0 が混ざっていること自体は異常ではない。**見たいのは「画面が 0 になるか」**。"""
+
+    def test_採用が0なら必ず出す(self):
+        # 実際に起きた事故。kind が第1キーで、FWの「確定の 0」が実数を押しのけた。
+        kind, _ = classify_gap({"fw_sheet": 0, "pos_sheet": 12640890}, adopted=0)
+        assert kind == "zero"
+
+    def test_採用が実数なら画面は正しいので赤くしない(self):
+        # 1766 は FW未連動。fw_sheet が 0 を書くのは仕様どおりで、
+        # pos_sheet の実数を採る。毎回赤くすると既知の差を外した意味が無くなる。
+        kind, _ = classify_gap(
+            {"fw_sheet": 0, "pos_sheet": 12640890}, adopted=12640890
+        )
+        assert kind == "zero_ok"
+
+    def test_採用値が分からなければ鳴らす側に倒す(self):
+        # 見逃すと画面が黙って 0 になる。分からないなら出す。
         kind, _ = classify_gap({"fw_sheet": 0, "pos_sheet": 12640890})
         assert kind == "zero"
 
     def test_税抜税込の組でも0なら既知にしない(self):
         # 既知の組だからといって、0 を見逃してよい理由にはならない。
-        kind, _ = classify_gap({"fw_sheet": 0, "fw_uriage_suii": 23014088})
+        kind, _ = classify_gap({"fw_sheet": 0, "fw_uriage_suii": 23014088}, adopted=0)
         assert kind == "zero"
 
     def test_両方0は静かにする(self):
         # 書かれていないだけ。鳴らしても打ち手が無い。
         assert classify_gap({"a": 0, "b": 0})[0] == "skip"
+
+    def test_採用が実数でも差の判定より0を先に見る(self):
+        # 0 と実数の「差」を % で語っても意味が無い。帯の判定へ落とさない。
+        kind, gap = classify_gap(
+            {"fw_sheet": 0, "fw_uriage_suii": 23014088}, adopted=23014088
+        )
+        assert kind == "zero_ok"
+        assert gap == 100.0
 
 
 class Test鳴らさない場合:

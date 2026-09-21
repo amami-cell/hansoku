@@ -1732,14 +1732,26 @@ KNOWN_GAPS: dict[frozenset, tuple[float, float]] = {
 }
 
 
-def classify_gap(by_src: dict, gap_pct: float = 1.0) -> tuple[str, float]:
+def classify_gap(
+    by_src: dict, gap_pct: float = 1.0, adopted: float | None = None
+) -> tuple[str, float]:
     """1つの (店,月) を複数の口が持っているとき、どう扱うかを決める。
 
     返り値は種別と差(%):
-      "zero"   … **片方だけ 0。** 取れていない口がある。いちばん見たい形
-      "known"  … 既知の差（税抜/税込）。数だけ数えて中身は並べない
-      "check"  … 要確認
-      "skip"   … 単独の口・両方0・差が小さい
+      "zero"     … **片方だけ 0 で、採用されている値も 0。** 画面が 0 になる。最優先
+      "zero_ok"  … 片方だけ 0 だが採用は実数。担当外の口が 0 を書いただけ。数だけ
+      "known"    … 既知の差（税抜/税込）。数だけ数えて中身は並べない
+      "check"    … 要確認
+      "skip"     … 単独の口・両方0・差が小さい
+
+    ``adopted`` は**集計が実際に採る値**（画面に出る値）。0 が混ざっていても、
+    採用されているのが実数なら画面は正しい。1766 は FW未連動なので fw_sheet が
+    0 を書くが、pos_sheet の実数を採るので**これは正常な形**。ここを毎回赤くすると
+    既知の差を外した意味が無くなる。
+
+    ⚠ **adopted が分からないときは鳴らす側に倒す。** 「採用が 0」は
+    このセッションで実際に起きた事故（kind が第1キーで FW の「確定の 0」が
+    実数を押しのけた）そのもので、見逃すと画面が黙って 0 になる。
 
     純粋な関数にしてあるのは、DBを立てずにここを固定するため。
     """
@@ -1747,6 +1759,8 @@ def classify_gap(by_src: dict, gap_pct: float = 1.0) -> tuple[str, float]:
         return "skip", 0.0
     lo, hi = min(by_src.values()), max(by_src.values())
     if lo <= 0 < hi:
+        if adopted is not None and adopted > 0:
+            return "zero_ok", 100.0
         return "zero", 100.0
     if not lo:
         return "skip", 0.0
@@ -1780,6 +1794,7 @@ def report_source_audit(
     """
     import sys as _sys
 
+    from ..db.warehouse import AggregateQuery
     from ..model import GRAIN_MONTH
 
     try:
@@ -1817,6 +1832,26 @@ def report_source_audit(
         per_month.setdefault(month, {})[src] = per_month.setdefault(month, {}).get(src, 0) + 1
         per_cell.setdefault((r["store_code"], month), {})[src] = float(r["value"])
 
+    # **集計が実際に採る値**（＝画面に出る値）を引く。採用順の再実装ではなく、
+    # 画面と同じ経路をそのまま使う。0 が混ざっていても採用が実数なら画面は正しい。
+    adopted: dict[tuple[str, str], float] = {}
+    try:
+        from datetime import date as _date
+
+        for row in warehouse.aggregate(
+            AggregateQuery(
+                date_from=_date(y, m, 1),
+                date_to=_date(ly, lm, 28),
+                grain=GRAIN_MONTH,
+                metrics=[metric],
+                group_by=("store_code", "date"),
+            )
+        ):
+            adopted[(row["store_code"], row["date"].strftime("%Y-%m"))] = float(row["value"])
+    except Exception as exc:  # noqa: BLE001
+        # 引けなかったら**鳴らす側に倒す**（adopted なし＝全部 zero 扱い）。
+        print(f"  （採用値を引けませんでした: {exc}。片方0はすべて要対応として出します）")
+
     print(f"=== 出どころ別 取り込み状況 metric={metric} / {date_from}〜{date_to} ===\n")
     print("月ごとの source（店数）:")
     prev_srcs: set[str] | None = None
@@ -1833,10 +1868,10 @@ def report_source_audit(
 
     # 同じ (店,月) を複数 source が持ち、値がずれているもの。
     # **既知の差と、片方が0のケースを分けて数える。**
-    conflicts, known, zeros = [], [], []
-    bucket = {"zero": zeros, "known": known, "check": conflicts}
+    conflicts, known, zeros, zeros_ok = [], [], [], []
+    bucket = {"zero": zeros, "zero_ok": zeros_ok, "known": known, "check": conflicts}
     for (code, month), by_src in sorted(per_cell.items()):
-        kind_, gap = classify_gap(by_src, gap_pct)
+        kind_, gap = classify_gap(by_src, gap_pct, adopted.get((code, month)))
         if kind_ == "skip":
             continue
         bucket[kind_].append((code, month, by_src, gap))
@@ -1855,7 +1890,12 @@ def report_source_audit(
         print(f"\n既知の差（{pairs}）: {len(known)}件 … 税抜と税込。SOURCE_PRIORITY で"
               "税込を採るので問題ない")
 
-    print(f"\n⚠ 片方だけ 0（取れていない口がある）: {len(zeros)}件")
+    if zeros_ok:
+        # 担当外の口が 0 を書いただけ。採用は実数なので画面は正しい。
+        # 例: 1766 は FW未連動で fw_sheet=0、pos_sheet の実数を採る。
+        print(f"\n担当外の口が 0（採用は実数なので画面は正しい）: {len(zeros_ok)}件")
+
+    print(f"\n⚠ 採用値が 0（画面が 0 になる）: {len(zeros)}件")
     _show(zeros, show_gap=False)
 
     print(f"\n要確認の食い違い（{gap_pct}% 以上・既知の差を除く）: {len(conflicts)}件")
@@ -1870,9 +1910,11 @@ def report_source_audit(
         )
     if conflicts or zeros or switches:
         print(f"::error::[出どころ] 切替 {len(switches)}件 / 要確認 {len(conflicts)}件 / "
-              f"片方0 {len(zeros)}件（既知の差 {len(known)}件は除く）")
+              f"採用が0 {len(zeros)}件"
+              f"（既知の差 {len(known)}件・担当外の0 {len(zeros_ok)}件は除く）")
         return 1
-    print(f"\n出どころは一貫しています。（既知の差 {len(known)}件は除く）")
+    print(f"\n出どころは一貫しています。"
+          f"（既知の差 {len(known)}件・担当外の0 {len(zeros_ok)}件は除く）")
     return 0
 
 
