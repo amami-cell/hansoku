@@ -104,6 +104,9 @@ class SourceSettings:
 
     fw_spreadsheet_id: str
     service_account_json: str
+    # POS取込シート（pos-sync が書く「POS売上」タブ）。**FW共有シートとは別物**。
+    # 未設定なら空で、POSの取り込みだけが動かない（他の取り込みには影響しない）。
+    pos_spreadsheet_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -186,6 +189,7 @@ def load_settings(env: Env | None = None) -> Settings:
 
     sources = SourceSettings(
         fw_spreadsheet_id=_env("FW_SPREADSHEET_ID", DEFAULT_FW_SPREADSHEET_ID),
+        pos_spreadsheet_id=_env("POS_SPREADSHEET_ID", ""),
         service_account_json=sa_json,
     )
 
