@@ -153,3 +153,21 @@ class Test終了コード:
 
         assert looks_broken(IngestReport(tabs_missing=["POS売上"]))
         assert looks_broken(IngestReport(skipped=["3行目: 年月が空"]))
+
+
+class Test取り込み元の優先順位:
+    """**FW側はFW未連動店に 0 を書く。** 既定の順位だとその 0 が実数を
+    押しのける。実測で 1766 の 2026-08 が 0 のままだった（投入は成功していた）。"""
+
+    def test_pos_sheetがFWより優先される(self):
+        from hansoku.db.warehouse import SOURCE_PRIORITY, _SOURCE_PRIORITY_DEFAULT
+
+        # 数字が小さいほど優先
+        assert SOURCE_PRIORITY["pos_sheet"] < SOURCE_PRIORITY["fw_sheet"]
+        assert SOURCE_PRIORITY["pos_sheet"] < SOURCE_PRIORITY["fw_uriage_suii"]
+        assert SOURCE_PRIORITY["pos_sheet"] < _SOURCE_PRIORITY_DEFAULT
+
+    def test_FW連動店にはpos_sheetの行を作らないので影響しない(self, master):
+        # 最優先にしても安全なのは、FW連動店に行を作らないから。
+        rows, _ = build_rows(rd(row(name="NagaGutsu", code="1151", pos="dinii")), master)
+        assert rows == []
