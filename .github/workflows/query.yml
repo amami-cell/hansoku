@@ -34,6 +34,10 @@ on:
         description: '店舗コード（空欄なら全店）'
         required: false
         default: ''
+      source:
+        description: '取り込み口を絞る（fw_sheet / fw_uriage_suii / pos_sheet）。空欄なら優先順位で1つ選ぶ'
+        required: false
+        default: ''
       group_by:
         description: '束ね方'
         type: choice
