@@ -10,8 +10,12 @@
 const METRIC_LABELS = {
   sales: "売上", food_sales: "フード売上", drink_sales: "ドリンク売上",
   food_theory_cost: "フード理論原価", drink_theory_cost: "ドリンク理論原価",
-  cost_rate: "理論原価率",
+  cost_rate: "理論原価率", actual_cost_rate: "実原価率",
 };
+// 率で持つ指標。円と違って期間合計にできず、グラフの軸も%になる。
+// 理論原価率（ABC部門）と実原価率（棚卸・仕入）は**別物**。その差が不明ロス。
+const RATIO_METRICS = new Set(["cost_rate", "actual_cost_rate"]);
+const isRatioMetric = m => RATIO_METRICS.has(m);
 const yen = n => "¥" + Math.round(n).toLocaleString("ja-JP");
 const man = n => (n / 10000).toFixed(0) + "万";
 const pct = n => (n * 100).toFixed(1) + "%";
@@ -530,7 +534,7 @@ function effectOver(code, c, accessor) {
   };
 }
 function campEffect(code, c) {
-  if (METRIC === "cost_rate") return null;
+  if (isRatioMetric(METRIC)) return null;
   return effectOver(code, c, valueAt);
 }
 // 施策期間の集客（客数）効果。売上と別枠（DATA.covers）。指標選択に依らず常に客数。
@@ -939,13 +943,24 @@ function budgetRate(code) {
   return { m: latest.m, rate: latest.v / b * 100 };
 }
 
+// 実原価（前月棚卸＋当月仕入−当月棚卸）。FWのABC部門に依存しないので、
+// 部門が紐付いていない店・月でも出る。rate は cost_rate と同じ分数。
+const acAt = (code, month) => ((DATA.actual_cost || {})[code] || {})[month];
+// suspect が付いた月は率として使わない。指標の並べ替えや粗利率の穴埋めに
+// 混ぜると、棚卸の取り違え（実測で 342.9% の月があった）がそのまま順位になる。
+// 消さずに店舗詳細では「要確認」として理由つきで出す（元データの誤りに気づけるように）。
+const acRateAt = (code, month) => {
+  const a = acAt(code, month);
+  return a && typeof a.rate === "number" && !a.suspect ? a.rate : undefined;
+};
 function valueAt(code, month) {
   if (METRIC === "cost_rate") return (DATA.cost_rate[code] || {})[month];
+  if (METRIC === "actual_cost_rate") return acRateAt(code, month);
   return ((DATA.monthly[code] || {})[month] || {})[METRIC];
 }
 function series(code, months) {
   return months.map(m => {
-    const v = METRIC === "cost_rate" ? (DATA.cost_rate[code] || {})[m] : valueAt(code, m);
+    const v = valueAt(code, m);
     return typeof v === "number" ? v : null;
   });
 }
@@ -1022,7 +1037,7 @@ function coversSummary(code) {
 // ── コントロール ─────────────────────────────────────────────────────────
 function buildMetricSelect() {
   const sel = document.getElementById("metricsel");
-  sel.innerHTML = DATA.metrics.concat(["cost_rate"])
+  sel.innerHTML = DATA.metrics.concat(["cost_rate", "actual_cost_rate"])
     .map(m => `<option value="${m}">${METRIC_LABELS[m] || m}</option>`).join("");
   sel.value = METRIC;
   sel.addEventListener("change", () => { METRIC = sel.value; render(); syncHash(); });
@@ -1570,7 +1585,11 @@ function storeProfit(code) {
     if (typeof cov === "number" && cov > 0) kt = ls.v / cov;
   }
   const lcr = latestWith(code, crAt);
-  return { kt, gp: lcr ? 1 - lcr.v : null };
+  // 理論が無い店は実原価で。どちらで出したかを gpSrc に持たせ、ラベルを変える。
+  // 同じ「粗利」の名前で根拠の違う2つを並べると、差（不明ロス）が読めなくなる。
+  const lac = lcr ? null : latestWith(code, acRateAt);
+  const gpr = lcr || lac;
+  return { kt, gp: gpr ? 1 - gpr.v : null, gpSrc: lcr ? "理論" : (lac ? "実原価" : null) };
 }
 
 function renderList() {
@@ -1623,14 +1642,14 @@ function renderList() {
     const profLine = (pf.kt != null || pf.gp != null || cr)
       ? `<div class="sprof">
           ${pf.kt != null ? `<span class="pf pf-kt" title="直近確定月の 売上÷客数">客単 ${yen(pf.kt)}</span>` : ""}
-          ${pf.gp != null ? `<span class="pf pf-gp ${pf.gp >= 0.65 ? "up" : pf.gp < 0.60 ? "warn" : ""}" title="100−FW理論原価率（ロス・棚卸差異は含まない）">理論粗利 ${pct(pf.gp)}</span>` : ""}
+          ${pf.gp != null ? `<span class="pf pf-gp ${pf.gp >= 0.65 ? "up" : pf.gp < 0.60 ? "warn" : ""}" title="${pf.gpSrc === "実原価" ? "100−実原価率（前月棚卸＋当月仕入−当月棚卸÷売上）" : "100−FW理論原価率（ロス・棚卸差異は含まない）"}">${pf.gpSrc || "理論"}粗利 ${pct(pf.gp)}</span>` : ""}
           ${cr ? `<span class="pf pf-cr" title="${esc(cr.tip)}">原価率 ${esc(cr.label)}</span>` : ""}
         </div>`
       : "";
     return `
       <button class="scard" data-store="${code}" style="--rc:${color}">
         <div class="stop"><span class="rtag">${region}</span>${storeName(code)}</div>
-        <div class="sbig">${METRIC === "cost_rate" ? "―" : man(total) + '<span class="unit">円</span>'}</div>
+        <div class="sbig">${isRatioMetric(METRIC) ? "―" : man(total) + '<span class="unit">円</span>'}</div>
         ${spark}
         ${profLine}
         ${promoLine}
@@ -1646,7 +1665,7 @@ function renderList() {
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
     <section class="block">
       <div class="bhead"><h2>店舗</h2>
-        <span class="bnote">${METRIC === "cost_rate" ? "理論原価率は期間合計にできないため ― と出ます" : METRIC_LABELS[METRIC] + "・期間合計"}／前年同月比（当月の暫定は除く）</span></div>
+        <span class="bnote">${isRatioMetric(METRIC) ? METRIC_LABELS[METRIC] + "は期間合計にできないため ― と出ます" : METRIC_LABELS[METRIC] + "・期間合計"}／前年同月比（当月の暫定は除く）</span></div>
       ${warnBox}
       ${controls}
       <div class="sgrid">${cards}</div>
@@ -1767,7 +1786,7 @@ function renderTargetBoard() {
 }
 
 function renderCampaigns() {
-  const isRatio = METRIC === "cost_rate";
+  const isRatio = isRatioMetric(METRIC);
   // 状態順（実施中→予定→終了）→ 同状態内は前年比の良い順（データ無しは後ろ）
   const STORD = { live: 0, soon: 1, done: 2 };
   const all = (DATA.campaigns || []).map(c => ({ c, s: campStatus(c), sum: campaignSummary(c) }));
@@ -3139,7 +3158,7 @@ function renderCampaign(id) {
   const sum = campaignSummary(c);
   const tgt = targetOf(c);
   const prog = campTimeProgress(c);
-  const isRatio = METRIC === "cost_rate";
+  const isRatio = isRatioMetric(METRIC);
 
   // 目標（進捗欄で編集）。目標は2026年10月分から。過ぎた施策には出さない。
   const goalBtn = !goalEligible(c) ? ""
@@ -3284,7 +3303,7 @@ function renderCampaign(id) {
 // 施策バーをタップで施策詳細、店名タップで店舗詳細へ。
 function renderManage() {
   const STATUS_ORDER = { live: 0, soon: 1, done: 2 };
-  const isRatio = METRIC === "cost_rate";
+  const isRatio = isRatioMetric(METRIC);
   const blocks = DATA.regions.map(r => {
     const codes = r.stores.filter(hasData);
     if (!codes.length) return "";
@@ -3633,7 +3652,7 @@ function renderReview(c) {
 function campReviewLine(c) {
   const hl = campHeadline(c);
   if (hl) return hl;
-  if (METRIC === "cost_rate") return "";
+  if (isRatioMetric(METRIC)) return "";
   // その施策が効くはずの範囲があればそれを出す。無ければ店全体だが、必ず
   // 「重なっている施策の数」を添えて、施策の成績と読ませない。
   const t = campTargeted(c);
@@ -3778,13 +3797,20 @@ function crossProfit() {
       if (typeof cov === "number" && cov > 0) kt = ls.v / cov;
     }
     const lcr = latestWith(code, crAt);
+    // 理論原価率が無い店は、実原価（前月棚卸＋当月仕入−当月棚卸）で粗利率を出す。
+    // FWのABC部門が紐付いていない店（ひよこ飯店・たいだいの2026-07以前）が
+    // 「―」のまま店長会に出てしまうため。**どちらで出したかは行に明記する。**
+    // 黙って混ぜると、理論と実際の差＝不明ロスが読めなくなる。
+    const lac = lcr ? null : latestWith(code, acRateAt);
+    const gpr = lcr || lac;
     return {
       code, name: s.name, brand_name: s.brand_name,
-      kt, gp: lcr ? 1 - lcr.v : null,
+      kt, gp: gpr ? 1 - gpr.v : null,
+      gpSrc: lcr ? "理論" : (lac ? "実原価" : null),
       // 対象月は店ごとに違う（取込の進み方が揃っていない）。同じ表に並べる以上、
       // どの月の数字なのかを行ごとに出さないと、月をまたいだ順位づけになる。
       ktM: ls ? ls.m : null,
-      gpM: lcr ? lcr.m : null,
+      gpM: gpr ? gpr.m : null,
     };
   }).filter(x => x.kt != null || x.gp != null);
 }
@@ -3939,7 +3965,7 @@ function renderCross() {
           <span class="xpname">${esc(x.name)}<small>${esc(x.brand_name || "")}</small>${isWorst ? '<span class="xptag">原価改善の狙い目</span>' : ""}</span>
           <span class="xpbar"><span class="xpfill" style="width:${Math.max(4, Math.round(x.kt / maxKt * 100))}%"></span></span>
           <span class="xpkt">${yen(x.kt)}<small>客単価${x.ktM ? "・" + x.ktM : ""}</small></span>
-          <span class="xpgp ${gpCls}">${x.gp != null ? pct(x.gp) + `<small>理論粗利率${x.gpM ? "・" + x.gpM : ""}</small>`
+          <span class="xpgp ${gpCls}">${x.gp != null ? pct(x.gp) + `<small>${x.gpSrc || "理論"}粗利率${x.gpM ? "・" + x.gpM : ""}</small>`
             : (() => { const cr = costReason(x.code); return cr ? `<span class="pf-cr" title="${esc(cr.tip)}">${esc(cr.label)}</span><small>原価率が出ません</small>` : `—<small>理論粗利率</small>`; })()}</span>
           ${aim}
         </li>`;
@@ -3953,10 +3979,14 @@ function renderCross() {
         <span class="bnote">${(() => {
           const ms = [...new Set(prof.map(x => x.ktM).filter(Boolean))].sort();
           const span = ms.length > 1 ? `対象月は店により ${ms[0]}〜${ms[ms.length - 1]}` : `対象月 ${ms[0] || "―"}`;
-          return `各店の直近確定月の 客単価 × 理論粗利率　${prof.length}店　${span}`;
+          const na = prof.filter(x => x.gpSrc === "実原価").length;
+          const src = na ? `（うち${na}店は実原価ベース）` : "";
+          return `各店の直近確定月の 客単価 × 粗利率${src}　${prof.length}店　${span}`;
         })()}</span></div>
       <div class="panel"><ul class="xplist">${rows}</ul>
-        <div class="bnote" style="margin-top:8px">客単価＝売上÷客数、理論粗利率＝100−FW理論原価率（ロス・棚卸差異は含まない）。行タップで店舗詳細へ。</div>
+        <div class="bnote" style="margin-top:8px">客単価＝売上÷客数。<b>理論粗利率</b>＝100−FW理論原価率（ロス・棚卸差異は含まない）。
+          FWに部門が紐付いていない店は<b>実原価粗利率</b>＝100−実原価率（前月棚卸＋当月仕入−当月棚卸÷売上）で出しています。
+          <b>根拠が違うので、理論と実原価の行を直接比べないでください。</b>行タップで店舗詳細へ。</div>
         ${worstNote}
       </div>
     </section>`;
@@ -4989,7 +5019,7 @@ function renderStore(code) {
   const s = store(code);
   const months = DATA.months;
   const color = regionColor(s.region);
-  const isRatio = METRIC === "cost_rate";
+  const isRatio = isRatioMetric(METRIC);
   const y = yoy(code);
 
   // 見出しKPI
@@ -5177,7 +5207,7 @@ function renderStore(code) {
               effHtml += `<div class="ceff sub2">期間中の集客 <b>${nin(cov.cur)}</b>・${cy}${cmom}</div>`;
             }
           }
-        } else if (st.k !== "soon" && METRIC !== "cost_rate") {
+        } else if (st.k !== "soon" && !isRatioMetric(METRIC)) {
           effHtml = `<div class="ceff muted">確定した月の売上が出たら、前年同月比を表示します（月単位で集計）。</div>`;
         }
         // 目標対比（アプリ内で入力した目標／schedule.yaml の目標）
@@ -5400,13 +5430,24 @@ function costSpark(code, n = 6) {
         <span class="cscur ${cls}">直近 ${pct(last.v)}</span></div>
     </div>`;
 }
+// 実原価が入っている最新の確定月。率だけでなく金額も出すのでレコードごと返す。
+function latestActualCost(code) {
+  for (let i = DATA.months.length - 1; i >= 0; i--) {
+    const m = DATA.months[i];
+    if (m >= CURRENT_MONTH) continue;
+    const a = acAt(code, m);
+    if (a && typeof a.total === "number") return { m, a };
+  }
+  return null;
+}
 function renderProfitability(code) {
   const crAt = (c, m) => (DATA.cost_rate[c] || {})[m];   // 分数(0-1)
   const ls = latestWith(code, salesAt);
   const lcr = latestWith(code, crAt);
+  const lac = latestActualCost(code);
   const d = deptFor(code);
   const deptCr = d && d.buckets ? d.buckets.filter(b => b.cost_rate != null) : [];
-  if (!ls && !lcr && !deptCr.length) return "";      // 出せる材料が無ければ節ごと省く
+  if (!ls && !lcr && !lac && !deptCr.length) return "";   // 出せる材料が無ければ節ごと省く
 
   const cards = [];
   // 客単価（売上÷客数）＋前年同月比
@@ -5459,6 +5500,34 @@ function renderProfitability(code) {
         <div class="delta">売上 ${man(grM.v)}円 × 理論粗利率 ${pct(1 - cr)}</div></div>`);
     }
   }
+  // 実原価率（前月棚卸＋当月仕入−当月棚卸÷売上）。理論原価率とは根拠が違う
+  // ので別のカードにする。**同じ数字として扱わないこと。** ABCの部門が無い
+  // 店・月でも出るので、理論が空のときここだけが埋まる。
+  if (lac) {
+    const a = lac.a;
+    const r = typeof a.rate === "number" ? a.rate : null;
+    // 値が信用できない月は、数字は見せつつ「要確認」と理由を出す。
+    // 黙って消すと、棚卸の入力ミスが直らないまま毎月出続ける。
+    const cls = a.suspect ? "down" : (r == null ? "" : (r <= 0.35 ? "up" : "down"));
+    const foot = a.suspect
+      ? `<b class="warn">要確認</b>：${esc(a.suspect)}<br>実原価 ${man(a.total)}円`
+      : `実原価 ${man(a.total)}円・フード ${man(a.food)}／ドリンク ${man(a.drink)}円`;
+    cards.push(`<div class="kpi"><div class="lbl">実原価率（${lac.m}）${a.suspect ? " ⚠" : ""}</div>
+      <div class="big ${cls}">${r == null ? "―" : pct(r)}</div>
+      <div class="delta">${foot}</div></div>`);
+    // 不明ロス＝実原価率−理論原価率。同じ月で両方そろうときだけ。
+    // 月が違う2つの率の差は不明ロスではないので、月をずらしてまで出さない。
+    // 要確認の月は差も信用できないので出さない（嘘のロスが出る）。
+    const th = a.suspect ? undefined : crAt(code, lac.m);
+    if (r != null && typeof th === "number") {
+      const diff = r - th;
+      const sv = salesAt(code, lac.m);
+      const yenLoss = typeof sv === "number" ? `・およそ ${man(sv * diff)}円` : "";
+      cards.push(`<div class="kpi"><div class="lbl">不明ロス（${lac.m}）</div>
+        <div class="big ${diff * 100 >= 1.0 ? "down" : ""}">${signed(diff * 100)}<span class="unit">pt</span></div>
+        <div class="delta">実原価 ${pct(r)} − 理論 ${pct(th)}${yenLoss}</div></div>`);
+    }
+  }
   if (!cards.length && !deptCr.length) return "";
   // 部門別 原価率→粗利率（bucket.cost_rate は % 単位＝FW ABC 実績）
   const deptChips = deptCr.length
@@ -5469,12 +5538,10 @@ function renderProfitability(code) {
           <i>${esc(b.name)}</i>原価${b.cost_rate}%<b>→粗利${(100 - b.cost_rate).toFixed(0)}%</b></span>`)
         .join("")}</div>`
     : "";
-  const abcNote = (deptCr.length || abcCostRate(code) != null)
-    ? "　ABCは実績（FW ABC）・ロス・棚卸差異は含まない／理論は理論原価率" : "";
   return `
     <section class="block">
       <div class="bhead"><h2>収益性・客単価</h2>
-        <span class="bnote">既存データ（売上・客数・理論/ABC原価率）から算出${abcNote}</span></div>
+        <span class="bnote">既存データ（売上・客数・ABC理論原価率・棚卸／仕入）から算出</span></div>
       <div class="panel">
         <div class="kpis">${cards.join("")}</div>
         ${costSpark(code)}
@@ -5928,7 +5995,7 @@ function renderOverview() {
       const cells = months.map(m => {
         const v = valueAt(c, m);
         const prov = isProvisional(m) ? " prov" : "";
-        const shown = v == null ? "―" : METRIC === "cost_rate" ? pct(v) : yen(v);
+        const shown = v == null ? "―" : isRatioMetric(METRIC) ? pct(v) : yen(v);
         return `<td class="num${prov}">${shown}</td>`;
       }).join("");
       return `<tr><td class="rgn" style="--rc:${regionColor(r.name)}"><button class="linkbtn" data-store="${c}">${storeName(c)}</button></td>${cells}</tr>`;
@@ -6001,7 +6068,7 @@ function pathOf(ser, x, y) {
 }
 
 function singleLine(code, months, color, camps = []) {
-  const isRatio = METRIC === "cost_rate";
+  const isRatio = isRatioMetric(METRIC);
   const ser = series(code, months);
   const vals = ser.filter(v => v != null);
   if (!vals.length) return `<div class="empty">データがありません</div>`;
@@ -6051,7 +6118,7 @@ function singleLine(code, months, color, camps = []) {
 }
 
 function multiLine(codes, months, region, focusCode) {
-  const isRatio = METRIC === "cost_rate";
+  const isRatio = isRatioMetric(METRIC);
   const all = [];
   const byCode = codes.map(c => { const s = series(c, months); s.forEach(v => v != null && all.push(v)); return s; });
   if (!all.length) return `<div class="empty">データがありません</div>`;

@@ -315,6 +315,27 @@ def test_原価率は0から1の割合(payload):
             assert 0 < rate < 1
 
 
+def test_実原価の器が必ず出る(payload):
+    # 材料（棚卸・仕入）が揃っていない環境では中身は空だが、キーは必ず出す。
+    # 画面側が存在チェックだけで落ちないようにするため。
+    assert isinstance(payload["actual_cost"], dict)
+
+
+def test_実原価は理論原価率と別の入れ物(payload):
+    # 同じ列に混ぜると、その差である不明ロスが消える。
+    assert payload["actual_cost"] is not payload["cost_rate"]
+
+
+def test_実原価が入るなら金額と率が揃う(payload):
+    for by_month in payload["actual_cost"].values():
+        for v in by_month.values():
+            assert {"food", "drink", "total"} <= set(v)
+            assert v["total"] == v["food"] + v["drink"]
+            # 売上が無い月は率を出さない（0%にすると「達成」に見える）
+            # 率は cost_rate と同じ分数。パーセントで入れると画面が100倍で出す。
+            assert v["rate"] is None or 0 < v["rate"] < 1
+
+
 def test_施策は空でも成立する(payload):
     assert payload["campaigns"] == []
 

@@ -37,6 +37,10 @@ on:
         description: '店舗コード（空欄なら全店）'
         required: false
         default: ''
+      source:
+        description: '取り込み口を絞る（fw_sheet / fw_uriage_suii / pos_sheet）。空欄なら優先順位で1つ選ぶ'
+        required: false
+        default: ''
       group_by:
         description: '束ね方'
         type: choice
@@ -49,6 +53,18 @@ on:
         description: '集計の代わりに、取り込み元シートのタブ一覧を出す'
         type: boolean
         default: false
+      actual_cost:
+        description: '集計の代わりに、実原価（棚卸＋仕入）が店×月でどれだけ出せているかを見る'
+        type: boolean
+        default: false
+      month_from:
+        description: '実原価の開始 YYYY-MM'
+        required: false
+        default: '2026-02'
+      month_to:
+        description: '実原価の終了 YYYY-MM'
+        required: false
+        default: '2026-08'
       sample_tabs:
         description: '中身を覗くタブ名（カンマ区切り。列構造の確認用）'
         required: false
@@ -152,8 +168,28 @@ jobs:
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: 実原価が出せている店×月
+        if: ${{ inputs.actual_cost && !inputs.inspect_sheet }}
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -o pipefail
+          args="--month-from ${{ inputs.month_from }} --month-to ${{ inputs.month_to }}"
+          [ -n "${{ inputs.store }}" ] && args="$args --store ${{ inputs.store }}"
+          {
+            echo '## 実原価（前月棚卸 ＋ 当月仕入 − 当月棚卸）'
+            echo ''
+            echo '```'
+            python -m hansoku.cli actual-cost $args
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: 集計
-        if: ${{ !inputs.inspect_sheet && !inputs.audit_cost && !inputs.probe_sheet }}
+        if: ${{ !inputs.inspect_sheet && !inputs.audit_cost && !inputs.probe_sheet && !inputs.actual_cost }}
         env:
           HANSOKU_ENV: cloud
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
@@ -166,6 +202,7 @@ jobs:
                 --date-from ${{ inputs.date_from }} \
                 --date-to ${{ inputs.date_to }}"
           [ -n "${{ inputs.store }}" ] && args="$args --store ${{ inputs.store }}"
+          [ -n "${{ inputs.source }}" ] && args="$args --source ${{ inputs.source }}"
           args="$args --group-by ${{ inputs.group_by }}"
           # 実行結果はジョブのサマリにも残す（ログを掘らなくても読める）
           {

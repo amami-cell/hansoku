@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from ..analytics import RATIO_METRICS, ratio
+from ..analytics import RATIO_METRICS, actual_cost_by_month, ratio
 from ..db.warehouse import AggregateQuery, Warehouse
 from ..model import (
     DEPT_BUCKETS,
@@ -988,36 +988,13 @@ def build(
             if value.value:
                 cost_rates.setdefault(value.store_code, {})[month] = round(value.value, 4)
 
-    # 理論原価（共有シート）が無い店・月は、ABCグリッドの原価金額から原価率を補完する。
-    # これは FW を直接叩いて取れる実データ（abc-store-ingest）なので、共有シートに損益が
-    # 流れていない過去月（例 2025-09〜12）も、ABCが取れていれば原価率が出せる。
-    # 分子=Σ原価金額 / 分母=Σ売上金額（同じABCグリッド・いずれも税込なので比で相殺）。
-    # 出所は cost_rate_src に残す（theory=理論原価 / abc=ABC原価金額）。
-    cost_rate_src: dict[str, dict[str, str]] = {}
-    for c_code, mm in cost_rates.items():
-        for mth in mm:
-            cost_rate_src.setdefault(c_code, {})[mth] = "theory"
-    _abc_cost: dict[tuple[str, str], float] = {}
-    _abc_sales: dict[tuple[str, str], float] = {}
-    for _metric, _acc in ((METRIC_PRODUCT_COST, _abc_cost), (METRIC_PRODUCT_SALES, _abc_sales)):
-        for row in warehouse.aggregate(
-            AggregateQuery(
-                date_from=date_from, date_to=date_to, grain=GRAIN_MONTH,
-                metrics=[_metric], store_codes=master.active_codes,
-                group_by=("store_code", "date"),
-            )
-        ):
-            _acc[(row["store_code"], row["date"].strftime("%Y-%m"))] = row["value"]
-    for (c_code, mth), cost in _abc_cost.items():
-        sales = _abc_sales.get((c_code, mth))
-        if not cost or not sales:
-            continue
-        if mth in cost_rates.get(c_code, {}):
-            continue  # 理論原価が有る月は触らない
-        rate = cost / sales
-        if 0 < rate <= 1:  # 割合（0.30＝30%）。異常値（原価>売上等）は載せない
-            cost_rates.setdefault(c_code, {})[mth] = round(rate, 4)
-            cost_rate_src.setdefault(c_code, {})[mth] = "abc"
+    # 実原価（前月棚卸 + 当月仕入 − 当月棚卸）。インフォマートの棚卸・仕入から出す。
+    # FWのABC部門に依存しないので、**部門が紐付いていない店・月でも原価が出る**
+    # （1069 ひよこ飯店 / 1137 たいだい の 2026-07 以前がこれ）。
+    # cost_rate（理論原価率）とは別物。その差が不明ロスなので、混ぜてはいけない。
+    actual_cost = actual_cost_by_month(
+        warehouse, months=sorted(months), store_codes=master.active_codes
+    )
 
     # FW ABC（部門・商品）の月次シリーズ。毎月ABCを取り込むと月ごとに積み上がり、
     # 施策詳細で ケーキ/ジェラート/パフェ・食べ放題・宴会コース を月ごとに並べられる。
@@ -1128,8 +1105,9 @@ def build(
         ],
         "monthly": monthly,
         "cost_rate": cost_rates,
-        # 原価率の出所（theory=理論原価／abc=ABC原価金額の補完）。{code:{month:src}}。
-        "cost_rate_src": cost_rate_src,
+        # 実原価（金額と率）。理論原価率(cost_rate)と並べると差＝不明ロスが見える。
+        # {店コード: {"YYYY-MM": {food, drink, total, rate}}}
+        "actual_cost": actual_cost,
         # 原価率（損益）が出ない店の理由。{code:{status,months,latest}}。
         # status: pos=新レジ未接続 / new=新店・反映待ち / none=FW未反映 / partial=直近のみ。
         "cost_status": cost_status,

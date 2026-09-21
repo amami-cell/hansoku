@@ -26,8 +26,27 @@ class SheetReader(ABC):
         """1タブ分の値を行列で返す。空セルは空文字で埋まる。"""
 
 
+def sheet_range(tab: str, last_column: str = "E") -> str:
+    """読む範囲。**最後の列を間違えると、その列だけ黙って空になる。**
+
+    エラーにならないので気づきにくい。実際 A:E のままで POS売上タブの
+    `客数`（F列）が取れず、売上だけが入った。
+    純粋な関数にしてあるのは、実APIを叩かずにここを固定するため。
+    """
+    return f"'{tab}'!A:{last_column}"
+
+
 class GoogleSheetReader(SheetReader):
-    def __init__(self, spreadsheet_id: str, service_account_json: str):
+    """共有シートを読む。**列の範囲は最後の列で決まる。**
+
+    既定は A:E。FWタブとインフォマートの月次集計が E列までで収まるため。
+    ⚠️ **これより右の列を使うタブは `last_column` を広げること。**
+    広げ忘れると、その列だけ黙って空になる（エラーにならないので気づきにくい）。
+    実際、POS売上タブの `客数`（F列）がこれで取れず、売上だけが入った。
+    """
+
+    def __init__(self, spreadsheet_id: str, service_account_json: str,
+                 last_column: str = "E"):
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
 
@@ -41,6 +60,7 @@ class GoogleSheetReader(SheetReader):
                 text, scopes=READONLY_SCOPES
             )
         self._id = spreadsheet_id
+        self._last_column = last_column
         self._service = build("sheets", "v4", credentials=creds, cache_discovery=False)
 
     def tab_names(self) -> list[str]:
@@ -51,7 +71,7 @@ class GoogleSheetReader(SheetReader):
         result = (
             self._service.spreadsheets()
             .values()
-            .get(spreadsheetId=self._id, range=f"'{tab}'!A:E")
+            .get(spreadsheetId=self._id, range=sheet_range(tab, self._last_column))
             .execute()
         )
         return result.get("values", [])

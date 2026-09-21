@@ -1884,6 +1884,59 @@ def report_data_audit(
     return 0
 
 
+# 同じ (店,月) を2つの口が持っていて、**差があって当たり前**の組み合わせ。
+# fw_sheet は税抜・fw_uriage_suii は税込で、消費税ぶんだけ必ずずれる。
+# SOURCE_PRIORITY が税込を採るので運用上は問題なく、毎回並べると
+# **本当に見たい異常が埋もれる**（実際 1766 の異常が23件の中に紛れた）。
+#
+# ⚠️ 帯を外れたら既知として扱わない。「いつもの差」で片付けると、
+# 税率でも説明がつかないずれを見逃す。
+KNOWN_GAPS: dict[frozenset, tuple[float, float]] = {
+    frozenset({"fw_sheet", "fw_uriage_suii"}): (7.0, 11.0),
+}
+
+
+def classify_gap(
+    by_src: dict, gap_pct: float = 1.0, adopted: float | None = None
+) -> tuple[str, float]:
+    """1つの (店,月) を複数の口が持っているとき、どう扱うかを決める。
+
+    返り値は種別と差(%):
+      "zero"     … **片方だけ 0 で、採用されている値も 0。** 画面が 0 になる。最優先
+      "zero_ok"  … 片方だけ 0 だが採用は実数。担当外の口が 0 を書いただけ。数だけ
+      "known"    … 既知の差（税抜/税込）。数だけ数えて中身は並べない
+      "check"    … 要確認
+      "skip"     … 単独の口・両方0・差が小さい
+
+    ``adopted`` は**集計が実際に採る値**（画面に出る値）。0 が混ざっていても、
+    採用されているのが実数なら画面は正しい。1766 は FW未連動なので fw_sheet が
+    0 を書くが、pos_sheet の実数を採るので**これは正常な形**。ここを毎回赤くすると
+    既知の差を外した意味が無くなる。
+
+    ⚠ **adopted が分からないときは鳴らす側に倒す。** 「採用が 0」は
+    このセッションで実際に起きた事故（kind が第1キーで FW の「確定の 0」が
+    実数を押しのけた）そのもので、見逃すと画面が黙って 0 になる。
+
+    純粋な関数にしてあるのは、DBを立てずにここを固定するため。
+    """
+    if len(by_src) < 2:
+        return "skip", 0.0
+    lo, hi = min(by_src.values()), max(by_src.values())
+    if lo <= 0 < hi:
+        if adopted is not None and adopted > 0:
+            return "zero_ok", 100.0
+        return "zero", 100.0
+    if not lo:
+        return "skip", 0.0
+    gap = (hi / lo - 1) * 100
+    if gap < gap_pct:
+        return "skip", gap
+    band = KNOWN_GAPS.get(frozenset(by_src))
+    if band and band[0] <= gap <= band[1]:
+        return "known", gap
+    return "check", gap
+
+
 def report_source_audit(
     warehouse,
     master,
@@ -1905,6 +1958,7 @@ def report_source_audit(
     """
     import sys as _sys
 
+    from ..db.warehouse import AggregateQuery
     from ..model import GRAIN_MONTH
 
     try:
@@ -1942,6 +1996,26 @@ def report_source_audit(
         per_month.setdefault(month, {})[src] = per_month.setdefault(month, {}).get(src, 0) + 1
         per_cell.setdefault((r["store_code"], month), {})[src] = float(r["value"])
 
+    # **集計が実際に採る値**（＝画面に出る値）を引く。採用順の再実装ではなく、
+    # 画面と同じ経路をそのまま使う。0 が混ざっていても採用が実数なら画面は正しい。
+    adopted: dict[tuple[str, str], float] = {}
+    try:
+        from datetime import date as _date
+
+        for row in warehouse.aggregate(
+            AggregateQuery(
+                date_from=_date(y, m, 1),
+                date_to=_date(ly, lm, 28),
+                grain=GRAIN_MONTH,
+                metrics=[metric],
+                group_by=("store_code", "date"),
+            )
+        ):
+            adopted[(row["store_code"], row["date"].strftime("%Y-%m"))] = float(row["value"])
+    except Exception as exc:  # noqa: BLE001
+        # 引けなかったら**鳴らす側に倒す**（adopted なし＝全部 zero 扱い）。
+        print(f"  （採用値を引けませんでした: {exc}。片方0はすべて要対応として出します）")
+
     print(f"=== 出どころ別 取り込み状況 metric={metric} / {date_from}〜{date_to} ===\n")
     print("月ごとの source（店数）:")
     prev_srcs: set[str] | None = None
@@ -1956,21 +2030,40 @@ def report_source_audit(
         print(f"  {month}  {label}{mark}")
         prev_srcs = set(srcs)
 
-    # 同じ (店,月) を複数 source が持ち、値がずれているもの
-    conflicts = []
+    # 同じ (店,月) を複数 source が持ち、値がずれているもの。
+    # **既知の差と、片方が0のケースを分けて数える。**
+    conflicts, known, zeros, zeros_ok = [], [], [], []
+    bucket = {"zero": zeros, "zero_ok": zeros_ok, "known": known, "check": conflicts}
     for (code, month), by_src in sorted(per_cell.items()):
-        if len(by_src) < 2:
+        kind_, gap = classify_gap(by_src, gap_pct, adopted.get((code, month)))
+        if kind_ == "skip":
             continue
-        lo, hi = min(by_src.values()), max(by_src.values())
-        if lo and (hi / lo - 1) * 100 >= gap_pct:
-            conflicts.append((code, month, by_src, (hi / lo - 1) * 100))
+        bucket[kind_].append((code, month, by_src, gap))
 
-    print(f"\n同じ (店,月) を複数 source が持ち {gap_pct}% 以上ずれている: {len(conflicts)}件")
-    for code, month, by_src, gap in conflicts[:40]:
-        detail = " / ".join(f"{s}={v:,.0f}" for s, v in sorted(by_src.items()))
-        print(f"  {code} {name_of.get(code, '')[:14]} {month}  差 {gap:.1f}%  {detail}")
-    if len(conflicts) > 40:
-        print(f"  … 他 {len(conflicts) - 40}件")
+    def _show(items, limit=40, show_gap=True):
+        for code, month, by_src, gap in items[:limit]:
+            detail = " / ".join(f"{s}={v:,.0f}" for s, v in sorted(by_src.items()))
+            head = f"  差 {gap:.1f}%" if show_gap else ""
+            print(f"  {code} {name_of.get(code, '')[:14]} {month}{head}  {detail}")
+        if len(items) > limit:
+            print(f"  … 他 {len(items) - limit}件")
+
+    if known:
+        # 数だけ出す。中身まで並べると本当に見たいものが埋もれる。
+        pairs = " / ".join(sorted({"+".join(sorted(b)) for _, _, b, _ in known}))
+        print(f"\n既知の差（{pairs}）: {len(known)}件 … 税抜と税込。SOURCE_PRIORITY で"
+              "税込を採るので問題ない")
+
+    if zeros_ok:
+        # 担当外の口が 0 を書いただけ。採用は実数なので画面は正しい。
+        # 例: 1766 は FW未連動で fw_sheet=0、pos_sheet の実数を採る。
+        print(f"\n担当外の口が 0（採用は実数なので画面は正しい）: {len(zeros_ok)}件")
+
+    print(f"\n⚠ 採用値が 0（画面が 0 になる）: {len(zeros)}件")
+    _show(zeros, show_gap=False)
+
+    print(f"\n要確認の食い違い（{gap_pct}% 以上・既知の差を除く）: {len(conflicts)}件")
+    _show(conflicts)
 
     if switches:
         print(
@@ -1979,10 +2072,13 @@ def report_source_audit(
             + "\n  定義（税込/税抜・純売上/総売上）が違えば、その境目をまたぐ前年比が"
             "まるごとずれます。"
         )
-    if conflicts or switches:
-        print(f"::error::[出どころ] 切替 {len(switches)}件 / 食い違い {len(conflicts)}件")
+    if conflicts or zeros or switches:
+        print(f"::error::[出どころ] 切替 {len(switches)}件 / 要確認 {len(conflicts)}件 / "
+              f"採用が0 {len(zeros)}件"
+              f"（既知の差 {len(known)}件・担当外の0 {len(zeros_ok)}件は除く）")
         return 1
-    print("\n出どころは一貫しています。")
+    print(f"\n出どころは一貫しています。"
+          f"（既知の差 {len(known)}件・担当外の0 {len(zeros_ok)}件は除く）")
     return 0
 
 
