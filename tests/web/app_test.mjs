@@ -972,12 +972,15 @@ test("storeYearMatrix：縦＝指標・横＝月・右端に年計。月見出�
   assert.ok(/予算/.test(html) && /客単価/.test(html), "予算・客単価の指標行");
 });
 
-test("storeYearMatrix：構成比・販促の行は持たず、構成比は凡例（%）で示す", () => {
+test("storeYearMatrix：品目構成比を『区分×月』の行で一覧に出す（月ごとに読める）", () => {
   const ctx = loadApp(annualData);
   const html = call(ctx, `storeYearMatrix("1160","2025")`);
   assert.ok(!html.includes("ymxvbar"), "小さくて見にくい構成比の縦バー行は撤去");
   assert.ok(!/<th>販促<\/th>/.test(html), "販促の行はマトリクスに持たない（年間チャートへ）");
-  assert.ok(html.includes("品目構成比（確定分）") && html.includes("パフェ"), "構成比は読める凡例で残す");
+  assert.ok(html.includes("ymxsec") && /品目構成比/.test(html), "品目構成比のセクション見出しがある");
+  assert.ok(html.includes("ymxcompo-row") && html.includes("パフェ"), "区分ごとの行（例：パフェ）が月別で並ぶ");
+  assert.ok(html.includes("ymxcdot"), "区分は色ドット付きで示す（チャートと同色）");
+  assert.ok(html.includes("data-compocell"), "構成比の金額セルは押せる（商品内訳の小窓）");
 });
 
 test("storeAnnualChart：販促は年間チャート（帯）として見出し付きで出す", () => {

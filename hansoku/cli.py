@@ -353,6 +353,7 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 date_from=args.abc_from or "2024-01",
                 date_to=args.abc_to or "2026-08",
                 metric=args.metric,
+                grain=getattr(args, "coverage_grain", None),
             )
     if args.mode == "source-audit":
         from .ingest.fw_daily import report_source_audit
@@ -400,20 +401,75 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
         with get_warehouse(settings) as warehouse:
             return report_abc_coverage(warehouse, master, month=args.month)
     if args.mode == "abc-store-ingest":
-        from .ingest.fw_daily import ingest_abc_store
+        from .ingest.fw_daily import ingest_abc_store, ingest_abc_stores
 
         if not args.abc_store:
             raise SystemExit("abc-store-ingest には --abc-store（店コード or 店名）が必要です")
         settings = load_settings()
         master = StoreMaster.load(args.stores)
+        raw = args.abc_store.strip()
+        kw = raw.lower()
+        # --abc-store に「複数店」を渡せる：
+        #   カンマ区切り  例) "1006,1015,1069"（コード or 店名）
+        #   キーワード    all/active … 稼働中のFW連動店すべて
+        #                  nonlargo   … 上記から 1160(ルクア) を除く
+        # いずれも 1店=1ログインで順に回す（同一セッションで店を切替えない）。
         with get_warehouse(settings) as warehouse:
+            if "," in raw or kw in ("all", "active", "nonlargo"):
+                if kw in ("all", "active", "nonlargo"):
+                    stores = [
+                        s.store_code
+                        for s in master.active
+                        if getattr(s, "pos", "fw") == "fw"
+                    ]
+                    if kw == "nonlargo":
+                        stores = [c for c in stores if c != "1160"]
+                else:
+                    stores = [x.strip() for x in raw.split(",") if x.strip()]
+                return ingest_abc_stores(
+                    warehouse,
+                    master,
+                    artifacts=Path(args.artifacts),
+                    stores=stores,
+                    month=args.month,
+                    dry_run=args.dry_run,
+                )
             return ingest_abc_store(
                 warehouse,
                 master,
                 artifacts=Path(args.artifacts),
-                store=args.abc_store,
+                store=raw,
                 month=args.month,
                 dry_run=args.dry_run,
+            )
+    if args.mode == "abc-campaign":
+        from .ingest.fw_daily import ingest_abc_campaigns
+
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return ingest_abc_campaigns(
+                warehouse,
+                master,
+                artifacts=Path(args.artifacts),
+                store=args.abc_store or None,
+                only_ids=getattr(args, "abc_ids", None),
+                dry_run=args.dry_run,
+                skip_existing=not getattr(args, "abc_refresh", False),
+            )
+    if args.mode == "gelato-switch":
+        from .ingest.fw_daily import find_gelato_switches
+
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return find_gelato_switches(
+                warehouse,
+                master,
+                artifacts=Path(args.artifacts),
+                store=args.abc_store or "1160",
+                from_month=(args.abc_from[:7] if args.abc_from else None),
+                to_month=(args.abc_to[:7] if args.abc_to else None),
             )
     if args.mode == "lunch-analyze":
         from .ingest.fw_daily import analyze_lunch
@@ -898,7 +954,8 @@ def build_parser() -> argparse.ArgumentParser:
                  "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
                  "abc-dom-probe", "uriage-probe", "monthly-coverage",
-                 "abc-detail", "data-audit", "source-audit"],
+                 "abc-detail", "data-audit", "source-audit", "abc-campaign",
+                 "gelato-switch"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument(
@@ -927,10 +984,20 @@ def build_parser() -> argparse.ArgumentParser:
                          help="hourly-store-probe の期間 'ラベル:from:to,...'（YYYY-MM-DD）")
     fwdaily.add_argument("--abc-ranges", default=None, dest="abc_ranges",
                          help="abc-totals-probe の期間 'ラベル:from:to,...'（YYYY-MM-DD）")
+    fwdaily.add_argument("--abc-ids", default=None, dest="abc_ids",
+                         help="abc-campaign: 対象施策id（カンマ区切り。既定=schedule全件のうち条件を満たすもの）")
+    fwdaily.add_argument("--abc-refresh", action="store_true", dest="abc_refresh",
+                         help="abc-campaign: 取込済みの過去回も含めて全部取り直す（既定は終了済みの回はスキップ）")
     fwdaily.add_argument(
         "--metric",
         default=None,
         help="monthly-coverage で数える指標（既定 sales。ABCの穴探しは dept_sales）",
+    )
+    fwdaily.add_argument(
+        "--coverage-grain",
+        default=None,
+        dest="coverage_grain",
+        help="monthly-coverage の粒度（既定 month。時間帯別の穴探しは hour）",
     )
     fwdaily.add_argument("--menu", default=None, help="report モードで開く帳票名")
     fwdaily.add_argument("--months", type=int, default=2, help="遡る月数")

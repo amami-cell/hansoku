@@ -40,7 +40,20 @@ on:
           - source-audit
           - abc-dom-probe
           - manager-dl-probe
+          - abc-campaign
+          - gelato-switch
         default: explore
+      runner:
+        description: '実行環境: hosted=GitHub提供(無料枠を消費) / self-hosted=自前ランナー(枠を消費しない)'
+        type: choice
+        options:
+          - hosted
+          - self-hosted
+        default: hosted
+      abc_refresh:
+        description: 'abc-campaign: 取込済みの過去回も取り直す (true/false)'
+        required: false
+        default: 'false'
       path:
         description: '探索するメニュー名（カンマ区切り）'
         required: false
@@ -89,6 +102,10 @@ on:
         description: 'monthly-coverage: 数える指標（sales / dept_sales / product_sales）'
         required: false
         default: 'sales'
+      coverage_grain:
+        description: 'monthly-coverage: 粒度（空=month。時間帯別の穴探しは hour）'
+        required: false
+        default: ''
       abc_ingest_month:
         description: 'abc-store-ingest: 対象月 YYYY-MM（既定は前月）。--abc-store に店コード or 店名'
         required: false
@@ -115,8 +132,12 @@ env:
 
 jobs:
   fw:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # hosted=GitHub提供(無料枠を消費) / self-hosted=自前ランナー(枠を消費しない)。
+    runs-on: ${{ inputs.runner == 'self-hosted' && 'self-hosted' || 'ubuntu-latest' }}
+    # 重いモード（gelato-switch=日別二分探索、abc-store-ingest=23ヶ月分の店別再取込、
+    # abc-campaign=全施策再取込、hourly-ingest=全店×描画待ちリトライ）は30分では収まらない
+    # ことがある。公開リポで無料枠は無制限のため、これらだけ余裕を持たせる（他は30分）。
+    timeout-minutes: ${{ (inputs.mode == 'gelato-switch' || inputs.mode == 'abc-store-ingest' || inputs.mode == 'abc-campaign' || inputs.mode == 'hourly-ingest') && 120 || 30 }}
 
     steps:
       - uses: actions/checkout@v4
@@ -126,10 +147,23 @@ jobs:
           python-version: '3.12'
           cache: pip
 
+      # Chromium本体をキャッシュ（毎回の数分DLを無くして無料枠を節約）。
+      # self-hostedでは常設のブラウザが残るので実質DLゼロになる。
+      - name: Playwrightブラウザをキャッシュ
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ms-playwright-chromium-v1
+
       - name: 依存パッケージをインストール
         run: |
           pip install -r requirements.txt
-          python -m playwright install --with-deps chromium
+          # ブラウザ本体はキャッシュ/自前ランナーに在れば no-op（再DLしない）。
+          python -m playwright install chromium
+          # apt のシステム依存は hosted のときだけ（self-hostedは事前準備済み前提）。
+          if [ "${{ inputs.runner }}" != "self-hosted" ]; then
+            sudo python -m playwright install-deps chromium || python -m playwright install-deps chromium || true
+          fi
 
       - name: Secrets の確認
         env:
@@ -197,7 +231,13 @@ jobs:
             elif [ "${{ inputs.mode }}" = "hourly-dry" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode hourly-dry --limit 1 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "hourly-ingest" ]; then
-              xvfb-run -a python -m hansoku.cli fw-daily --mode hourly --artifacts fw-artifacts
+              # abc_ingest_month を渡せば対象月を指定できる（既定＝前月。今月を明示したい時用）
+              M="${{ inputs.abc_ingest_month }}"
+              if [ -n "$M" ]; then
+                xvfb-run -a python -m hansoku.cli fw-daily --mode hourly --month "$M" --artifacts fw-artifacts
+              else
+                xvfb-run -a python -m hansoku.cli fw-daily --mode hourly --artifacts fw-artifacts
+              fi
             elif [ "${{ inputs.mode }}" = "abc-dry" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode abc-dry --limit 1 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "abc-ingest" ]; then
@@ -236,6 +276,21 @@ jobs:
                 --abc-store "${{ inputs.abc_store }}" \
                 --month "${{ inputs.abc_ingest_month }}" \
                 --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "abc-campaign" ]; then
+              # 登録済み販促の[start,end]レンジABCを施策id紐づけで取込（販売時期実績）
+              xvfb-run -a python -m hansoku.cli fw-daily --mode abc-campaign \
+                --abc-store "${{ inputs.abc_store }}" \
+                --abc-ids "${{ inputs.abc_item }}" \
+                ${{ inputs.abc_refresh == 'true' && '--abc-refresh' || '' }} \
+                --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "gelato-switch" ]; then
+              # TOジェラート ローテ各回の初売日を0円メニュー内訳の日別プローブで確定（DB書込なし・印字のみ）
+              # abc_from/abc_to（YYYY-MM）で対象回を絞れる＝年ごと等に分割実行可能
+              xvfb-run -a python -m hansoku.cli fw-daily --mode gelato-switch \
+                --abc-store "${{ inputs.abc_store }}" \
+                --abc-from "${{ inputs.abc_from }}" \
+                --abc-to "${{ inputs.abc_to }}" \
+                --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "uriage-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode uriage-probe \
                 --month "${{ inputs.abc_ingest_month }}" \
@@ -245,6 +300,7 @@ jobs:
                 --abc-from "${{ inputs.abc_from }}" \
                 --abc-to "${{ inputs.abc_to }}" \
                 --metric "${{ inputs.coverage_metric }}" \
+                --coverage-grain "${{ inputs.coverage_grain }}" \
                 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "source-audit" ]; then
               # FWログイン不要。同じ指標を複数の取り込み口が書いていないか調べる。

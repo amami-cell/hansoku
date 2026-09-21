@@ -21,6 +21,9 @@ on:
           - dept_sales
           - dept_qty
           - product_sales
+          - product_qty
+          - product_cost
+          - product_gross
         default: sales
       date_from:
         description: '開始日 YYYY-MM-DD'
@@ -66,6 +69,26 @@ on:
         description: '中身を覗くタブ名（カンマ区切り。列構造の確認用）'
         required: false
         default: ''
+      audit_cost:
+        description: '集計の代わりに、損益（原価率）取込監査を全店で出す'
+        type: boolean
+        default: false
+      audit_from:
+        description: '損益監査の開始月 YYYY-MM（空=直近12ヶ月）'
+        required: false
+        default: ''
+      audit_to:
+        description: '損益監査の終了月 YYYY-MM（空=直近の完全月）'
+        required: false
+        default: ''
+      probe_sheet:
+        description: '集計の代わりに、FW共有シートの損益タブの年月カバレッジを出す（バックフィル手配用）'
+        type: boolean
+        default: false
+      check_months:
+        description: 'probe_sheet: 有無を確認する月（カンマ区切り YYYY-MM）'
+        required: false
+        default: '2025-09,2025-10,2025-11,2025-12'
 
 # トークンは読み取りだけでよい（どのワークフローも push もコメントもしない）。
 permissions:
@@ -90,8 +113,37 @@ jobs:
       - name: 依存パッケージをインストール
         run: pip install -r requirements.txt
 
+      - name: 損益（原価率）取込監査
+        if: ${{ inputs.audit_cost }}
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AUDIT_FROM: ${{ inputs.audit_from }}
+          AUDIT_TO: ${{ inputs.audit_to }}
+        run: |
+          set -o pipefail
+          python scripts/audit_cost.py | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: FW共有シート 損益タブの年月カバレッジ
+        if: ${{ inputs.probe_sheet }}
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          FW_SPREADSHEET_ID: ${{ secrets.FW_SPREADSHEET_ID }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CHECK_MONTHS: ${{ inputs.check_months }}
+        run: |
+          set -o pipefail
+          python scripts/probe_sheet_months.py | tee -a "$GITHUB_STEP_SUMMARY"
+
       - name: 取り込み元シートのタブ一覧
-        if: ${{ inputs.inspect_sheet }}
+        if: ${{ inputs.inspect_sheet && !inputs.audit_cost && !inputs.probe_sheet }}
         env:
           HANSOKU_ENV: cloud
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
@@ -137,7 +189,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: 集計
-        if: ${{ !inputs.inspect_sheet && !inputs.actual_cost }}
+        if: ${{ !inputs.inspect_sheet && !inputs.audit_cost && !inputs.probe_sheet && !inputs.actual_cost }}
         env:
           HANSOKU_ENV: cloud
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}

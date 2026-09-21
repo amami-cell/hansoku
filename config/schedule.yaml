@@ -151,16 +151,16 @@ campaigns:
   - { id: c1160-cake-2602, stores: ["1160"], title: 2月ケーキ, kind: dev, bucket: ケーキ, start: "2026-02-15", end: "2026-03-18" }
   # パフェ枠（ショートケーキパフェ→ライチ→パフェスノー→ハロウィン→いちじく→ノエル→みかん）
   #   items は商品名キーワード。該当商品の売上だけを切り出して昨対比・前回比を出す。
-  - { id: c1160-parfait-lychee, stores: ["1160"], title: 5月パフェ ライチ, kind: dev, bucket: パフェ, items: [ライチ], start: "2025-05-08", end: "2025-05-31" }
-  - { id: c1160-parfait-snow, stores: ["1160"], title: パフェスノー（夏限定・4種）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー], start: "2025-06-01", end: "2025-09-30" }
-  - { id: c1160-parfait-halloween, stores: ["1160"], title: ハロウィンパフェ, kind: dev, bucket: パフェ, items: [ハロウィン, かぼちゃ, パンプキン, モンブラン, マロン], start: "2025-09-30", end: "2025-10-31" }
-  - { id: c1160-parfait-ichijiku, stores: ["1160"], title: いちじくパフェ, kind: dev, bucket: パフェ, items: [いちじく, イチジク, 無花果], start: "2025-10-31", end: "2025-12-01" }
+  - { id: c1160-parfait-lychee, stores: ["1160"], title: 5月パフェ ライチ, kind: dev, bucket: パフェ, items: [ペルル・デ・リッシ, ペルル], start: "2025-05-08", end: "2025-05-31", note: "実体は仏名『パルフェ・オゥ・ペルル・デ・リッシ』（ライチ）" }
+  - { id: c1160-parfait-snow, stores: ["1160"], title: パフェスノー（夏限定・4種）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー, スパークリング], start: "2025-06-01", end: "2025-09-30", note: "スノー系＋『丸ごと白桃/夏いちご…スパークリングジュレのパフェ』も対象" }
+  - { id: c1160-parfait-halloween, stores: ["1160"], title: ハロウィンパフェ, kind: dev, bucket: パフェ, items: [ポイズン], start: "2025-09-30", end: "2025-10-31", note: "実体は仏名『パルフェ・オ・ポイズン・シュクレ・エトランゼ』（毒りんご風パフェ）" }
+  - { id: c1160-parfait-ichijiku, stores: ["1160"], title: いちじくパフェ, kind: dev, bucket: パフェ, items: [オトンヌ, アペティ, いちじく, イチジク, 無花果], start: "2025-10-31", end: "2025-12-01", note: "実体は仏名『パルフェ・アペティ・ドゥ・オトンヌ』（Fig&Caramel）" }
   - { id: c1160-parfait-noel, stores: ["1160"], title: ノエル（クリスマスパフェ）, kind: dev, bucket: パフェ, items: [ノエル, クリスマス, サンタ], start: "2025-12-02", end: "2025-12-25" }
-  - { id: c1160-parfait-mikan, stores: ["1160"], title: みかんパフェ, kind: dev, bucket: パフェ, items: [みかん, 蜜柑, オレンジ], start: "2026-01-02", end: "2026-02-01" }
+  - { id: c1160-parfait-mikan, stores: ["1160"], title: みかんパフェ, kind: dev, bucket: パフェ, items: [マンダリン, みかん, 蜜柑], start: "2026-01-02", end: "2026-02-01", note: "実体は仏名『パルフェ・ア・ラ・マンダリン…』" }
   - { id: c1160-parfait-shortcake, stores: ["1160"], title: ショートケーキパフェ, kind: dev, bucket: パフェ, items: [ショートケーキ], start: "2026-02-02", end: "2026-05-07" }
   # コラボ枠（bucket=コラボ で区分に束ね、items で該当商品を切り出す）
-  - { id: c1160-collab-hakuto, stores: ["1160"], title: 白桃パフェDaysコラボ, kind: dev, bucket: コラボ, items: [白桃], start: "2025-07-25", end: "2025-07-27", note: 期間限定コラボ }
-  - { id: c1160-collab-kumamon, stores: ["1160"], title: くまもとモンコラボ, kind: dev, bucket: コラボ, items: [くまモン, くまもと, クマモン], start: "2025-11-01", end: "2025-11-30", note: 期間限定コラボ }
+  - { id: c1160-collab-hakuto, stores: ["1160"], title: 白桃パフェDaysコラボ, kind: dev, bucket: パフェ, items: [アンシャンター], start: "2025-07-25", end: "2025-07-27", note: "3日限定コラボ。実体は仏名『パルフェ・ドゥ・アンシャンター・ピーチ』（岡山白桃・通常の白桃パフェとは別SKU）" }
+  - { id: c1160-collab-kumamon, stores: ["1160"], title: くまもとモンコラボ, kind: dev, bucket: コラボ, items: [くまもと, くまモン, クマモン, パタット, 晩白柚], start: "2025-11-01", end: "2025-11-30", note: "POS実名は『くまもとモンパフェ』（くまもとで一致・取込済）。POPの仏名『パルフェ・ア・ラ・パタット・ドゥース』も保険で追加" }
 
   # ── 門真Largo（1713）───────────────────────────────
   - { id: r1713-osusume, stores: ["1713"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-11-20" }
@@ -213,12 +213,37 @@ campaigns:
   # 門真Largo 食べ放題（1713）… 食べ放題部門の実績・構成比を月ごとに追う。
   - { id: r1713-tabehodai, stores: ["1713"], title: 食べ放題（月次追跡）, kind: dev, bucket: 食べ放題,
       start: "2026-09-01", note: "通年想定。食べ放題部門の実績・構成比。月次で並べるには月次ABC蓄積が要る" }
-  # ルクアLargo デザート（1160）… 月ごとに ケーキ/テイクアウトジェラート/おすすめパフェ の実績。
-  #   既存: r1160-cake（ケーキ変更）・r1160-parfait（パフェ）。ジェラートを追加。
-  #   items は正式な商品名が分かれば付ける（例 ["ジェラート"] で該当商品を拾う）。
-  - { id: r1160-gelato, stores: ["1160"], title: テイクアウトジェラート, kind: dev, bucket: テイクアウトジェラート,
-      items: ["ジェラート"], start: "2026-09-01",
-      note: "FW部門『テイクアウトジェラート』。TOジェラート ダブル/シングル/トリプル" }
+  # ルクアLargo デザート（1160）… 月ごとに ケーキ/ジェラート/おすすめパフェ の実績。
+  #   既存: r1160-cake（ケーキ変更）・r1160-parfait（パフェ）。ジェラートは通年の販促枠。
+  #   bucket は店の区分名『ジェラート』に合わせる（TOジェラートもこの区分に束ねている）。
+  #   TOジェラートは毎回2品が販促＝風味が毎月ローテ。items は固定しない（"ジェラート"を入れると
+  #   定番のスクープ本体 TOジェラート ダブル/シングル/トリプル まで拾ってしまうため）。
+  #   毎月の“限定フレーバー”（直近6か月で抜けのある品）を限定判定で自動マークする。
+  - { id: r1160-gelato, stores: ["1160"], title: ジェラート（TO・毎回2品ローテ）, kind: dev, bucket: ジェラート,
+      start: "2024-01-01", end: "2027-12-31",
+      note: "FW部門『ジェラート』。TOジェラートは毎回2品が販促（風味が毎月入替）。定番スクープ本体・通年風味は付けず、限定判定でローテ品だけを販促マーク。" }
+
+  # ── TOジェラート ローテの「回」（2024-01〜2026-08）────────────────────────────
+  #   FWの月次実績（0円内訳＝点数）から、毎回2品ずつ・2ヶ月ごとに入れ替わるローテを
+  #   復元。切替は奇数月の月初（POPの『◯月1日〜』とも一致）。r1160-gelato(通年)は
+  #   部門ビュー用、この c1160-gelato-* は回ごとの切替日を持つタイムライン用。
+  #   ジェラートは0円商品のため販売時期実績(売上)は付かず、点数は月次内訳で表示。
+  - { id: c1160-gelato-2401, stores: ["1160"], title: ジェラート 1-2月, kind: dev, bucket: ジェラート, items: [大人の苺ミルク, 柚子茶ジンジャー], start: "2023-12-26", end: "2024-03-04" }
+  - { id: c1160-gelato-2403, stores: ["1160"], title: ジェラート 3-4月, kind: dev, bucket: ジェラート, items: [苺練乳ソルベ, キウイ×バナナ], start: "2024-03-05", end: "2024-05-07" }
+  - { id: c1160-gelato-2405, stores: ["1160"], title: ジェラート 5-6月, kind: dev, bucket: ジェラート, items: [ブルーベリーソルベ, サマーメロンソルベ], start: "2024-05-08", end: "2024-07-19" }
+  - { id: c1160-gelato-2407, stores: ["1160"], title: ジェラート 7-8月, kind: dev, bucket: ジェラート, items: [ココナッツミルク, チョコミント・ディスコ], start: "2024-07-20", end: "2024-09-14" }
+  - { id: c1160-gelato-2409, stores: ["1160"], title: ジェラート 9-10月, kind: dev, bucket: ジェラート, items: [巨峰ブルーベリースペシャル, ピーナッツバター], start: "2024-09-15", end: "2024-11-04" }
+  - { id: c1160-gelato-2411, stores: ["1160"], title: ジェラート 11-12月, kind: dev, bucket: ジェラート, items: [大人のベイリーズストロベリー, 黒糖ジンジャーミルク], start: "2024-11-05", end: "2025-01-18" }
+  - { id: c1160-gelato-2501, stores: ["1160"], title: ジェラート 1-2月, kind: dev, bucket: ジェラート, items: [リンゴブランデー, ビロードショコラ], start: "2025-01-19", end: "2025-03-14" }
+  - { id: c1160-gelato-2503, stores: ["1160"], title: ジェラート 3-4月, kind: dev, bucket: ジェラート, items: [苺ヨーグルト, 桜ブラン], start: "2025-03-15", end: "2025-05-14" }
+  - { id: c1160-gelato-2505, stores: ["1160"], title: ジェラート 5-6月, kind: dev, bucket: ジェラート, items: [ブルーベリーチーズケーキ, ミルキーメロン], start: "2025-05-15", end: "2025-07-03" }
+  - { id: c1160-gelato-2507, stores: ["1160"], title: ジェラート 7-8月, kind: dev, bucket: ジェラート, items: [蜜香ウーロン, パイナップルケーキ], start: "2025-07-04", end: "2025-09-06" }
+  - { id: c1160-gelato-2509, stores: ["1160"], title: ジェラート 9-10月, kind: dev, bucket: ジェラート, items: [かぼちゃプリンクラッシュ, 黒ごま豆乳もち], start: "2025-09-07", end: "2025-10-01" }
+  - { id: c1160-gelato-2511, stores: ["1160"], title: ジェラート 11-12月, kind: dev, bucket: ジェラート, items: [苺ティラミス, サングリア], start: "2025-10-02", end: "2026-01-09" }
+  - { id: c1160-gelato-2601, stores: ["1160"], title: ジェラート 1-2月, kind: dev, bucket: ジェラート, items: [リッチ苺ミルク, ショコラノワゼット], start: "2026-01-10", end: "2026-03-08" }
+  - { id: c1160-gelato-2603, stores: ["1160"], title: ジェラート 3-4月, kind: dev, bucket: ジェラート, items: [ドバイ・ピスタチオショコラ, 苺ブラン], start: "2026-03-09", end: "2026-05-08" }
+  - { id: c1160-gelato-2605, stores: ["1160"], title: ジェラート 5-6月, kind: dev, bucket: ジェラート, items: [リッチマンゴー・ミルク, ソルティアナナ], start: "2026-05-09", end: "2026-06-30" }
+  - { id: c1160-gelato-2607, stores: ["1160"], title: ジェラート 7-8月, kind: dev, bucket: ジェラート, items: [ココマンゴー, アンゴリア・ロッサ], start: "2026-07-01", end: "2026-08-31" }
 
   # ================================================================
   # 夏おすすめ（〜8/31）— 計画表「実行計画 2026.8月末迄」より。
@@ -245,7 +270,7 @@ campaigns:
   # 兄弟枠に合わせて測り方を補完（bucket/items 未設定だと効果が出ない）。
   #   パフェ（スノー）=夏のスノーパフェ → c1160-parfait-snow と同じ items で昨対・前回比。
   #   ケーキ=夏のケーキ枠 → c1160-cake-* と同じく bucket=ケーキ。
-  - { id: s1160-parfait, stores: ["1160"], title: パフェ（スノー）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー], start: "2026-07-01", end: "2026-09-23" }
+  - { id: s1160-parfait, stores: ["1160"], title: パフェ（スノー）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー, スパークリング], start: "2026-07-01", end: "2026-09-23", note: "スノー系＋スパークリングジュレのパフェも対象" }
   - { id: s1160-cake, stores: ["1160"], title: ケーキ, kind: dev, bucket: ケーキ, start: "2026-07-01", end: "2026-08-31" }
   - { id: s1713-kakigori, stores: ["1713"], title: かき氷フェア, kind: dev, start: "2026-07-13", end: "2026-09-04" }
   - { id: s1162-natsu, stores: ["1162"], title: 夏おすすめ（1品新規）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }

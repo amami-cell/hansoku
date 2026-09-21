@@ -50,6 +50,7 @@ jobs:
           node --check web/app.js
           node tests/web/app_test.mjs
           node tests/web/worker_test.mjs
+          node tests/web/goals_test.mjs
 
       - name: URLと画面の対応（実ブラウザ）
         run: |

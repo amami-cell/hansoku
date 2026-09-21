@@ -196,7 +196,8 @@ class Test指標の混在を防ぐ:
         rows = loaded.aggregate(
             AggregateQuery(*AUG, GRAIN_MONTH, metrics=["sales"], group_by=("store_code",))
         )
-        assert len(rows) == 24
+        # 稼働店ぶん（1115 閉店で 24→23）。
+        assert len(rows) == 23
 
     def test_metricを含めれば複数指標でも集計できる(self, loaded):
         rows = loaded.aggregate(

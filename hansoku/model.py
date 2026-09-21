@@ -45,6 +45,13 @@ METRIC_SUPPLY_INVENTORY: Final = "supply_inventory"
 METRIC_COVERS: Final = "covers"
 METRIC_AVG_CHECK: Final = "avg_check"
 METRIC_PRODUCT_SALES: Final = "product_sales"
+# 商品別の販売点数（ABCの「販売数量」）。売上と並べて「何個売れたか」を出す。
+METRIC_PRODUCT_QTY: Final = "product_qty"
+# 商品別の原価金額・粗利金額（ABCグリッドの「原価金額」「粗利金額」）。
+# 売上・点数と同じ (source, grain, date, store, product) に並べて貯める。
+# 原価率は貯めず、必要時に 原価金額/売上 から組み直す（比率は合計できないため）。
+METRIC_PRODUCT_COST: Final = "product_cost"
+METRIC_PRODUCT_GROSS: Final = "product_gross"
 # 部門別（ABC 分類=部門）の売上・数量。ランチ/ドリンク/コース等の構成把握に使う。
 METRIC_DEPT_SALES: Final = "dept_sales"
 METRIC_DEPT_QTY: Final = "dept_qty"
@@ -66,6 +73,9 @@ METRICS: Final = (
     METRIC_COVERS,
     METRIC_AVG_CHECK,
     METRIC_PRODUCT_SALES,
+    METRIC_PRODUCT_QTY,
+    METRIC_PRODUCT_COST,
+    METRIC_PRODUCT_GROSS,
     METRIC_DEPT_SALES,
     METRIC_DEPT_QTY,
 )
@@ -89,6 +99,9 @@ ADDITIVE_METRICS: Final = frozenset(
         METRIC_SUPPLY_INVENTORY,
         METRIC_COVERS,
         METRIC_PRODUCT_SALES,
+        METRIC_PRODUCT_QTY,
+        METRIC_PRODUCT_COST,
+        METRIC_PRODUCT_GROSS,
         METRIC_DEPT_SALES,
         METRIC_DEPT_QTY,
     }

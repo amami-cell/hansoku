@@ -1,0 +1,47 @@
+name: 損益（原価率）取込監査
+
+# どの店の原価率が「―」になっているか（＝損益＝店長会資料DLが取り込めていないか）を
+# 全店で棚卸しする。読み取りのみ。結果はジョブのサマリに出す。
+
+on:
+  workflow_dispatch:
+    inputs:
+      audit_from:
+        description: "監査開始月 YYYY-MM（空=直近12ヶ月）"
+        required: false
+        default: ""
+      audit_to:
+        description: "監査終了月 YYYY-MM（空=直近の完全月）"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 依存をインストール
+        run: pip install -r requirements.txt
+      - name: 監査
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AUDIT_FROM: ${{ github.event.inputs.audit_from }}
+          AUDIT_TO: ${{ github.event.inputs.audit_to }}
+        run: |
+          set -o pipefail
+          python scripts/audit_cost.py | tee -a "$GITHUB_STEP_SUMMARY"

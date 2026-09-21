@@ -105,7 +105,9 @@ class Test権限:
 
     def test_adminは全店見られる(self, seeded):
         seeded.grant_admin("amami@8sin.co.jp")
-        assert len(seeded.stores_for("amami@8sin.co.jp")) == 24
+        # 稼働24店中1115（曲ル角ニハ泡喰ライ）は2026-08末で閉店＝active:false なので、
+        # 全店同期は24だが admin の閲覧範囲（稼働店）は23。
+        assert len(seeded.stores_for("amami@8sin.co.jp")) == 23
 
     def test_店長は担当店だけ見られる(self, seeded):
         seeded.grant("tencho@example.com", "1015", "manager")

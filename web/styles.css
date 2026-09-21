@@ -507,15 +507,22 @@ tbody tr:last-child td{border-bottom:0;}
 .ceff .sub,.ceff .muted{color:var(--ink-3);font-weight:400;}
 .ceff .sub{margin-left:4px;}
 
-/* 時間帯別 売上棒グラフ */
-.hbars{display:flex;align-items:flex-end;gap:4px;height:160px;padding:4px 2px 0;overflow-x:auto;}
+/* 時間帯別 客数棒グラフ＋売上折れ線 */
+.hlegend{display:flex;gap:14px;margin-bottom:8px;font-size:11px;color:var(--ink-3);}
+.hlg-c{color:var(--accent);} .hlg-s{color:var(--warning-ink);font-weight:600;}
+.hwrap{position:relative;overflow-x:auto;}
+.hbars{display:flex;align-items:flex-end;gap:4px;height:160px;padding:4px 2px 0;}
 .hbar{flex:1 1 0;min-width:16px;display:flex;flex-direction:column;align-items:center;height:100%;}
 .hcol{flex:1;width:100%;display:flex;align-items:flex-end;}
-.hfill{width:100%;background:var(--accent);border-radius:3px 3px 0 0;opacity:.55;transition:opacity .15s;}
-.hbar:hover .hfill{opacity:.9;}
+.hfill{width:100%;background:var(--accent);border-radius:3px 3px 0 0;opacity:.5;transition:opacity .15s;}
+.hbar:hover .hfill{opacity:.85;}
 .hbar.peak .hfill{background:var(--good-ink,var(--accent));opacity:.95;}
 .hlbl{margin-top:4px;font-size:10px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
 .hbar.peak .hlbl{color:var(--ink);font-weight:700;}
+/* 売上の折れ線を棒の集計面（ラベルを除く）にぴったり重ねる */
+.hline{position:absolute;left:2px;right:2px;top:4px;bottom:20px;pointer-events:none;overflow:visible;}
+.hline polyline{stroke:var(--warning-ink);stroke-width:1.6;fill:none;vector-effect:non-scaling-stroke;opacity:.9;}
+.hline circle{fill:var(--warning-ink);}
 
 /* 売れ筋商品（ABC）リスト */
 .plist{list-style:none;margin:0;padding:0;}
@@ -528,6 +535,42 @@ tbody tr:last-child td{border-bottom:0;}
 .pbar{flex:1 1 30%;height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden;}
 .pfill{display:block;height:100%;background:var(--accent);opacity:.55;border-radius:4px;}
 .psales{flex:none;width:88px;text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+.pgp{flex:none;width:50px;text-align:right;font-size:11px;font-variant-numeric:tabular-nums;color:var(--ink-3);}
+.pgp.up{color:var(--good-ink);font-weight:600;} .pgp.down{color:var(--critical-ink);font-weight:600;}
+.pgp.muted{color:var(--ink-3);opacity:.5;}
+/* 売れ筋一覧（ABC）の 0円サブ内訳行：親の下に一段下げて折返し表示 */
+.prowsub{display:flex;align-items:flex-start;gap:8px;padding:3px 2px 3px 30px;
+  border-bottom:1px solid var(--line);font-size:11.5px;color:var(--ink-3);}
+.prowsub:last-child{border-bottom:none;}
+.prowsubhead{padding:4px 2px 2px 22px;font-size:10.5px;font-weight:800;letter-spacing:.04em;
+  color:var(--sub);text-transform:none;border-bottom:1px solid var(--line2);}
+.fw-list li.fw-subhead{padding:4px 8px 2px 34px;font-size:10.5px;font-weight:800;letter-spacing:.04em;
+  color:var(--sub);list-style:none;}
+.prowsub.promo{background:color-mix(in srgb, var(--accent) 12%, transparent);}
+.prowsub.promo .psub-n{color:var(--accent);font-weight:700;}
+.fw-list li.fw-subitem.promo .fw-pn{color:var(--accent);font-weight:700;}
+.psub-n{flex:1 1 auto;min-width:0;overflow-wrap:anywhere;word-break:break-word;line-height:1.4;}
+.psub-q{flex:none;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+.psub-v{flex:none;width:88px;text-align:right;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+/* 内訳サブメニューのアコーディオン開閉（開く/閉じるをゆっくり柔らかい高さアニメで） */
+.psubwrap,.fw-list li.fw-subwrap{display:block;padding:0;margin:0;border-bottom:0;list-style:none;}
+/* ふわっと柔らかい開閉（easeOutExpoでゆっくり着地）。ねっとり感の元だった自動スクロールは
+   撤廃済みなので、アニメ自体は好みのふわっと感に戻す。0.8s＋軽いフェード＆微スライド。 */
+.subacc{display:grid;grid-template-rows:0fr;transition:grid-template-rows .8s cubic-bezier(.16,1,.3,1);}
+.psubwrap.open>.subacc,.fw-subwrap.open>.subacc{grid-template-rows:1fr;}
+.subacc>.subacc-in{overflow:hidden;min-height:0;opacity:0;transform:translateY(-6px);
+  transition:opacity .6s ease,transform .8s cubic-bezier(.16,1,.3,1);}
+.psubwrap.open>.subacc>.subacc-in,.fw-subwrap.open>.subacc>.subacc-in{opacity:1;transform:translateY(0);}
+.psubs,.fw-subs{list-style:none;margin:0;padding:0;}
+/* ブラウザ標準のスクロール補正は使わない（window でと要素でとで挙動がバラつくため）。
+   代わりに JS が「画面より上で畳まれた分」だけスクロールを補正する（keepBelowStable）。 */
+html{overflow-anchor:none;}
+/* 小窓(fw-list)の overflow-anchor と余白は、後段の .fw-list 定義（overflow:auto 側）に
+   まとめる。ここで padding-bottom を書いても後段の padding ショートハンドで上書きされるため。 */
+/* 下余白（スペーサー）は JS が「サブを開いている間だけ」挿入し、上にスクロールすると外す。
+   常設ではないので、閉じて戻ったときに余分な空白が残らない。 */
+#subspacer{flex:none;pointer-events:none;}
+@media (prefers-reduced-motion:reduce){.subacc,.subacc>.subacc-in{transition:none;}}
 .cgtag{font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);
   border:1px solid var(--accent-line);border-radius:4px;padding:1px 7px;line-height:1.6;}
 .fbar{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:14px;}
@@ -858,6 +901,53 @@ tbody tr:last-child td{border-bottom:0;}
 .rvnext.muted{background:none;border:none;color:var(--ink-3);padding:0;}
 .rvby{margin-top:6px;font-size:11px;color:var(--ink-3);}
 
+/* 目標の振り返り（目標 vs 実績・達成率） */
+.trtbl{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;}
+.trtbl th{font-size:11px;font-weight:700;color:var(--ink-3);text-align:right;
+  padding:4px 8px;border-bottom:1px solid var(--line);letter-spacing:.03em;}
+.trtbl th.tr-l{text-align:left;}
+.trtbl td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;color:var(--ink);}
+.trtbl td.tr-l{text-align:left;font-weight:600;color:var(--ink);}
+.trtbl tr:last-child td{border-bottom:none;}
+.trtbl .tr-v{color:var(--ink-2);}
+.tr-dir{margin-left:6px;font-size:10.5px;font-weight:600;color:var(--ink-3);
+  background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:1px 6px;}
+.tr-rate{font-weight:700;}
+.tr-rate.good{color:var(--good-ink);}
+.tr-rate.bad{color:var(--warning-ink);}
+.tr-rate.muted{color:var(--ink-3);font-weight:400;}
+.tr-note{margin-top:9px;font-size:11px;color:var(--ink-3);line-height:1.6;}
+/* 目標の変更ログ（誰がいつ設定したか）。目標セルの下に控えめに。 */
+.tr-meta{margin-top:2px;font-size:10px;font-weight:400;color:var(--ink-3);white-space:nowrap;}
+
+/* 目標スコアボード（施策の効果ビュー上部・横断の達成率一覧） */
+.tblist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}
+.tblist li{border:1px solid var(--line);border-radius:10px;padding:9px 12px;cursor:pointer;
+  background:var(--surface);transition:border-color .12s;}
+.tblist li:hover{border-color:var(--line-strong);}
+.tb-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px;}
+.tb-name{font-size:13.5px;color:var(--ink);}
+.tb-store{font-size:11.5px;color:var(--ink-3);}
+.tb-owner{font-size:11px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line);border-radius:999px;padding:1px 8px;margin-left:auto;white-space:nowrap;}
+.tb-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.tb-chip{font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;white-space:nowrap;
+  font-variant-numeric:tabular-nums;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line);}
+.tb-chip.good{color:var(--good-ink);background:color-mix(in srgb,var(--good-ink) 12%,transparent);border-color:color-mix(in srgb,var(--good-ink) 30%,transparent);}
+.tb-chip.bad{color:var(--warning-ink);background:color-mix(in srgb,var(--warning-ink) 12%,transparent);border-color:color-mix(in srgb,var(--warning-ink) 30%,transparent);}
+.tb-chip.muted{color:var(--ink-3);}
+/* 担当者別 平均達成率サマリ */
+.tb-sumbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:2px 0 10px;}
+.tb-sum-l{font-size:11px;font-weight:700;color:var(--ink-3);letter-spacing:.03em;margin-right:2px;}
+.tb-sum{display:inline-flex;flex-direction:column;align-items:flex-start;gap:1px;
+  border:1px solid var(--line);border-radius:10px;padding:6px 12px;cursor:pointer;background:var(--surface);
+  font-variant-numeric:tabular-nums;transition:border-color .12s;}
+.tb-sum:hover{border-color:var(--line-strong);}
+.tb-sum.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset;}
+.tb-sum-n{font-size:11.5px;color:var(--ink-2);font-weight:600;}
+.tb-sum-v{font-size:16px;font-weight:800;line-height:1.1;}
+.tb-sum-c{font-size:10px;color:var(--ink-3);}
+.tb-sum.good .tb-sum-v{color:var(--good-ink);} .tb-sum.bad .tb-sum-v{color:var(--warning-ink);} .tb-sum.muted .tb-sum-v{color:var(--ink-3);}
+
 /* 部門構成（コース/ランチ/アラカルト/飲み放題/食べ放題） */
 .dlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:9px;}
 .drow{display:grid;grid-template-columns:78px 1fr auto auto;align-items:center;
@@ -917,7 +1007,9 @@ tbody tr:last-child td{border-bottom:0;}
 .annualbar .ytabs{display:flex;flex-wrap:wrap;gap:4px;}
 /* チャート（帯・ガント）。狭い画面では横スクロールで月幅を確保する */
 .gantt{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-.grow{display:grid;grid-template-columns:150px 1fr;align-items:center;gap:8px;padding:3px 0;min-width:540px;}
+.grow{display:grid;grid-template-columns:84px 1fr;align-items:center;gap:8px;padding:3px 0;min-width:560px;}
+.glabel.gspace,.glabel.gcat{cursor:default;}
+.glabel.gcat .kdot{flex:0 0 auto;}
 .grow.ghead{border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:4px;position:sticky;top:0;background:var(--surface);}
 .glabel{font-size:12px;font-weight:600;color:var(--ink);text-align:left;background:none;border:none;cursor:pointer;
   display:flex;align-items:center;gap:6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;padding:0;}
@@ -932,6 +1024,7 @@ tbody tr:last-child td{border-bottom:0;}
 .gbar:hover{opacity:1;box-shadow:0 1px 6px rgba(0,0,0,.18);}
 .gbar.done{opacity:.6;}
 .gbt{pointer-events:none;}
+.gbar .gvm{color:#fff;font-weight:800;margin-right:3px;pointer-events:none;}
 .kdot{display:inline-block;width:9px;height:9px;border-radius:999px;flex:0 0 auto;}
 /* 効果判定マーカー・凡例 */
 .gvm{font-size:11px;font-weight:700;margin-right:2px;}
@@ -968,7 +1061,107 @@ tbody tr:last-child td{border-bottom:0;}
 .ymxt td.prov,.ymxt th.prov button{opacity:.55;}
 .ymxsum{background:var(--surface-2);font-weight:700;border-left:1px solid var(--line-strong);}
 .ymxt thead .ymxsum{color:var(--ink);}
-/* 年間の品目構成比（読める凡例。マトリクス内の小さな縦バーは廃止） */
+/* 品目構成比を「区分×月」の行で読める形に（各月＝売上に占める割合／年計＝年間シェア） */
+.ymxt tr.ymxsec th{background:var(--surface-2);color:var(--ink-2);font-weight:700;font-size:11.5px;
+  border-top:2px solid var(--line-strong);}
+.ymxt tr.ymxsec td{background:var(--surface-2);border-top:2px solid var(--line-strong);}
+.ymxt tr.ymxcompo-row th{font-weight:600;color:var(--ink-2);}
+.ymxt tr.ymxcompo-row td.ymxcompo-c{color:var(--ink-2);}
+.ymxcdot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:6px;vertical-align:middle;}
+/* 構成比セルは押せる（商品内訳の小窓） */
+.ymxt td.ymxcompo-click{cursor:pointer;}
+.ymxt td.ymxcompo-click:hover{background:var(--accent-soft);color:var(--accent);}
+/* 商品内訳の小ウインドウ（複数・ドラッグ移動可） */
+#fwins{position:fixed;inset:0;pointer-events:none;z-index:1000;}
+.fwin{position:absolute;pointer-events:auto;width:340px;height:min(52vh,380px);max-width:96vw;max-height:92vh;
+  min-width:240px;min-height:150px;background:var(--surface);
+  border:1px solid var(--line-strong);border-radius:12px;box-shadow:0 10px 34px rgba(0,0,0,.30);
+  font-size:12.5px;overflow:hidden;display:flex;flex-direction:column;resize:both;}
+.fw-head{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--surface-2);
+  cursor:move;border-bottom:1px solid var(--line);user-select:none;}
+.fw-dot{width:9px;height:9px;border-radius:2px;flex:0 0 auto;}
+.fw-ti{font-weight:700;color:var(--ink);}
+.fw-sub{color:var(--ink-3);font-size:11px;}
+.fw-sz{margin-left:auto;background:none;border:0;font-size:15px;line-height:1;color:var(--ink-3);
+  cursor:pointer;padding:0 4px;}
+.fw-sz:hover{color:var(--accent);}
+.fw-x{background:none;border:0;font-size:17px;line-height:1;color:var(--ink-3);cursor:pointer;padding:0 2px;}
+.fw-x:hover{color:var(--ink);}
+/* パネル頭のトグル（並び替え・％基準）。ptab を小さめにして頭に収める。 */
+.fw-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:6px 10px;flex:0 0 auto;
+  background:var(--surface-2);border-bottom:1px solid var(--line);}
+.fw-ctl-l{font-size:10.5px;color:var(--ink-3);}
+.fw-ctl .ptabs{padding:2px;}
+.fw-ctl .ptab{font-size:11px;padding:3px 9px;}
+/* ⤢ の既定サイズ（標準→大→特大）。角ドラッグでさらに自由リサイズできる。 */
+.fwin.fw-lg{width:min(520px,94vw);height:min(66vh,560px);font-size:13.5px;}
+.fwin.fw-xl{width:min(760px,96vw);height:min(82vh,760px);font-size:15px;}
+.fwin.fw-xl .fw-list li{padding:9px 12px;}
+.fw-list{list-style:none;margin:0;padding:4px 4px;flex:1 1 auto;overflow:auto;
+  overflow-anchor:none;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
+  font-variant-numeric:tabular-nums;}
+.fw-head{flex:0 0 auto;}
+.fw-list li{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:6px 8px;border-bottom:1px solid var(--line);}
+.fw-list li:last-child{border-bottom:0;}
+/* 商品名は省略せず全文を折り返して表示。数値（売上・点数・％）は右で崩さない。 */
+.fw-pn{color:var(--ink);flex:1 1 auto;min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.4;}
+.fw-rk{color:var(--ink-3);font-size:10px;}
+.fw-pv{color:var(--ink);font-weight:700;white-space:nowrap;flex:0 0 auto;text-align:right;}
+.fw-pq{color:var(--ink-2);font-weight:600;margin-left:6px;}
+.fw-pp{color:var(--ink-3);font-weight:600;margin-left:6px;}
+/* 販促に関わる部門・商品を色付け */
+.fw-list li.promo,.fw-list li.fw-catrow.promo{background:color-mix(in srgb, var(--accent) 12%, transparent);}
+.fw-pbadge{font-size:10px;font-weight:700;color:#fff;background:var(--accent);border-radius:4px;padding:1px 5px;margin-left:6px;}
+.fw-catrow{cursor:pointer;}
+.fw-catrow:hover{background:var(--accent-soft);}
+/* F/D比セル（押すと部門別小窓） */
+.ymxt td.fdcell{cursor:pointer;font-weight:600;}
+.ymxt td.fdcell:hover{background:var(--accent-soft);color:var(--accent);}
+.ymxt tr.ymxfd th{color:var(--ink-2);}
+/* 品目構成比セルで販促がある月は色付け */
+.ymxt td.ymxcompo-c.promo{background:color-mix(in srgb, var(--accent) 14%, transparent);color:var(--accent);font-weight:700;}
+.fwin.fw-flash{animation:fwflash .6s ease;}
+@keyframes fwflash{0%,100%{box-shadow:0 10px 34px rgba(0,0,0,.30);}50%{box-shadow:0 0 0 3px var(--accent);}}
+/* 携帯：下から出るシート＋タブ（複数はタブで切替・重ならない） */
+#fsheet{position:fixed;left:0;right:0;bottom:0;z-index:1100;background:var(--surface);
+  border-top:1px solid var(--line-strong);border-radius:16px 16px 0 0;box-shadow:0 -10px 34px rgba(0,0,0,.30);
+  max-height:94vh;display:flex;flex-direction:column;animation:fsUp .18s ease;overscroll-behavior:contain;}
+@keyframes fsUp{from{transform:translateY(100%);}to{transform:translateY(0);}}
+/* 上部ハンドル：上下ドラッグで高さ調整（触りやすいよう縦20pxの当たり判定） */
+.fs-grab{height:20px;flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+  cursor:ns-resize;touch-action:none;}
+.fs-grab::before{content:"";width:46px;height:5px;background:var(--line-strong);border-radius:3px;}
+.fs-grab:hover::before{background:var(--accent);}
+.fs-tabs{display:flex;gap:6px;overflow-x:auto;padding:4px 12px;flex:0 0 auto;-webkit-overflow-scrolling:touch;}
+.fs-tab{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-size:12.5px;font-weight:600;
+  border:1px solid var(--line);background:var(--surface-2);color:var(--ink-2);border-radius:999px;padding:7px 11px;cursor:pointer;}
+.fs-tab.on{border-color:var(--accent);color:var(--accent);background:var(--accent-soft);}
+.fs-dot{width:8px;height:8px;border-radius:2px;flex:0 0 auto;}
+.fs-tx{margin-left:3px;color:var(--ink-3);font-weight:800;padding:0 2px;}
+.fs-sub{display:flex;align-items:center;gap:6px;padding:9px 14px;font-size:13px;color:var(--ink-2);
+  border-bottom:1px solid var(--line);flex:0 0 auto;}
+.fs-close{margin-left:auto;background:none;border:1px solid var(--line);border-radius:8px;padding:5px 12px;
+  font-size:12.5px;color:var(--ink-2);cursor:pointer;}
+/* 下シートのリスト。下余白は JS が開いている間だけ付ける（常設しない）。 */
+.fs-list{flex:1 1 auto;overflow:auto;padding-bottom:16px;overscroll-behavior:contain;overflow-anchor:none;}
+/* 部門別（月）：部門ごとに色分け。部門ヘッダは合計を太字、商品は一段下げて明細 */
+.fw-list li.fw-sec{border-left:4px solid var(--cc);background:color-mix(in srgb, var(--cc) 10%, transparent);
+  font-size:13px;margin-top:4px;}
+.fw-list li.fw-sec b{color:var(--ink);}
+.fw-list li.fw-subrow{border-left:4px solid color-mix(in srgb, var(--cc) 45%, transparent);
+  padding-left:20px;color:var(--ink-2);font-size:12px;}
+.fw-list li.fw-sec.promo,.fw-list li.fw-subrow.promo{background:color-mix(in srgb, var(--accent) 12%, transparent);}
+/* 0円サブ（選択メニュー内訳）の畳み表示：親行の開閉ボタン＋開いたときの内訳行 */
+.fw-subtog{display:inline-block;margin-left:6px;padding:1px 7px;font-size:10.5px;font-weight:600;
+  line-height:1.5;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line);
+  border-radius:999px;cursor:pointer;white-space:nowrap;font-family:inherit;}
+.fw-subtog:hover{border-color:var(--accent);color:var(--accent);}
+.fw-subtog.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);}
+/* 内訳（サブ）行：親よりさらに一段下げ、控えめに。名前は全文折返し。 */
+.fw-list li.fw-subitem{padding-left:34px;color:var(--ink-3);font-size:11.5px;
+  background:color-mix(in srgb, var(--cc, var(--ink-3)) 4%, transparent);}
+.fw-list li.fw-subitem .fw-pn{color:var(--ink-3);}
+.fw-list li.fw-subitem .fw-pv{color:var(--ink-2);font-weight:600;}
 .ymxcompo-lg{margin-top:10px;}
 .ymxcl-t{font-size:12px;font-weight:600;color:var(--ink-2);}
 /* 前年差の内訳（なぜ増えた/減った：区分ごとの差を大きい順に） */
@@ -1134,6 +1327,22 @@ textarea.pf-in{resize:vertical;line-height:1.5;}
 .pf-row{display:flex;gap:10px;}
 .pf-row .pf-l{flex:1;}
 .pf-msg{font-size:12px;color:var(--critical-ink);background:var(--warn-soft);border-radius:7px;padding:6px 10px;}
+.pf-hint{font-size:10.5px;font-weight:600;color:var(--sub);margin-left:6px;}
+.pf-tg-head{font-size:12px;font-weight:800;color:var(--ink-2);margin-top:4px;border-top:1px solid var(--line);padding-top:10px;}
+.pf-tg-inherit{margin-left:8px;font-size:10.5px;font-weight:600;color:var(--gold,#a9722a);background:color-mix(in srgb,var(--gold,#a9722a) 14%,transparent);border-radius:5px;padding:1px 7px;}
+.pf-tg-grid{display:flex;flex-direction:column;gap:7px;}
+.pf-tg{display:grid;grid-template-columns:1fr auto 112px;grid-template-areas:"l fill in" "help help diff";gap:2px 8px;align-items:center;}
+.pf-tg-l{grid-area:l;font-size:12.5px;font-weight:600;color:var(--ink-2);display:flex;align-items:center;gap:5px;}
+.pf-tg-u{font-size:10.5px;color:var(--sub);font-weight:500;}
+.pf-tg-rev{font-size:9.5px;font-weight:700;color:var(--gold,#a9722a);background:color-mix(in srgb,var(--gold,#a9722a) 15%,transparent);border-radius:4px;padding:0 4px;}
+.pf-tg-in{grid-area:in;text-align:right;font-variant-numeric:tabular-nums;}
+.pf-tg-in::placeholder{color:var(--muted,#9c968b);font-size:12px;}
+.pf-tg-fill{grid-area:fill;font:inherit;font-size:10.5px;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:2px 7px;cursor:pointer;white-space:nowrap;}
+.pf-tg-fill:hover:not(:disabled){border-color:var(--line-strong);}
+.pf-tg-fill:disabled{opacity:.4;cursor:default;}
+.pf-tg-help{grid-area:help;font-size:10px;color:var(--sub);}
+.pf-tg-diff{grid-area:diff;font-size:10.5px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-3);}
+.pf-tg-diff.good{color:var(--good-ink);} .pf-tg-diff.bad{color:var(--warning-ink);} .pf-tg-diff.flat{color:var(--ink-3);}
 .pf-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:4px;}
 .pf-del{font:inherit;font-size:12px;color:var(--critical-ink);background:none;border:1px solid color-mix(in srgb,var(--critical-ink) 35%,var(--line));border-radius:8px;padding:7px 12px;cursor:pointer;}
 .pf-cancel{font:inherit;font-size:13px;color:var(--ink-2);background:none;border:0;padding:7px 12px;cursor:pointer;}
@@ -1373,6 +1582,10 @@ table.bqtbl tbody tr:hover{background:color-mix(in srgb,var(--ink-1) 6%,transpar
   background:color-mix(in srgb,var(--ink-1) 8%,transparent);color:var(--ink-2);}
 .pf-gp.up{color:var(--good-ink);background:color-mix(in srgb,var(--good-ink) 12%,transparent);}
 .pf-gp.warn{color:var(--warning-ink);background:color-mix(in srgb,var(--warning-ink) 12%,transparent);}
+/* 原価率が出ない理由バッジ（「―」を素で出さない）。控えめな注意色。 */
+.pf-cr{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;white-space:nowrap;
+  color:var(--ink-3);background:color-mix(in srgb,var(--ink-1) 7%,transparent);
+  border:1px dashed var(--line-strong);}
 
 /* 収益性ランキングのワースト（原価改善の狙い目） */
 .xpworst{background:color-mix(in srgb,var(--warning-ink) 7%,transparent);}
@@ -1492,7 +1705,7 @@ b.warn{color:var(--warning-ink);}
 .sheet-hd input{flex:1;min-width:0;font:inherit;font-size:16px;padding:11px 13px;
   border:1px solid var(--line-strong);border-radius:10px;background:var(--bg);color:var(--ink);}
 .sheet-hd input:focus{outline:2px solid var(--accent);outline-offset:1px;}
-.sheet-bdy{overflow-y:auto;padding:6px 8px 14px;-webkit-overflow-scrolling:touch;}
+.sheet-bdy{overflow-y:auto;padding:6px 8px 14px;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
 .sr-hint{margin:14px 12px;font-size:13px;color:var(--ink-3);line-height:1.8;}
 .sr-list{list-style:none;margin:0;padding:0;}
 .sr-item{display:flex;align-items:center;gap:11px;width:100%;text-align:left;

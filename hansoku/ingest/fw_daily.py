@@ -733,6 +733,11 @@ def ingest_hourly(
         y, m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
         month = f"{y}-{m:02d}"
     d_from, d_to = _month_bounds(month)
+    # 当月（月途中）は終端日を今日までに詰める。末日（未来日）を投げると当月の
+    # グリッドが出ない/別挙動になる店があるため、9/16実行なら 9/16 で止める。
+    _today = datetime.now(timezone.utc).date()
+    if (_today.year, _today.month) == (int(month[:4]), int(month[5:7])):
+        d_to = _today.strftime("%Y/%m/%d")
     rep_date = _date(int(month[:4]), int(month[5:7]), 1)
 
     source = "fw_hourly"
@@ -741,71 +746,114 @@ def ingest_hourly(
     collected: list[ActualRow] = []
     skipped: list[str] = []
 
+    # まず1セッションでコンボ候補→対象店リストを作る。
     with fw_session(artifacts) as session:
         _open_hourly(session)
         options = _combo_options(session)
         print(f"[時間帯別] 店舗コンボボックス {len(options)}件 / 対象月 {month}（{d_from}〜{d_to}）")
         targets = []
+        skipped_pos = []
         for opt in options:
             code = opt["value"].lstrip("0")
             store = active_by_code.get(code) or master.find_by_name(opt["name"])
-            if store and store.active:
-                targets.append((opt["value"], store))
-        print(f"[時間帯別] マスタと一致した稼働店 {len(targets)}件")
-        if store_limit:
-            targets = targets[:store_limit]
+            if not (store and store.active):
+                continue
+            # FW未連動の店（pos=uレジ/ダイニー）はFWにデータが無いので対象外。掘っても
+            # 毎回「グリッド無し」で失敗するだけ（例 1766 ぎふや福岡天神＝uレジ）。
+            if store.pos != "fw":
+                skipped_pos.append(f"{store.store_code}:{store.pos}")
+                continue
+            targets.append((opt["value"], store))
+    if skipped_pos:
+        print(f"[時間帯別] FW未連動でスキップ {len(skipped_pos)}件: {', '.join(skipped_pos)}")
+    print(f"[時間帯別] マスタと一致した稼働店 {len(targets)}件")
+    if store_limit:
+        targets = targets[:store_limit]
 
-        for ti, (value, store) in enumerate(targets):
-            name = store.store_name
-            if not _select_combo(session, value):
-                print(f"[時間帯別] 店舗選択に失敗: {name} ({value})")
-                skipped.append(f"{store.store_code}:店舗選択")
-                continue
-            if not _set_date_range(session, d_from, d_to):
-                # 日付が効いていなければ別の期間のグリッドを読むことになる。続行しない。
-                print(f"[時間帯別] 日付レンジ設定に失敗: {name}")
-                skipped.append(f"{store.store_code}:日付レンジ")
-                continue
-            _click_search(session)
-            time.sleep(1.2)
-            grid = _extract_hour_grid(session)
-            if ti == 0:
-                # 最初の1店は生の視覚行も出して、ラベル・列の並びを確認できるようにする
-                print("[時間帯別] 先頭店の視覚行（先頭12行・診断用）:")
-                for cells in _visual_rows(session)[:12]:
-                    print("   ", " | ".join(cells[:14]))
-            if not grid:
-                session.snapshot(f"nohour_{store.store_code}")
-                print(f"  {store.store_code} {name[:14]} 時間帯グリッドが読めませんでした")
-                skipped.append(f"{store.store_code}:グリッド無し")
-                continue
-            n_before = len(collected)
-            for band in grid:
-                ints = band["ints"]
-                if len(ints) <= _HOUR_SALES:
+    # 【真因】同一セッションで店を切り替え続けると、2店目以降でグリッドが再描画され
+    # なくなることがある（実測：バッチ4でも一部の店が「グリッド無し」で落ちる。単店
+    # プローブは常に満額読める＝データはあり、1店1セッションなら確実）。
+    # 対策：1店＝1セッション（BATCH=1）。検索が1セッション1回になるので取りこぼさない。
+    # 実行頻度は低い（月次の更新）ので再ログインのコストは許容する。
+    BATCH = 1
+    diag_done = False
+    for bi in range(0, len(targets), BATCH):
+        chunk = targets[bi:bi + BATCH]
+        with fw_session(artifacts) as session:
+            _open_hourly(session)
+            _combo_options(session)  # コンボが描画されるまで待つ（選択の空振り防止）
+            time.sleep(1.0)          # 新セッション直後はコンボ確定に少し猶予を持たせる
+            for value, store in chunk:
+                name = store.store_name
+                # 店舗選択は新セッション直後にまれに空振りする（バッチ先頭が丸ごと
+                # 失敗する事象＝一過性で、走行ごとに落ちる店が変わる）。数回まで粘る。
+                sel = False
+                for _sa in range(3):
+                    if _select_combo(session, value):
+                        sel = True
+                        break
+                    time.sleep(1.5)
+                if not sel:
+                    print(f"[時間帯別] 店舗選択に失敗: {name} ({value})")
+                    skipped.append(f"{store.store_code}:店舗選択")
                     continue
-                sales = ints[_HOUR_SALES]
-                covers = ints[_HOUR_COVERS]
-                for metric, val in ((METRIC_SALES, sales), (METRIC_COVERS, covers)):
-                    if val > 0:
-                        collected.append(
-                            ActualRow(
-                                store_code=store.store_code,
-                                date=rep_date,
-                                grain=GRAIN_HOUR,
-                                metric=metric,
-                                value=float(val),
-                                hour=band["hour"],
-                                kind=KIND_FINAL,
-                                source=source,
-                                ingested_at=ingested_at,
+                if not _set_date_range(session, d_from, d_to):
+                    # 日付が効いていなければ別期間のグリッドを読むことになる。続行しない。
+                    print(f"[時間帯別] 日付レンジ設定に失敗: {name}")
+                    skipped.append(f"{store.store_code}:日付レンジ")
+                    continue
+                # 描画待ち：検索後、行数が伸び止まる（=描画完了）までポーリング。
+                _click_search(session)
+                best: list[dict] = []
+                stable = 0
+                for _ in range(10):  # 最大 ~15秒
+                    time.sleep(1.5)
+                    g = _extract_hour_grid(session)
+                    if len(g) > len(best):
+                        best = g
+                        stable = 0
+                    elif g and len(g) == len(best):
+                        stable += 1
+                        if stable >= 2:  # 2回連続で同数＝描画完了
+                            break
+                if not diag_done:
+                    diag_done = True
+                    print("[時間帯別] 先頭店の視覚行（先頭12行・診断用）:")
+                    for cells in _visual_rows(session)[:12]:
+                        print("   ", " | ".join(cells[:14]))
+                if not best:
+                    session.snapshot(f"nohour_{store.store_code}")
+                    print(f"  {store.store_code} {name[:14]} 時間帯グリッドが読めませんでした")
+                    skipped.append(f"{store.store_code}:グリッド無し")
+                    continue
+                n_before = len(collected)
+                for band in best:
+                    ints = band["ints"]
+                    if len(ints) <= _HOUR_SALES:
+                        continue
+                    sales = ints[_HOUR_SALES]
+                    covers = ints[_HOUR_COVERS]
+                    for metric, val in ((METRIC_SALES, sales), (METRIC_COVERS, covers)):
+                        if val > 0:
+                            collected.append(
+                                ActualRow(
+                                    store_code=store.store_code,
+                                    date=rep_date,
+                                    grain=GRAIN_HOUR,
+                                    metric=metric,
+                                    value=float(val),
+                                    hour=band["hour"],
+                                    kind=KIND_FINAL,
+                                    source=source,
+                                    ingested_at=ingested_at,
+                                )
                             )
-                        )
-            hours = sorted({b["hour"] for b in grid})
-            hspan = f"{hours[0]}〜{hours[-1]}時" if hours else "-"
-            print(
-                f"  {store.store_code} {name[:14]} {len(grid)}帯 {hspan} +{len(collected) - n_before}行"
-            )
+                hours = sorted({b["hour"] for b in best})
+                hspan = f"{hours[0]}〜{hours[-1]}時" if hours else "-"
+                print(
+                    f"  {store.store_code} {name[:14]} {len(best)}帯 {hspan}"
+                    f" +{len(collected) - n_before}行"
+                )
 
     print(f"[時間帯別] 収集 {len(collected)} 行")
     if skipped:
@@ -865,11 +913,26 @@ def probe_hourly_store(
             if not _set_date_range(session, d_from, d_to):
                 print(f"[時間帯probe] {label}: 日付設定に失敗 {d_from}〜{d_to}")
             _click_search(session)
-            time.sleep(1.6)
-            grid = _extract_hour_grid(session)
+            # 描画待ち：行数が伸び止まるまでポーリング（単発待ちだと取りこぼす）
+            grid = []
+            best = []
+            stable = 0
+            for _ in range(12):
+                time.sleep(1.5)
+                g = _extract_hour_grid(session)
+                if len(g) > len(best):
+                    best = g
+                    stable = 0
+                elif g and len(g) == len(best):
+                    stable += 1
+                    if stable >= 2:
+                        break
+            grid = best
             if not grid:
                 session.snapshot(f"nohour_probe_{label}")
-                print(f"=== {label} {d_from}〜{d_to} === グリッドなし")
+                print(f"=== {label} {d_from}〜{d_to} === グリッドなし。画面の視覚行（先頭18行・診断）:")
+                for cells in _visual_rows(session)[:18]:
+                    print("   ", " | ".join((c or "") for c in cells[:14]))
                 continue
             tot_c = tot_s = 0
             lines = []
@@ -906,6 +969,8 @@ ABC_MENU = ("販売管理", "店舗業務", "ABC分析")
 # 原価は 100.00・原価率は 25.25% で整数判定から外れるため、この並びで安定する。
 _ABC_QTY = 1  # 商品名の後ろの整数列での販売数量位置
 _ABC_SALES = 2  # 同・売上金額位置
+_ABC_COST = 3  # 同・原価金額位置（列: 単価0 数量1 売上2 原価金額3 粗利4）
+_ABC_GROSS = 4  # 同・粗利金額位置
 # 合計・総計・小計は商品ではないので商品グリッドから除外する
 _ABC_TOTAL_NAMES = {"合計", "総計", "小計", "合 計", "総 計", "小 計", "総合計"}
 
@@ -1257,6 +1322,47 @@ def _extract_product_grid(session) -> list[dict]:
     return result
 
 
+# 「NN:区分名」形式のグループ見出し行（例 "20:テイクアウトジェラート"）。分類=グループ／
+# メニューで各商品の上に出る小計行。商品ではないので取り込まず、直後の商品行に
+# その所属グループとして貼る。全角コロンも許す。
+_ABC_GROUP_RE = re.compile(r"^\s*\d+\s*[:：]\s*\S")
+
+
+def _extract_product_grid_grouped(session) -> list[dict]:
+    """分類=グループ／メニューのグリッドを、各商品に所属グループを付けて返す。
+
+    各要素は {"name", "rank", "ints", "group"}。group は直前に現れた「NN:区分名」見出し
+    （例 "20:テイクアウトジェラート"）。全商品グリッドには内訳（0円の選択商品）が出ないため、
+    サンデー/テイクアウトジェラート等の“素の風味名”を正しい区分へ束ねるのに使う。"""
+    result: list[dict] = []
+    seen: set[tuple[str | None, str]] = set()
+    group: str | None = None
+    for cells in _visual_rows(session):
+        name_idx = _abc_product_name_index(cells)
+        if name_idx is None:
+            continue
+        name = cells[name_idx].strip()
+        if _ABC_GROUP_RE.match(name):  # 区分見出し行。商品ではない。
+            group = name
+            continue
+        if name in ("商品名",) or name in _ABC_TOTAL_NAMES:
+            continue
+        ints = _row_ints(cells[name_idx + 1:])
+        if len(ints) < 3:  # [単価,数量,売上] は要る
+            continue
+        key = (group, name)
+        if key in seen:
+            continue
+        rank = None
+        for c in reversed(cells):
+            if _ABC_RANK_RE.match(c.strip()):
+                rank = c.strip()
+                break
+        seen.add(key)
+        result.append({"name": name, "rank": rank, "ints": ints, "group": group})
+    return result
+
+
 def ingest_abc(
     warehouse,
     master,
@@ -1278,6 +1384,9 @@ def ingest_abc(
     from ..model import (
         GRAIN_MONTH,
         KIND_FINAL,
+        METRIC_PRODUCT_COST,
+        METRIC_PRODUCT_GROSS,
+        METRIC_PRODUCT_QTY,
         METRIC_PRODUCT_SALES,
         ActualRow,
     )
@@ -1383,6 +1492,39 @@ def ingest_abc(
                         ingested_at=ingested_at,
                     )
                 )
+                # 販売点数（何個売れたか）。売上と並べて出すため同じ商品名で持つ。
+                if len(ints) > _ABC_QTY and ints[_ABC_QTY] > 0:
+                    collected.append(
+                        ActualRow(
+                            store_code=ABC_GROUP_CODE,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_QTY,
+                            value=float(ints[_ABC_QTY]),
+                            product_name=prod["name"][:80],
+                            product_category=prod["rank"],
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
+                    )
+                # 原価金額・粗利金額（ABCグリッド由来）。売上・点数と同じ商品名で並べる。
+                for _m, _i in ((METRIC_PRODUCT_COST, _ABC_COST), (METRIC_PRODUCT_GROSS, _ABC_GROSS)):
+                    if len(ints) > _i:
+                        collected.append(
+                            ActualRow(
+                                store_code=ABC_GROUP_CODE,
+                                date=rep_date,
+                                grain=GRAIN_MONTH,
+                                metric=_m,
+                                value=float(ints[_i]),
+                                product_name=prod["name"][:80],
+                                product_category=prod["rank"],
+                                kind=KIND_FINAL,
+                                source=source,
+                                ingested_at=ingested_at,
+                            )
+                        )
             top = products[0]
             print(
                 f"[ABC] 稼働{len(picked_codes)}店 {len(products)}品 "
@@ -1460,6 +1602,7 @@ def report_monthly_coverage(
     date_from: str = "2024-01",
     date_to: str = "2026-08",
     metric: str | None = None,
+    grain: str | None = None,
 ) -> int:
     """指定指標（既定=月次売上）が店×月でどこまで埋まっているかを出す。
 
@@ -1467,12 +1610,15 @@ def report_monthly_coverage(
     バックフィルの前後で回して、埋まったか・どこが穴かを確かめるための道具。
     metric に dept_sales / product_sales を渡すと、ABCの取りこぼし月を洗い出せる
     （FWのグリッドは稀に埋まりきる前に読まれ、その月だけ0件になることがある）。
+    grain=hour を渡すと時間帯別（fw_hourly, 代表日=月初）の店×月カバレッジを出せる。
     """
     import sys as _sys
     from datetime import date as _date
 
     from ..db.warehouse import AggregateQuery
-    from ..model import GRAIN_MONTH, METRIC_DEPT_SALES, METRIC_SALES
+    from ..model import GRAIN_HOUR, GRAIN_MONTH, METRIC_DEPT_SALES, METRIC_SALES
+
+    grain = grain or GRAIN_MONTH
 
     try:
         _sys.stdout.reconfigure(line_buffering=True)
@@ -1501,7 +1647,7 @@ def report_monthly_coverage(
         AggregateQuery(
             date_from=d_from,
             date_to=d_to,
-            grain=GRAIN_MONTH,
+            grain=grain,
             metrics=[metric],
             store_codes=master.active_codes,
             group_by=("store_code", "date"),
@@ -1524,34 +1670,52 @@ def report_monthly_coverage(
             return "FWのABCに部門が無い（商品と部門が未紐付け）"
         return None
 
-    print(f"=== 月次カバレッジ [{metric}] {date_from}〜{date_to}（{len(want)}ヶ月） ===")
+    # 開業日 "YYYY-MM-DD" → 開店月 "YYYY-MM"。この月より前は営業しておらず、
+    # 実績が無いのが正しい＝欠けではなく対象外(N/A)として数える。
+    def _open_month(st) -> str | None:
+        o = (getattr(st, "opened", "") or "").strip()
+        return o[:7] if len(o) >= 7 else None
+
+    def _expected(st) -> list[str]:
+        om = _open_month(st)
+        return [m for m in want if om is None or m >= om]
+
+    print(f"=== 店×月カバレッジ [{metric}/{grain}] {date_from}〜{date_to}（{len(want)}ヶ月） ===")
     full, partial, empty, other_pos = [], [], [], []
     for st in master.active:
         got = have.get(st.store_code, set())
-        miss = [m for m in want if m not in got]
-        head = f"  {st.store_code} {st.store_name[:16]:<16} {len(want) - len(miss):>2}/{len(want)}"
+        exp = _expected(st)
+        miss = [m for m in exp if m not in got]
+        pre = len(want) - len(exp)  # 開店前で対象外の月数
+        note = f"（開店前{pre}ヶ月は対象外）" if pre else ""
+        head = f"  {st.store_code} {st.store_name[:16]:<16} {len(exp) - len(miss):>2}/{len(exp)}"
         cannot = _cannot(st)
         if cannot and not got:
             other_pos.append(st.store_code)
             print(f"― {head}  {cannot}")
         elif not miss:
             full.append(st.store_code)
-            print(f"✓ {head}  すべて有り")
-        elif len(miss) == len(want):
+            print(f"✓ {head}  すべて有り{note}")
+        elif len(miss) == len(exp):
             empty.append(st.store_code)
-            print(f"✗ {head}  データ無し")
+            print(f"✗ {head}  データ無し{note}")
         else:
             partial.append(st.store_code)
             shown = ",".join(miss[:14]) + (" …" if len(miss) > 14 else "")
-            print(f"△ {head}  欠け: {shown}")
+            print(f"△ {head}  欠け: {shown}{note}")
 
     # 月ごとに「何店ぶん入っているか」も出す。穴が月側か店側かの切り分け用。
-    print("--- 月別に埋まっている店数 ---")
-    n_active = len(master.active)
+    # 分母はその月に営業していた店数（開店前の店は数えない）。
+    print("--- 月別に埋まっている店数（分母=その月の営業店） ---")
     for m in want:
-        n = sum(1 for st in master.active if m in have.get(st.store_code, set()))
-        bar = "■" * round(n / max(n_active, 1) * 20)
-        print(f"  {m}  {n:>2}/{n_active}  {bar}")
+        open_here = [
+            st for st in master.active
+            if (_open_month(st) is None or m >= _open_month(st)) and _cannot(st) is None
+        ]
+        denom = len(open_here)
+        n = sum(1 for st in open_here if m in have.get(st.store_code, set()))
+        bar = "■" * round(n / max(denom, 1) * 20)
+        print(f"  {m}  {n:>2}/{denom}  {bar}")
     print(
         f"=== 完備 {len(full)}店 / 欠けあり {len(partial)}店 / 皆無 {len(empty)}店"
         f" / FWでは取れない {len(other_pos)}店 ==="
@@ -2043,6 +2207,65 @@ def report_abc_detail(
             return 1
         codes = sorted(want)
 
+    if len(span) > 1 and "rotation" in (items or ""):
+        # ローテーション地図: 品目区分ごとに、各商品が「どの月に出たか」を presence 文字列で
+        # 並べる（●=出た/·=無し）。売価0円の内訳（TOジェラートの風味等）も点数で拾うので、
+        # 季節ローテ（毎月入れ替わる限定品）と定番(GM=全期間●)が一目で分かる。
+        from ..model import METRIC_PRODUCT_QTY as _MQ
+        from ..web.export import classify_category as _classify
+        from ..web.export import load_store_categories as _loadcats
+        allrules = _loadcats()
+        # (code,name,month)->sales / qty、(code,name)->group（点数行の "NN:" 見出し）
+        sales_m: dict[tuple, float] = {}
+        qty_m: dict[tuple, float] = {}
+        grp: dict[tuple, str] = {}
+        for row in warehouse.aggregate(AggregateQuery(
+                date_from=d_from, date_to=d_to, grain=GRAIN_MONTH,
+                metrics=[METRIC_PRODUCT_SALES], store_codes=codes,
+                group_by=("store_code", "date", "product_name"))):
+            sales_m[(row["store_code"], row["product_name"], row["date"].strftime("%Y-%m"))] = row["value"]
+        for row in warehouse.aggregate(AggregateQuery(
+                date_from=d_from, date_to=d_to, grain=GRAIN_MONTH,
+                metrics=[_MQ], store_codes=codes,
+                group_by=("store_code", "date", "product_name", "product_category"))):
+            key = (row["store_code"], row["product_name"], row["date"].strftime("%Y-%m"))
+            qty_m[key] = qty_m.get(key, 0.0) + (row["value"] or 0)
+            cat = row.get("product_category")
+            if cat and re.match(r"^\s*\d+\s*[:：]", str(cat)):
+                grp[(row["store_code"], row["product_name"])] = str(cat)
+        names_by_store: dict[str, set] = {}
+        for (code_, name_, _mm) in list(sales_m) + list(qty_m):
+            names_by_store.setdefault(code_, set()).add(name_)
+        print(f"=== ローテーション地図 {span[0]}〜{span[-1]}（●=出た月 / 区分別） ===")
+        for st in master.active:
+            if st.store_code not in codes or st.store_code not in names_by_store:
+                continue
+            rules = allrules.get(st.store_code)
+            print(f"\n── {st.store_code} {st.store_name} ──  月: {' '.join(mm for mm in span)}")
+            # 区分→[(name, presence, salesΣ, qtyΣ, active月数)]
+            bycat: dict[str, list] = {}
+            for name_ in names_by_store[st.store_code]:
+                g = grp.get((st.store_code, name_))
+                cat = _classify(name_, rules, g) if rules else "-"
+                pres = "".join(
+                    "●" if (sales_m.get((st.store_code, name_, mm), 0) or qty_m.get((st.store_code, name_, mm), 0))
+                    else "·" for mm in span)
+                sΣ = sum(sales_m.get((st.store_code, name_, mm), 0) for mm in span)
+                qΣ = sum(qty_m.get((st.store_code, name_, mm), 0) for mm in span)
+                active = pres.count("●")
+                bycat.setdefault(cat, []).append((name_, pres, sΣ, qΣ, active))
+            order = [c["name"] for c in (rules.get("categories", []) if rules else [])] + [(rules or {}).get("other", "その他")]
+            for cat in order:
+                rows_ = bycat.get(cat)
+                if not rows_:
+                    continue
+                # 全期間●=定番(GM)は末尾、抜けのある=ローテ/限定を上に。
+                rows_.sort(key=lambda r: (r[4], -r[2]))
+                print(f"  【{cat}】")
+                for name_, pres, sΣ, qΣ, active in rows_:
+                    tag = "GM" if active == len(span) else "限定"
+                    print(f"    {pres}  {tag:<3} {name_[:28]:<28} 売上Σ{int(sΣ):>9,} 点数Σ{int(qΣ):>6,} ({active}/{len(span)}月)")
+        return 0
     if len(span) > 1:
         # 月ごとの売れ筋を並べる（推移を見る形）。店は1つに絞って使うのが前提。
         by_month: dict[str, list[tuple[str, float]]] = {}
@@ -2196,6 +2419,9 @@ def ingest_abc_store(
         KIND_FINAL,
         METRIC_DEPT_QTY,
         METRIC_DEPT_SALES,
+        METRIC_PRODUCT_COST,
+        METRIC_PRODUCT_GROSS,
+        METRIC_PRODUCT_QTY,
         METRIC_PRODUCT_SALES,
         ActualRow,
         dept_bucket,
@@ -2308,34 +2534,189 @@ def ingest_abc_store(
             _abc_click_radio(session.page, "全商品")
             _abc_search_and_rows(session)  # グリッド充填まで粘る
             products = _extract_product_grid(session)
-            products.sort(
-                key=lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0,
-                reverse=True,
-            )
+            _sales_of = lambda p: p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0
+            _qty_of = lambda p: p["ints"][_ABC_QTY] if len(p["ints"]) > _ABC_QTY else 0
+            products.sort(key=_sales_of, reverse=True)
+            # 売れ筋は売上上位 top_n。0円の選択商品（内訳）はメニュー分類で所属グループ付きに
+            # 拾う（下の分類=メニュー）。全商品グリッドには本来これらは出ないが、店/日により
+            # 混じることがあるので zero_flat に控え、メニューが取れなかったときだけ点数を
+            # 焼くフォールバックにする（＝二重計上を避けつつ、内訳が丸ごと欠けるのを防ぐ）。
+            picked = list(products[:top_n])
+            picked_names = {p["name"] for p in picked}
+            zero_flat = [
+                p for p in products
+                if _sales_of(p) <= 0 and _qty_of(p) > 0 and p["name"] not in picked_names
+            ]
             n_prod = 0
-            for prod in products[:top_n]:
+            for prod in picked:
                 ints = prod["ints"]
-                if len(ints) <= _ABC_SALES:
+                sales = _sales_of(prod)
+                qty = _qty_of(prod)
+                if sales <= 0 and qty <= 0:
                     continue
-                sales = ints[_ABC_SALES]
-                if sales <= 0:
-                    continue
-                collected.append(
-                    ActualRow(
-                        store_code=code,
-                        date=rep_date,
-                        grain=GRAIN_MONTH,
-                        metric=METRIC_PRODUCT_SALES,
-                        value=float(sales),
-                        product_name=prod["name"][:80],
-                        product_category=prod["rank"],
-                        kind=KIND_FINAL,
-                        source=source,
-                        ingested_at=ingested_at,
+                if sales > 0:
+                    collected.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_SALES,
+                            value=float(sales),
+                            product_name=prod["name"][:80],
+                            product_category=prod["rank"],
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
                     )
-                )
+                # 販売点数（何個売れたか）。売価0円の商品でも点数があれば残す。
+                if qty > 0:
+                    collected.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_QTY,
+                            value=float(qty),
+                            product_name=prod["name"][:80],
+                            product_category=prod["rank"],
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
+                    )
+                # 原価金額・粗利金額（売上のある商品のみ。0円内訳は原価も無いので採らない）。
+                if sales > 0:
+                    for _m, _i in (
+                        (METRIC_PRODUCT_COST, _ABC_COST),
+                        (METRIC_PRODUCT_GROSS, _ABC_GROSS),
+                    ):
+                        if len(ints) > _i:
+                            collected.append(
+                                ActualRow(
+                                    store_code=code,
+                                    date=rep_date,
+                                    grain=GRAIN_MONTH,
+                                    metric=_m,
+                                    value=float(ints[_i]),
+                                    product_name=prod["name"][:80],
+                                    product_category=prod["rank"],
+                                    kind=KIND_FINAL,
+                                    source=source,
+                                    ingested_at=ingested_at,
+                                )
+                            )
                 n_prod += 1
             top = products[0]["name"][:16] if products else "-"
+
+            # --- 分類=メニュー：0円の選択商品（内訳）を所属グループ付きで拾う ---
+            # 全商品グリッドには内訳（テイクアウトジェラートの風味選択、サンデーの風味、
+            # フレンチトーストのトッピング等＝売価0円）が出ない。メニュー分類だと
+            # 「NN:区分名」見出しの下に選択商品が並ぶので、そこから点数のある内訳だけを、
+            # 所属グループ（例 "20:テイクアウトジェラート"）を product_category に載せて
+            # 点数(METRIC_PRODUCT_QTY)として取り込む。全商品で採れた商品は二重に数えない。
+            menu_rows: list[dict] = []
+            try:
+                # グループ→メニューの順に踏むと、区分見出しの下の内訳まで描かれやすい
+                # （全商品→メニューの直行だと 60/98 しか描けず取りこぼす）。
+                if _abc_click_radio(session.page, "グループ"):
+                    _abc_search_and_rows(session)
+                if _abc_click_radio(session.page, "メニュー"):
+                    _abc_search_and_rows(session)
+                    # 行数が伸び止まるまで粘り、最大件数の抽出を採る。描画がまだ途中の
+                    # ことがあるので、同数が3回続くまで（＝安定するまで）待つ。
+                    stable = 0
+                    for _ in range(12):
+                        cur = _extract_product_grid_grouped(session)
+                        if len(cur) > len(menu_rows):
+                            menu_rows = cur
+                            stable = 0
+                        else:
+                            stable += 1
+                            if stable >= 3:
+                                break
+                        time.sleep(1.2)
+            except Exception as e:  # noqa: BLE001
+                print(f"[ABC店] {code} {month} メニュー内訳の取得に失敗（無害）: {e}")
+                menu_rows = []
+            # 取り込んだ内訳のうち区分見出しが付いた件数（付かない＝分類が効かないので警告）。
+            n_grouped = sum(1 for p in menu_rows if p.get("group"))
+            print(f"[ABC店] {code} {month} メニュー内訳 抽出{len(menu_rows)}行 / 区分見出し付き{n_grouped}行")
+            n_break = 0
+            for prod in menu_rows:
+                nm = prod["name"]
+                if nm in picked_names:  # 全商品で採った商品は二重計上しない
+                    continue
+                ints = prod["ints"]
+                q = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
+                s = ints[_ABC_SALES] if len(ints) > _ABC_SALES else 0
+                if q <= 0 and s <= 0:
+                    continue
+                grp = (prod.get("group") or "")[:60] or None
+                if nm in ("ピスタチオ", "リッチミルク"):  # TOジェラートの+50円風味の所属確認用
+                    print(f"[ABC店] {code} {month} 内訳確認 {nm} → group={grp} sales={s} qty={q}")
+                # 売価のある内訳（例: テイクアウトジェラートの +50円 風味 ピスタチオ/リッチミルク）は
+                # 売上も焼く。区分見出しは点数行の product_category に載せるので、売上行は
+                # ランク欄を空にする（見出し文字列をランクとして表示しないため）。
+                if s > 0:
+                    collected.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_SALES,
+                            value=float(s),
+                            product_name=nm[:80],
+                            product_category=None,
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
+                    )
+                if q > 0:
+                    collected.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_QTY,
+                            value=float(q),
+                            product_name=nm[:80],
+                            product_category=grp,  # ランクではなく FW区分見出しを載せる
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
+                    )
+                picked_names.add(nm)
+                n_break += 1
+            if n_break:
+                print(f"[ABC店] {code} {month} 0円内訳を {n_break}件 追加取込（メニュー分類）")
+            elif zero_flat:
+                # メニュー分類が取れなかった。全商品に混じっていた0円の点数だけでも焼く
+                # （所属グループは付かないので商品名で区分される。従来挙動のフォールバック）。
+                for p in zero_flat:
+                    q = _qty_of(p)
+                    if q <= 0 or p["name"] in picked_names:
+                        continue
+                    collected.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep_date,
+                            grain=GRAIN_MONTH,
+                            metric=METRIC_PRODUCT_QTY,
+                            value=float(q),
+                            product_name=p["name"][:80],
+                            product_category=None,
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
+                    )
+                    picked_names.add(p["name"])
+                    n_break += 1
+                if n_break:
+                    print(f"[ABC店] {code} {month} 0円内訳を {n_break}件 取込（全商品フォールバック）")
 
             # --- 分類=部門：ランチ/ドリンク等の内訳（数量・売上・原価率） ---
             # 部門グリッドは負荷時に埋まりきらず0件になる／部門ラジオに切替らず全商品の
@@ -2477,6 +2858,549 @@ def ingest_abc_store(
     if no_dept:
         print(f"::error::[ABC店] {code} 部門が取れなかった月: {','.join(no_dept)}")
         return 1
+    return 0
+
+
+def ingest_abc_stores(
+    warehouse,
+    master,
+    *,
+    artifacts: Path,
+    stores: list[str],
+    month: str | None = None,
+    dry_run: bool = False,
+    per_store_budget_minutes: float = 20.0,
+) -> int:
+    """複数店の店舗別月次ABCを、1店ずつ「新しいFWセッション」で順に取り込む。
+
+    店舗切替を同一セッション内で繰り返すとグリッド再描画が止まる事象があるため
+    （時間帯別で確認済み）、店ごとに fw_session を開き直す＝1店=1ログイン。
+    冪等キーは source=fw_abc_<code> で店ごとに分かれるので、途中で1店落ちても
+    取れた店はそのまま残り、その店だけ流し直せばよい。1店で例外が出ても止めずに
+    次の店へ進む（1店の失敗で全店を巻き添えにしない）。
+
+    stores は店コード or 店名の配列。month は "2024-01..2024-08,2026-09" 等をそのまま
+    各店の ingest_abc_store に渡す。戻り値は 0=全店成功 / 1=要確認の店あり。
+    """
+    import sys as _sys
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    rc = 0
+    ok: list[str] = []
+    warn: list[str] = []
+    total = len(stores)
+    print(f"[ABC全店] 対象 {total}店 / 月 {month} / 1店=1ログイン")
+    for idx, store in enumerate(stores, 1):
+        print(f"[ABC全店] === {idx}/{total} 店『{store}』開始 ===")
+        try:
+            r = ingest_abc_store(
+                warehouse,
+                master,
+                artifacts=artifacts,
+                store=store,
+                month=month,
+                dry_run=dry_run,
+                budget_minutes=per_store_budget_minutes,
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"::warning::[ABC全店] 店『{store}』で例外（続行）: {e}")
+            r = 1
+        if r == 0:
+            ok.append(store)
+        else:
+            warn.append(store)
+            rc = 1
+        print(f"[ABC全店] --- {idx}/{total} 店『{store}』終了 rc={r} ---")
+    print(f"[ABC全店] 完了 成功{len(ok)}店 / 要確認{len(warn)}店 / 全{total}店")
+    if warn:
+        print(f"[ABC全店] 要確認の店: {','.join(warn)}")
+    return rc
+
+
+def _abc_grouped_rows_stable(session) -> list[dict]:
+    """今の日付レンジで、グループ→メニューの順に踏んでから内訳を全件（グループ付き）で採る。
+    行数が3回連続で伸び止まるまで粘る（メニューは全商品より行数が多く描画が遅れるため）。"""
+    if _abc_click_radio(session.page, "全商品"):
+        _abc_search_and_rows(session)
+    if _abc_click_radio(session.page, "グループ"):
+        _abc_search_and_rows(session)
+    rows: list[dict] = []
+    if _abc_click_radio(session.page, "メニュー"):
+        _abc_search_and_rows(session)
+        stable = 0
+        for _ in range(12):
+            cur = _extract_product_grid_grouped(session)
+            if len(cur) > len(rows):
+                rows = cur
+                stable = 0
+            else:
+                stable += 1
+                if stable >= 3:
+                    break
+            time.sleep(1.2)
+    return rows
+
+
+SCHEDULE_PATH = Path(__file__).resolve().parents[2] / "config" / "schedule.yaml"
+
+
+def ingest_abc_campaigns(
+    warehouse,
+    master,
+    *,
+    artifacts: Path,
+    store: str | None = None,
+    only_ids: str | None = None,
+    dry_run: bool = False,
+    budget_minutes: float = 25.0,
+    skip_existing: bool = True,
+) -> int:
+    """登録済み販促の [start,end] レンジでABCを引き、その施策の“販売時期”実績（商品別 売上/点数）を
+    施策id 紐づけで焼く。丸ごとの月ではなく、実際の販売期間の数字を施策詳細に出すための土台。
+
+    保存: source=fw_abc_camp / grain=day / date=開始日 / product_category=施策id。
+    月次(grain=month)とは分離されるので既存集計に影響しない。export が施策idごとに読み直す。
+    対象は schedule.yaml のうち start と end があり bucket か items を持つ施策（店は解決できるもの）。
+    """
+    import sys as _sys
+    from datetime import date as _date
+    from datetime import datetime, timezone
+
+    import yaml as _yaml
+
+    import calendar as _cal
+
+    from ..db.warehouse import AggregateQuery
+    from ..model import (
+        GRAIN_DAY,
+        GRAIN_MONTH,
+        KIND_FINAL,
+        METRIC_PRODUCT_COST,
+        METRIC_PRODUCT_GROSS,
+        METRIC_PRODUCT_QTY,
+        METRIC_PRODUCT_SALES,
+        ActualRow,
+    )
+    from ..web.export import classify_category as _classify
+    from ..web.export import load_store_categories as _loadcats
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    data = _yaml.safe_load(SCHEDULE_PATH.read_text(encoding="utf-8")) or {}
+    allrules = _loadcats()
+    # "" / all / *（および fw.yml の既定値 冷やし鶏）は「全施策」。それ以外はid絞り。
+    raw_ids = (only_ids or "").strip()
+    want_ids = (
+        set()
+        if raw_ids in ("", "all", "*", "冷やし鶏")
+        else {s.strip() for s in raw_ids.split(",") if s.strip()}
+    )
+
+    def _resolve(code_or_name: str):
+        try:
+            return master.by_code(code_or_name)
+        except Exception:  # noqa: BLE001
+            return master.find_by_name(code_or_name) or next(
+                (s for s in master.active if code_or_name in s.store_name), None
+            )
+
+    # 施策→対象店（単店に絞る。複数店の施策はそれぞれ別レンジ取込になるが、ルクア系は単店）。
+    jobs: dict[str, list[dict]] = {}  # store_code -> [campaign,...]
+    store_name: dict[str, str] = {}
+    for c in data.get("campaigns") or []:
+        cid = c.get("id")
+        if want_ids and cid not in want_ids:
+            continue
+        start, end = c.get("start"), c.get("end")
+        if not start or not end:
+            continue
+        if not (c.get("bucket") or c.get("items")):
+            continue
+        # 通年枠（例 ジェラートの常設枠 2024-2027）は discrete な“回”ではないので対象外。
+        # 販売時期実績は個別の回（〜数ヶ月）に限る。
+        try:
+            _sd = _date(int(start[:4]), int(start[5:7]), int(start[8:10]))
+            _ed = _date(int(end[:4]), int(end[5:7]), int(end[8:10]))
+            if (_ed - _sd).days > 200:
+                continue
+        except Exception:  # noqa: BLE001
+            pass
+        for s in c.get("stores") or []:
+            st = _resolve(str(s))
+            if not st or not st.active:
+                continue
+            if store:
+                sel = _resolve(store)
+                if not sel or sel.store_code != st.store_code:
+                    continue
+            jobs.setdefault(st.store_code, []).append(c)
+            store_name[st.store_code] = st.store_name
+
+    if not jobs:
+        print("[施策ABC] 対象施策がありません（start/end と bucket/items が要る）。終了。")
+        return 0
+
+    source = "fw_abc_camp"
+    ingested_at = datetime.now(timezone.utc)
+    t0 = time.time()
+    total = 0
+    today = _date.today()
+
+    # 施策を (店, 施策) の平坦リストにする。店ごとにまとめ、その中は開始日順。
+    flat: list[tuple[str, str, object, dict]] = []
+    for code, camps in jobs.items():
+        for c in sorted(camps, key=lambda x: str(x.get("start"))):
+            flat.append((code, store_name[code], allrules.get(code), c))
+
+    # すでに取込済みの施策id（過去の“回”は数字が確定するので二度取りしない）。
+    # end が未来（進行中）の回は毎回取り直す。best-effort: 読めなければ全件取る。
+    have_ids: set[str] = set()
+    if skip_existing and flat:
+        try:
+            starts = [c["start"] for (_, _, _, c) in flat]
+            dfrom = min(starts)
+            dto = max(starts)
+            q = AggregateQuery(
+                date_from=_date(int(dfrom[:4]), int(dfrom[5:7]), int(dfrom[8:10])),
+                date_to=_date(int(dto[:4]), int(dto[5:7]), int(dto[8:10])),
+                grain=GRAIN_DAY,
+                metrics=[METRIC_PRODUCT_SALES],
+                sources=[source],
+                store_codes=list(jobs.keys()),
+                group_by=["product_category"],
+            )
+            for r in warehouse.aggregate(q):
+                pc = r.get("product_category")
+                if pc:
+                    have_ids.add(str(pc))
+        except Exception as e:  # noqa: BLE001
+            print(f"[施策ABC] 既取込チェックは省略（{e}）。全件取り直す。")
+
+    def _is_done(cid: str, end: str) -> bool:
+        if cid not in have_ids:
+            return False
+        try:
+            ed = _date(int(end[:4]), int(end[5:7]), int(end[8:10]))
+        except Exception:  # noqa: BLE001
+            return False
+        return ed < today  # 終了済み（過去の回）だけスキップ。進行中は取り直す。
+
+    todo = [(code, name, rules, c) for (code, name, rules, c) in flat
+            if not _is_done(c["id"], c["end"])]
+    skipped = len(flat) - len(todo)
+    print(
+        f"[施策ABC] 対象 {len(flat)}施策 / {len(jobs)}店"
+        + (f"（うち取込済みで省略 {skipped}件、今回 {len(todo)}件）" if skipped else "")
+    )
+    if not todo:
+        print("[施策ABC] 取込対象なし（すべて取込済み）。終了。")
+        return 0
+
+    if not dry_run:
+        warehouse.ensure_schema()
+
+    def _ym_minus(ym: str, k: int) -> str:
+        idx = int(ym[:4]) * 12 + (int(ym[5:7]) - 1) - k
+        return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
+
+    def _limited_checker(code_: str, start_ym: str):
+        """おすすめジェラートと同じ半年ルック: 直近6か月ぶんの月次商品で毎月連続して
+        出ていれば定番(GM)、どこかに抜けがあれば限定(=その回の販促商品)。月次履歴が
+        浅い(4か月未満)ときは限定側に倒す（安全側＝拾う）。判定不能なら全部拾う。"""
+        months = [_ym_minus(start_ym, k) for k in range(6)]
+        lo, hi = min(months), max(months)
+        try:
+            rows_ = warehouse.aggregate(
+                AggregateQuery(
+                    date_from=_date(int(lo[:4]), int(lo[5:7]), 1),
+                    date_to=_date(
+                        int(hi[:4]), int(hi[5:7]), _cal.monthrange(int(hi[:4]), int(hi[5:7]))[1]
+                    ),
+                    grain=GRAIN_MONTH,
+                    metrics=[METRIC_PRODUCT_SALES],
+                    store_codes=[code_],
+                    group_by=["date", "product_name"],
+                )
+            )
+        except Exception:  # noqa: BLE001
+            return lambda _n: True
+        per_month: dict[str, set] = {}
+        for r in rows_:
+            per_month.setdefault(r["date"].strftime("%Y-%m"), set()).add(r["product_name"])
+        data_months = [mm for mm in months if per_month.get(mm)]
+        if len(data_months) < 4:
+            return lambda _n: True
+        return lambda nm: any(nm not in per_month.get(mm, set()) for mm in data_months)
+
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+        deadline = t0 + budget_minutes * 60
+        for code, name, rules, c in todo:
+            if time.time() > deadline:
+                print(f"[施策ABC] 時間切れ（{budget_minutes:.0f}分）。残りは次回。")
+                break
+            cid = c["id"]
+            d_from = c["start"].replace("-", "/")
+            d_to = c["end"].replace("-", "/")
+            rep = _date(int(c["start"][:4]), int(c["start"][5:7]), int(c["start"][8:10]))
+            # ── 施策ごとに ABC 画面を開き直す（＝毎回まっさらな状態から）。──
+            # 同じ画面を使い回して日付+検索だけ変えると2施策目以降でグリッドが空になる
+            # 事象があったため、1施策=1ログイン相当の“フレッシュ導線”で確実に引く。
+            # （店選択も毎回やり直すので、単店・複数店どちらでも状態が混ざらない。）
+            try:
+                _open_abc(session)
+                _select_date_preset(session, _ABC_PRESET_LASTMONTH)
+                _set_date_range(session, d_from, d_to)
+                hit = _abc_open_store_modal_and_select_one(session, name)
+                if hit is None:
+                    print(f"[施策ABC] 店舗選択に失敗（{name} / {cid}）。飛ばす。")
+                    continue
+                _abc_click_radio(session.page, "全商品")
+                _abc_search_and_rows(session)
+                rows = _extract_product_grid(session)
+            except Exception as e:  # noqa: BLE001
+                print(f"[施策ABC] {code} {cid} 取得中に例外: {e}。飛ばす。")
+                continue
+            bucket = c.get("bucket")
+            kws = [k for k in (c.get("items") or []) if k]
+
+            def _val_of(prod):
+                ints = prod["ints"]
+                sales = ints[_ABC_SALES] if len(ints) > _ABC_SALES else 0
+                qty = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
+                # 原価金額・粗利金額（無ければ None＝データ無しとして書かない）
+                cost = ints[_ABC_COST] if len(ints) > _ABC_COST else None
+                gross = ints[_ABC_GROSS] if len(ints) > _ABC_GROSS else None
+                return sales, qty, cost, gross
+
+            # 対象商品だけ残す: items があれば商品名一致、無ければ bucket(区分)一致。
+            picked: list[tuple[str, int, int, int | None, int | None]] = []
+            for prod in rows:
+                nm = prod["name"]
+                sales, qty, cost, gross = _val_of(prod)
+                if sales <= 0 and qty <= 0:
+                    continue
+                if kws:
+                    if not any(k in nm for k in kws):
+                        continue
+                elif bucket:
+                    if not rules or _classify(nm, rules, prod.get("group")) != bucket:
+                        continue
+                picked.append((nm, sales, qty, cost, gross))
+
+            # items 指定なのに1件も当たらない回（キーワード表記ゆれ／未記入）は、
+            # おすすめジェラートと同じ「半年ルック」で自動救済：販売期間中に出た bucket 商品の
+            # うち“限定(直近6か月で抜けのある新顔)”を拾う。定番(GM)は拾わない。
+            fallback = 0
+            if kws and not picked and bucket and rules:
+                is_lim = _limited_checker(code, c["start"][:7])
+                cands: list[tuple[str, int, int, int | None, int | None]] = []
+                for prod in rows:
+                    nm = prod["name"]
+                    sales, qty, cost, gross = _val_of(prod)
+                    if sales <= 0 and qty <= 0:
+                        continue
+                    if _classify(nm, rules, prod.get("group")) != bucket:
+                        continue
+                    if is_lim(nm):
+                        cands.append((nm, sales, qty, cost, gross))
+                # 拾いすぎ防止：売上上位5品までに絞る（その回の主役だけ残す）。
+                cands.sort(key=lambda x: x[1], reverse=True)
+                for nm, sales, qty, cost, gross in cands[:5]:
+                    picked.append((nm, sales, qty, cost, gross))
+                    fallback += 1
+
+            n = 0
+            crows: list[ActualRow] = []
+            for nm, sales, qty, cost, gross in picked:
+                # 売上・点数は正のときだけ、原価は正のときだけ、粗利は売上が正なら符号問わず記録。
+                emit: list[tuple[str, float]] = []
+                if sales > 0:
+                    emit.append((METRIC_PRODUCT_SALES, float(sales)))
+                if qty > 0:
+                    emit.append((METRIC_PRODUCT_QTY, float(qty)))
+                if sales > 0 and cost is not None and cost > 0:
+                    emit.append((METRIC_PRODUCT_COST, float(cost)))
+                if sales > 0 and gross is not None:
+                    emit.append((METRIC_PRODUCT_GROSS, float(gross)))
+                for metric, val in emit:
+                    crows.append(
+                        ActualRow(
+                            store_code=code,
+                            date=rep,
+                            grain=GRAIN_DAY,
+                            metric=metric,
+                            value=val,
+                            product_name=nm[:80],
+                            product_category=cid,  # 施策idで紐づける
+                            kind=KIND_FINAL,
+                            source=source,
+                            ingested_at=ingested_at,
+                        )
+                    )
+                n += 1
+            tag = f"（半年ルック救済 {fallback}品）" if fallback else ""
+            print(f"[施策ABC] {code} {cid} {c['start']}〜{c['end']} 対象{n}品 抽出{len(rows)}行{tag}")
+            # 施策ごとにその場で書く。長時間スクレイプ中に Neon 接続が idle で切れて
+            # 最後にまとめて書くと失敗するため（SSL closed）。切れていたら張り直して1回再試行。
+            if not dry_run and crows:
+                try:
+                    total += warehouse.replace_actuals(crows, scope_stores=True, scope_metrics=True)
+                except Exception as e:  # noqa: BLE001
+                    print(f"[施策ABC] 書込リトライ（接続張り直し）: {e}")
+                    try:
+                        warehouse.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    total += warehouse.replace_actuals(crows, scope_stores=True, scope_metrics=True)
+    print(f"[施策ABC] warehouse へ {total} 件 書き込みました（source={source}）")
+    return 0
+
+
+def find_gelato_switches(
+    warehouse,
+    master,
+    *,
+    artifacts: Path,
+    store: str = "1160",
+    from_month: str | None = None,
+    to_month: str | None = None,
+) -> int:
+    """schedule.yaml の c<店>-gelato-* 各回について、販促フレーバーが最初に売れた日を
+    FWのメニュー内訳(0円/日別)を当てて確定する。TOジェラート風味は0円で全商品に出ないため
+    メニュー内訳を日レンジで引いて判定。まず「前月末に無い＆当月初旬に有る＝月初切替」を
+    2プローブで確認し、月初でなければ二分探索で初売日を特定。結果を印字（scheduleは手で更新）。
+    from_month/to_month（YYYY-MM）で対象回を絞れる＝実行を年ごと等に分割できる。
+    """
+    import calendar as _cal
+    import sys as _sys
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    import yaml as _yaml
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    data = _yaml.safe_load(SCHEDULE_PATH.read_text(encoding="utf-8")) or {}
+    pre = f"c{store}-gelato-"
+    ents = [
+        c for c in (data.get("campaigns") or [])
+        if str(c.get("id", "")).startswith(pre) and c.get("items")
+    ]
+    mkey = lambda c: str(c["start"])[:7]  # noqa: E731
+    if from_month:
+        ents = [c for c in ents if mkey(c) >= from_month]
+    if to_month:
+        ents = [c for c in ents if mkey(c) <= to_month]
+    ents.sort(key=lambda c: str(c["start"]))
+    if not ents:
+        print("[ジェラート切替] 対象なし。終了。")
+        return 0
+
+    try:
+        st = master.by_code(store)
+        store_name = st.store_name
+    except Exception:  # noqa: BLE001
+        store_name = store
+
+    def D(s: str) -> "_date":
+        return _date(int(s[:4]), int(s[5:7]), int(s[8:10]))
+
+    def S(d) -> str:
+        return d.strftime("%Y/%m/%d")
+
+    def monthend(y: int, m: int):
+        return _date(y, m, _cal.monthrange(y, m)[1])
+
+    print(f"[ジェラート切替] 対象 {len(ents)}回 / 店 {store_name}")
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+
+        def present(d0, d1, kws):
+            """[d0,d1] のメニュー内訳に kws のどれかが数量>0 で出るか（フレッシュ導線）。"""
+            try:
+                _open_abc(session)
+                _select_date_preset(session, _ABC_PRESET_LASTMONTH)
+                _set_date_range(session, S(d0), S(d1))
+                if _abc_open_store_modal_and_select_one(session, store_name) is None:
+                    print("  [警告] 店舗選択失敗")
+                    return None
+                rows = _abc_grouped_rows_stable(session)
+            except Exception as e:  # noqa: BLE001
+                print(f"  [警告] 取得例外: {e}")
+                return None
+            for r in rows:
+                nm = r.get("name", "")
+                ints = r.get("ints", [])
+                q = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
+                if q > 0 and any(k in nm for k in kws):
+                    return True
+            return False
+
+        for c in ents:
+            cid = c["id"]
+            kws = [k for k in (c.get("items") or []) if k]
+            sd = D(c["start"])
+            y, m = sd.year, sd.month
+            m01 = _date(y, m, 1)
+            mend = monthend(y, m)
+            py, pm = (y - 1, 12) if m == 1 else (y, m - 1)
+            p20 = _date(py, pm, 20)
+            pend = monthend(py, pm)
+
+            pa = present(p20, pend, kws)
+            if pa is None:
+                print(f"[ジェラート切替] {cid} 判定不能（プローブ失敗）")
+                continue
+            prev_absent = not pa
+            early = present(m01, _date(y, m, 3), kws)
+            if early is None:
+                print(f"[ジェラート切替] {cid} 判定不能（プローブ失敗）")
+                continue
+            if prev_absent and early:
+                print(f"[ジェラート切替] {cid} 切替日 = {y:04d}-{m:02d}-01 ✅月初確定（前月末なし・初旬あり）")
+                continue
+
+            # 二分探索: base から [lo..hi] で present([base..D]) が True になる最小 D＝初売日。
+            # base は探索の起点（固定）、[lo,hi] は初売日の候補域。
+            # present(m01..m03)=False が確定しているので、月初なしケースは lo を m04 から始めて
+            # プローブを節約する（base は m01 のまま＝窓の起点はずらさない）。
+            if prev_absent:
+                base, hi = m01, mend
+                lo = _date(y, m, 4) if early is False else m01
+            else:
+                base, lo, hi = _date(py, pm, 1), _date(py, pm, 1), mend
+            probes = 0
+            while lo < hi and probes < 8:
+                mid = lo + (hi - lo) // 2
+                r = present(base, mid, kws)
+                probes += 1
+                if r is None:
+                    break
+                if r:
+                    hi = mid
+                else:
+                    lo = mid + _td(days=1)
+            note = "前月内" if not prev_absent else ("月途中" if lo > m01 else "月初")
+            print(f"[ジェラート切替] {cid} 初売日 = {lo.isoformat()} 🔎探索（{note}・{probes}プローブ）")
     return 0
 
 
@@ -2649,13 +3573,12 @@ def probe_abc_store(
             return [...new Set(out)].slice(0,30); }"""
         )
         print(f"[ABCprobe] 条件ラジオ: {radios}")
-        # ランチ部門・沼パスタが下位（行60以降）に埋もれるため、全行を出しつつ
-        # ランチ関連キーワード一致行を別途ハイライトする。
-        KW = ("スープ", "沼", "ランチ", "パスタ", "完熟", "ペペロン", "こくうま", "クリーム", "禁断")
+        # TOジェラート内訳（0円の選択商品）が各分類でどう並ぶか掴むための診断。
+        # 商品名にこれらを含む行は全行ダンプ（切り詰めない）。売価0×点数>0の
+        # 「内訳（選択商品）」行も分類ごとに全件出し、取込元(全商品)に含まれるかを見る。
+        KW = ("ジェラート", "TO", "サンデー", "シングル", "ダブル", "トリプル",
+              "スクープ", "フレーバー", "選択")
         # グリッドが「部門」に切り替わったのか、全商品のままなのかを1行で判る形にする。
-        # 200行ダンプの中から目視で読むのは毎回つらく、取り違えのもとになる。
-        # 行のダンプは40行まで。以前は200行×4分類でログが千行を超え、肝心の判定が
-        # 埋もれて読めなかった。商品名を一覧したいだけなら abc-detail（DB照会）で足りる。
         dump_n = 40
         summary: list[str] = []
         for level in levels:
@@ -2672,9 +3595,22 @@ def probe_abc_store(
             print(f"[ABCprobe] === 分類={level} 視覚行（先頭{dump_n}/計{len(rows)}） ===")
             for cells in rows[:dump_n]:
                 print("   ", " | ".join(cells[:14]))
+            # 0円内訳（選択商品）: グループ付きで抽出し、売価0×点数>0 を所属グループ付きで全件。
+            # 素の風味名（ベリーマニア等）がどの区分見出しにぶら下がるかをここで確定する。
+            gp = _extract_product_grid_grouped(session)
+            zero_break = [
+                (p["group"], p["name"], p["ints"][1])
+                for p in gp
+                if len(p["ints"]) >= 3 and p["ints"][0] == 0 and p["ints"][2] == 0 and p["ints"][1] > 0
+            ]
+            if zero_break:
+                tot = sum(q for _, _, q in zero_break)
+                print(f"[ABCprobe] --- {level}: 0円内訳(選択商品) {len(zero_break)}件 / 点数合計 {tot} ---")
+                for grp, nm, q in zero_break:
+                    print(f"    0円| [{grp}] {nm} | 点数 {q}")
             hits = [c for c in rows if any(k in " ".join(c) for k in KW)]
             if hits:
-                print(f"[ABCprobe] --- {level}: ランチ関連キーワード一致 {len(hits)}行 ---")
+                print(f"[ABCprobe] --- {level}: ジェラート/サンデー関連 {len(hits)}行（全件） ---")
                 for cells in hits:
                     print("   *", " | ".join(cells[:14]))
         # 判定はまとめて最後にもう一度出す。ログの末尾だけ見れば結論が分かるように。

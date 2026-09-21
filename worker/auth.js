@@ -64,7 +64,10 @@ export async function readToken(secret, token) {
 // ── 個人パスワード（PBKDF2でハッシュ化して保存。平文は保存しない）─────────────
 const b64 = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-const PBKDF2_ITER = 120000;
+// Cloudflare Workers の WebCrypto は PBKDF2 の反復回数上限が 100000（超えると
+// NotSupportedError）。上限いっぱいの 100000 を使う。まだ誰もハッシュ未保存なので
+// 過去分の再ハッシュは不要（既存があれば保存時の回数で検証する必要が出る点に注意）。
+const PBKDF2_ITER = 100000;
 
 /** パスワードをハッシュ化。saltB64 を渡さなければ新しい塩を作る。 */
 export async function hashPassword(password, saltB64) {
@@ -98,7 +101,9 @@ export function readCookie(header, name) {
 }
 
 export const COOKIE = "hansoku_session";
-export const SESSION_DAYS = 30;
+// 一度ログインしたら、その端末ではずっと入れっぱなしにする（実質1年）。
+// 期限が来ても、使っていれば下の「延長」で自動で伸びるので再ログインは要らない。
+export const SESSION_DAYS = 365;
 
 export function sessionCookie(token, days = SESSION_DAYS) {
   const maxAge = Math.round(days * 24 * 60 * 60);
@@ -107,6 +112,14 @@ export function sessionCookie(token, days = SESSION_DAYS) {
 
 export const clearCookie = () =>
   `${COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
+
+// パスワード設定画面へ渡す短命の本人確認クッキー（15分）。ログイン用の本セッションとは
+// 別クッキーにして、設定完了前に本セッションとして使い回せないようにする。
+export const PENDING_COOKIE = "hansoku_setpw";
+export const pendingCookie = (token) =>
+  `${PENDING_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=900; HttpOnly; Secure; SameSite=Lax`;
+export const clearPending = () =>
+  `${PENDING_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
 
 /**
  * 誰として扱うかを決める。null なら入れない。判断材料は署名クッキーだけ。
@@ -127,5 +140,8 @@ export async function identify(request, env) {
   if (!env.COOKIE_SECRET) return null;
   const token = readCookie(request.headers.get("cookie"), COOKIE);
   const v = token && (await readToken(env.COOKIE_SECRET, token));
-  return v ? { who: v.name, role: v.role, via: "user" } : null;
+  // 「setpw」はパスワード設定画面へ渡すための一時マーカー。本セッションとしては認めない
+  // （別クッキーに入っていても、万一 session クッキーに移されても入場させない）。
+  if (!v || v.role === "setpw") return null;
+  return { who: v.name, role: v.role, via: "user" };
 }

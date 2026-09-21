@@ -15,10 +15,20 @@ from pathlib import Path
 
 import yaml
 
-from .stores import StoreMaster
+from .stores import StoreMaster, UnknownStoreError
 from .web.export import DEFAULT_SCHEDULE_PATH, VALID_KINDS
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _is_known_code(master: StoreMaster, token: str) -> bool:
+    """トークンが店舗マスタに在るコードか（稼働・閉店を問わず）。閉店店を
+    タイプミスと誤検知しないために使う。"""
+    try:
+        master.by_code(token)
+        return True
+    except UnknownStoreError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -71,6 +81,7 @@ def lint_schedule(master: StoreMaster, path: Path | str | None = None) -> list[F
                 )
             else:
                 resolved = []
+                closed = []  # マスタに在るが閉店＝稼働店では無い（タイプミスでは無い）
                 for raw in stores_field:
                     token = str(raw)
                     if token in active:
@@ -80,13 +91,20 @@ def lint_schedule(master: StoreMaster, path: Path | str | None = None) -> list[F
                     if hit and hit.store_code in active:
                         resolved.append(hit.store_code)
                         continue
+                    # 稼働店では無いが、コード or 店名でマスタに在れば「閉店した店」。
+                    # 台帳に履歴として残すのは正当で、稼働店の集計・画面には出ないだけ。
+                    # タイプミス（真に未知のトークン）と区別してエラーにしない。
+                    if hit is not None or _is_known_code(master, token):
+                        closed.append(token)
+                        continue
                     findings.append(
                         Finding(
                             "error", where,
-                            f"stores の {token!r} が稼働店に見つかりません（黙って捨てられます）",
+                            f"stores の {token!r} が店舗マスタに見つかりません"
+                            f"（タイプミスの可能性。黙って捨てられます）",
                         )
                     )
-                if not resolved:
+                if not resolved and not closed:
                     findings.append(
                         Finding(
                             "error", where,

@@ -44,6 +44,7 @@ stores:
     store_name: "すさび湯 歌舞伎町"
     yomi: ["すさびゆかぶきちょう"]
     source_name: "0001015_すさび湯 歌舞伎町"
+    opened: "2024-07-25"
     infomart_code: "1015"
     infomart_name: "すさび湯　歌舞伎町（ＨＡＳＳＩＮ）"
     region: "東京"
@@ -66,6 +67,8 @@ stores:
     store_name: "ARATA"
     yomi: ["あらた"]
     source_name: "0001097_ARATA"
+    # 2024-03-08 リニューアルオープン。2024-02 は改装休業で実績無し（欠けではない）。
+    renewal_month: "2024-03"
     infomart_code: "973"
     infomart_name: "ＡＲＡＴＡ（ＨＡＳＳＩＮ）"
     region: "大阪"
@@ -94,7 +97,8 @@ stores:
     brand: "AWAKURAI"
     brand_name: "曲ル角ニハ泡喰ライ"
     is_shared_facility: false
-    active: true
+    # 2026-08末で閉店。9月以降は取込対象・稼働店一覧から除外（1〜8月の実績はDBに残る）。
+    active: false
   - store_code: "1131"
     store_name: "CRAFTMAN UMAMI"
     yomi: ["くらふとまん", "うまみ"]
@@ -110,6 +114,10 @@ stores:
     store_name: "料理と酒 たいだい"
     yomi: ["りょうりとさけたいだい"]
     source_name: "0001137_料理と酒 たいだい"
+    # 「焼肉にと」を改装して「料理と酒 たいだい」にリニューアル。2025-02 は
+    # 改装休業で実績無し（欠けではない）。同一店コードなので数字は継続。
+    former_name: "焼肉にと"
+    renewal_month: "2025-03"
     infomart_code: "924"
     infomart_name: "料理と酒　たいだい（旧　にと）（ＨＡＳＳＩＮ）"
     region: "大阪"
@@ -230,6 +238,7 @@ stores:
     aliases: ["すさび湯 天満橋"]
     yomi: ["すさびゆてんまばし"]
     source_name: "0001728_すさび湯 天満橋店"
+    opened: "2024-12-19"
     infomart_code: "1728"
     infomart_name: "すさび湯パナンテ京阪天満橋店（ＨＡＳＳＩＮ）"
     region: "大阪"
@@ -242,6 +251,7 @@ stores:
     aliases: ["GOLD お初"]
     yomi: ["ふれんちさかばごーるどおはつ"]
     source_name: "0001729_フレンチ酒場GOLDお初"
+    opened: "2025-02-21"
     infomart_code: "1729"
     infomart_name: "フレンチ酒場ＧＯＬＤ　お初天神店（ＨＡＳＳＩＮ）"
     region: "大阪"
@@ -254,6 +264,7 @@ stores:
     aliases: ["ぎふや パナンテ天満橋"]
     yomi: ["ぎふやてんまばし", "ぱなんて"]
     source_name: "0001739_ぎふや 天満橋店"
+    opened: "2025-09-26"
     infomart_code: "1739"
     infomart_name: "ぎふやパナンテ天満橋（ＨＡＳＳＩＮ）"
     region: "大阪"
@@ -266,6 +277,7 @@ stores:
     aliases: ["すさび湯 河原町三条店"]
     yomi: ["すさびゆきょうとかわらまちさんじょう"]
     source_name: "0001742_すさび湯 京都三条店"
+    opened: "2025-12-19"
     infomart_code: "1742"
     infomart_name: "すさび湯　三条店（ＨＡＳＳＩＮ）"
     region: "京都"
@@ -277,6 +289,7 @@ stores:
     store_name: "すさび湯 新宿東口店"
     yomi: ["すさびゆしんじゅくひがしぐち"]
     source_name: "0001743_すさび湯 新宿東口店"
+    opened: "2026-04-23"
     infomart_code: "1743"
     infomart_name: "すさび湯　新宿東口店（ＨＡＳＳＩＮ）"
     region: "東京"

@@ -9,10 +9,10 @@
 import { neon } from "@neondatabase/serverless";
 
 import {
-  clearCookie, identify, makeToken, sessionCookie, SESSION_DAYS, timingSafeEqual,
-  hashPassword, verifyPassword,
+  clearCookie, identify, makeToken, readToken, sessionCookie, SESSION_DAYS, timingSafeEqual,
+  hashPassword, verifyPassword, readCookie, PENDING_COOKIE, pendingCookie, clearPending,
 } from "./auth.js";
-import { htmlResponse, loginPage, joinPage } from "./login.js";
+import { htmlResponse, loginPage, setpwPage } from "./login.js";
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -65,12 +65,21 @@ async function logAudit(env, actor, action, target, detail) {
   } catch (e) { console.error("[hansoku][audit]", String(e)); }
 }
 
-/** ログイン（名前＋自分のパスワード）。 */
+/**
+ * ログイン。ID（お名前）＋ パスワード の1本化フロー。
+ *   - 個人パスワードが設定済み … 照合してログイン。
+ *   - 初回 / 初期化済み … パスワード欄に参加コード(8888)を入れると本人確認OKとみなし、
+ *     パスワード設定画面(/setpw)へ短命クッキーで誘導する（ここではまだ本入場させない）。
+ */
 async function handleLogin(request, env) {
   if (!env.COOKIE_SECRET) {
     return htmlResponse(loginPage({ error: "ログインの初期設定が未完了です。本部（システム担当）へ連絡してください。" }), 503);
   }
-  if (request.method === "GET") return htmlResponse(loginPage());
+  if (request.method === "GET") {
+    const q = new URL(request.url).searchParams;
+    const notice = q.get("set") ? "パスワードを設定しました。ID（お名前）と新しいパスワードでログインしてください。" : "";
+    return htmlResponse(loginPage({ name: normName(q.get("name") || ""), notice }));
+  }
   if (request.method !== "POST") return json({ error: "method" }, 405);
 
   const form = await request.formData();
@@ -78,62 +87,93 @@ async function handleLogin(request, env) {
   const password = String(form.get("password") || "");
   await new Promise((r) => setTimeout(r, 400));   // 総当たり対策：合否に依らず待つ
 
-  if (!name) return htmlResponse(loginPage({ error: "お名前を入れてください。" }), 400);
+  if (!name) return htmlResponse(loginPage({ error: "ID（お名前）を入れてください。" }), 400);
   const user = await getUser(env, name);
-  if (!user || !user.pass_hash || user.must_reset) {
-    return htmlResponse(loginPage({
-      error: "アカウントが無いか、パスワード未設定です。『初めての方・パスワードを忘れた方』から設定してください。",
-      name,
-    }), 401);
+  if (user && user.disabled) {
+    return htmlResponse(loginPage({ error: "このアカウントは停止中です。本部へご連絡ください。", name }), 403);
   }
-  if (user.disabled) return htmlResponse(loginPage({ error: "このアカウントは停止中です。本部へご連絡ください。", name }), 403);
-  if (!(await verifyPassword(password, user.pass_salt, user.pass_hash))) {
-    return htmlResponse(loginPage({ error: "パスワードが違います。", name }), 401);
+
+  // 個人パスワードが既にある人は、それで照合（乗っ取り防止のため 8888 は通さない）。
+  if (user && user.pass_hash && !user.must_reset) {
+    if (!(await verifyPassword(password, user.pass_salt, user.pass_hash))) {
+      return htmlResponse(loginPage({ error: "パスワードが違います。", name }), 401);
+    }
+    let role = user.role || "editor";
+    if (isOwnerName(name, env) && role !== "owner") {
+      role = "owner";
+      try { const sql = neon(env.DATABASE_URL); await sql`UPDATE app_users SET role='owner', updated_at=now() WHERE name=${name}`; } catch {}
+    }
+    try { const sql = neon(env.DATABASE_URL); await sql`UPDATE app_users SET last_login=now() WHERE name=${name}`; } catch {}
+    const token = await makeToken(env.COOKIE_SECRET, name, role, Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
+    return new Response(null, {
+      status: 303,
+      headers: { location: "/", "set-cookie": sessionCookie(token), "cache-control": "no-store" },
+    });
   }
-  // オーナー名は常にオーナー権限に寄せる。
-  let role = user.role || "editor";
-  if (isOwnerName(name, env) && role !== "owner") {
-    role = "owner";
-    try { const sql = neon(env.DATABASE_URL); await sql`UPDATE app_users SET role='owner', updated_at=now() WHERE name=${name}`; } catch {}
+
+  // 初回・初期化済み：参加コード(8888)で本人確認 → パスワード設定画面へ。
+  if (env.APP_PASSWORD && timingSafeEqual(password, env.APP_PASSWORD)) {
+    const pend = await makeToken(env.COOKIE_SECRET, name, "setpw", Date.now() + 15 * 60 * 1000);
+    return new Response(null, {
+      status: 303,
+      headers: { location: "/setpw", "set-cookie": pendingCookie(pend), "cache-control": "no-store" },
+    });
   }
-  try { const sql = neon(env.DATABASE_URL); await sql`UPDATE app_users SET last_login=now() WHERE name=${name}`; } catch {}
-  const token = await makeToken(env.COOKIE_SECRET, name, role, Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
-  return new Response(null, {
-    status: 303,
-    headers: { location: "/", "set-cookie": sessionCookie(token), "cache-control": "no-store" },
-  });
+  return htmlResponse(loginPage({
+    error: "初めての方・忘れた方は、パスワード欄に参加コード（8888）を入れてください。",
+    name,
+  }), 401);
 }
 
-/** 初回登録・パスワード再設定（名前＋参加コード8888 → 新パスワード）。 */
-async function handleJoin(request, env) {
-  if (!env.APP_PASSWORD || !env.COOKIE_SECRET || !env.DATABASE_URL) {
-    return htmlResponse(joinPage({ error: "登録の初期設定が未完了です。本部（システム担当）へ連絡してください。" }), 503);
+/**
+ * パスワード設定（初回・再設定）。/login で 8888 を通った人だけが持つ短命クッキーで本人確認。
+ * 今のパスワード（初回は8888、変更時は現パスワード）＋新しいパスワードを受け取り保存。
+ * 完了後はログイン画面へ戻し、ID＋新パスワードで入ってもらう（端末に保存できる）。
+ */
+async function handleSetpw(request, env) {
+  if (!env.COOKIE_SECRET) {
+    return htmlResponse(setpwPage({ error: "設定の初期化が未完了です。本部（システム担当）へ連絡してください。" }), 503);
   }
-  if (request.method === "GET") return htmlResponse(joinPage());
+  const pendTok = readCookie(request.headers.get("cookie"), PENDING_COOKIE);
+  const pend = pendTok && (await readToken(env.COOKIE_SECRET, pendTok));
+  const name = pend && pend.role === "setpw" ? pend.name : "";
+
+  // 本人確認クッキーが無い/切れた → ログインからやり直し。
+  if (!name) {
+    return new Response(null, { status: 303, headers: { location: "/login", "cache-control": "no-store" } });
+  }
+  if (request.method === "GET") return htmlResponse(setpwPage({ name }));
   if (request.method !== "POST") return json({ error: "method" }, 405);
+  // 保存には参加コード照合とDBが要る。
+  if (!env.APP_PASSWORD || !env.DATABASE_URL) {
+    return htmlResponse(setpwPage({ error: "設定の初期化が未完了です。本部（システム担当）へ連絡してください。", name }), 503);
+  }
 
   const form = await request.formData();
-  const name = normName(form.get("name"));
-  const code = String(form.get("code") || "");
-  const password = String(form.get("password") || "");
-  const password2 = String(form.get("password2") || "");
+  const oldpw = String(form.get("oldpw") || "");
+  const newpw = String(form.get("newpw") || "");
+  const newpw2 = String(form.get("newpw2") || "");
   await new Promise((r) => setTimeout(r, 400));
 
-  if (!name) return htmlResponse(joinPage({ error: "お名前を入れてください。" }), 400);
-  if (!timingSafeEqual(code, env.APP_PASSWORD)) {
-    return htmlResponse(joinPage({ error: "参加コードが違います。", name }), 401);
+  const user = await getUser(env, name);
+  if (user && user.disabled) {
+    return htmlResponse(setpwPage({ error: "このアカウントは停止中です。本部へご連絡ください。", name }), 403);
   }
-  if (password.length < 4) return htmlResponse(joinPage({ error: "パスワードは4文字以上にしてください。", name }), 400);
-  if (password !== password2) return htmlResponse(joinPage({ error: "確認用パスワードが一致しません。", name }), 400);
+  // 今のパスワード確認：設定済みなら現パスワード、初回/初期化済みなら参加コード(8888)。
+  const okOld = (user && user.pass_hash && !user.must_reset)
+    ? await verifyPassword(oldpw, user.pass_salt, user.pass_hash)
+    : timingSafeEqual(oldpw, env.APP_PASSWORD);
+  if (!okOld) {
+    return htmlResponse(setpwPage({ error: "今のパスワード（初回は 8888）が違います。", name }), 401);
+  }
+  if (newpw.length < 4) return htmlResponse(setpwPage({ error: "新しいパスワードは4文字以上にしてください。", name }), 400);
+  if (newpw !== newpw2) return htmlResponse(setpwPage({ error: "確認用パスワードが一致しません。", name }), 400);
+  if (timingSafeEqual(newpw, env.APP_PASSWORD)) {
+    return htmlResponse(setpwPage({ error: "参加コード（8888）と同じものは使えません。別のパスワードにしてください。", name }), 400);
+  }
 
-  const existing = await getUser(env, name);
-  // 既に本人がパスワードを持っている名前は、参加コードでは上書きさせない（乗っ取り防止）。
-  // 本部が「初期化（must_reset）」した場合のみ、この画面から再設定できる。
-  if (existing && existing.pass_hash && !existing.must_reset) {
-    return htmlResponse(joinPage({ error: "この名前は登録済みです。ログインしてください（忘れた場合は本部が初期化します）。", name }), 409);
-  }
-  const { hash, salt } = await hashPassword(password);
-  let role = existing ? (existing.role || "editor") : "editor";
+  const { hash, salt } = await hashPassword(newpw);
+  let role = user ? (user.role || "editor") : "editor";
   if (isOwnerName(name, env)) role = "owner";
   const sql = neon(env.DATABASE_URL);
   await ensureUsers(sql);
@@ -142,12 +182,17 @@ async function handleJoin(request, env) {
     VALUES (${name}, ${hash}, ${salt}, ${role}, false, false, now(), now(), now())
     ON CONFLICT (name) DO UPDATE
       SET pass_hash=EXCLUDED.pass_hash, pass_salt=EXCLUDED.pass_salt, role=${role},
-          must_reset=false, updated_at=now(), last_login=now()`;
-  await logAudit(env, name, existing ? "user.reset" : "user.join", name, role);
-  const token = await makeToken(env.COOKIE_SECRET, name, role, Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
+          must_reset=false, updated_at=now()`;
+  await logAudit(env, name, (user && user.pass_hash) ? "user.reset" : "user.join", name, role);
+
+  // 設定完了 → ログイン画面へ。名前を入れておき、成功メッセージを出す。短命クッキーは破棄。
   return new Response(null, {
     status: 303,
-    headers: { location: "/", "set-cookie": sessionCookie(token), "cache-control": "no-store" },
+    headers: {
+      location: `/login?set=1&name=${encodeURIComponent(name)}`,
+      "set-cookie": clearPending(),
+      "cache-control": "no-store",
+    },
   });
 }
 
@@ -162,12 +207,16 @@ export default {
         return serverError(e);
       }
     }
-    if (url.pathname === "/join") {
+    if (url.pathname === "/setpw") {
       try {
-        return await handleJoin(request, env);
+        return await handleSetpw(request, env);
       } catch (e) {
         return serverError(e);
       }
+    }
+    // 旧URL（/join）は設定画面に一本化。互換のためログインへ寄せる。
+    if (url.pathname === "/join") {
+      return new Response(null, { status: 303, headers: { location: "/login", "cache-control": "no-store" } });
     }
     if (url.pathname === "/logout") {
       return new Response(null, {
@@ -204,13 +253,24 @@ export default {
     }
 
     // 画面が「誰でログイン中か・書き込めるか」を知るための軽いエンドポイント。
+    // 画面を開くたびにここが呼ばれるので、ログイン中の人はここで有効期限を
+    // 手前から1年に伸ばし直す（＝使っている限り再ログイン不要＝ずっと入れっぱなし）。
     if (url.pathname === "/api/me") {
-      return json({
+      const body = JSON.stringify({
         name: me.via === "open" ? "" : me.who,
         role: me.via === "open" ? "open" : (me.role || "editor"),
         via: me.via, canWrite,
         owner: me.via !== "open" && me.role === "owner",
       });
+      const headers = { ...JSON_HEADERS };
+      if (me.via === "user" && env.COOKIE_SECRET) {
+        const token = await makeToken(
+          env.COOKIE_SECRET, me.who, me.role || "editor",
+          Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000,
+        );
+        headers["set-cookie"] = sessionCookie(token);
+      }
+      return new Response(body, { status: 200, headers });
     }
 
     if (url.pathname === "/api/targets") {
@@ -293,13 +353,17 @@ async function handlePlans(request, env, who) {
     start_date DATE NOT NULL, end_date DATE NOT NULL, goal BIGINT,
     note TEXT NOT NULL DEFAULT '', source_id TEXT NOT NULL DEFAULT '',
     set_by TEXT NOT NULL DEFAULT '', set_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
+  // 追加カラム（既存テーブルにも冪等に足す）: 担当者・終了日未定（常設）フラグ。
+  await sql`ALTER TABLE promo_plans ADD COLUMN IF NOT EXISTS owner TEXT NOT NULL DEFAULT ''`;
+  await sql`ALTER TABLE promo_plans ADD COLUMN IF NOT EXISTS open_ended BOOLEAN NOT NULL DEFAULT false`;
 
   if (request.method === "GET") {
-    const rows = await sql`SELECT id, store_code, title, kind, bucket, start_date, end_date, goal, note, source_id, set_by, set_at FROM promo_plans ORDER BY start_date`;
+    const rows = await sql`SELECT id, store_code, title, kind, bucket, start_date, end_date, goal, note, source_id, owner, open_ended, set_by, set_at FROM promo_plans ORDER BY start_date`;
     const plans = rows.map((r) => ({
       id: r.id, store_code: r.store_code, title: r.title, kind: r.kind || "dev",
       bucket: r.bucket || "", start: String(r.start_date).slice(0, 10), end: String(r.end_date).slice(0, 10),
       goal: r.goal == null ? null : Number(r.goal), note: r.note || "", source_id: r.source_id || "",
+      owner: r.owner || "", open_ended: !!r.open_ended,
       by: r.set_by || "", at: r.set_at,
     }));
     return json({ plans });
@@ -331,19 +395,25 @@ async function handlePlans(request, env, who) {
     const end = typeof body.end === "string" ? body.end.slice(0, 10) : "";
     const note = typeof body.note === "string" ? body.note.slice(0, 2000).trim() : "";
     const source_id = typeof body.source_id === "string" ? body.source_id.slice(0, 128) : "";
+    const owner = typeof body.owner === "string" ? body.owner.trim().slice(0, 120) : "";
+    const openEnded = body.open_ended === true;
     const goal = (body.goal == null || body.goal === "") ? null : Math.max(0, Math.round(Number(body.goal) || 0));
     const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    // 終了日未定（常設）は end を start と同じにして open_ended で表す（列は NOT NULL のため）。
+    const endStore = openEnded ? start : end;
     if (!store_code || !title) return json({ error: "missing", detail: "店舗と販促名は必須です" }, 400);
-    if (!dateRe.test(start) || !dateRe.test(end) || end < start) return json({ error: "bad-date", detail: "期間（開始・終了）が不正です" }, 400);
+    if (!dateRe.test(start)) return json({ error: "bad-date", detail: "開始日が不正です" }, 400);
+    if (!openEnded && (!dateRe.test(end) || end < start)) return json({ error: "bad-date", detail: "期間（開始・終了）が不正です" }, 400);
     await sql`
-      INSERT INTO promo_plans (id, store_code, title, kind, bucket, start_date, end_date, goal, note, source_id, set_by, set_at)
-      VALUES (${id}, ${store_code}, ${title}, ${kind}, ${bucket}, ${start}, ${end}, ${goal}, ${note}, ${source_id}, ${email}, now())
+      INSERT INTO promo_plans (id, store_code, title, kind, bucket, start_date, end_date, goal, note, source_id, owner, open_ended, set_by, set_at)
+      VALUES (${id}, ${store_code}, ${title}, ${kind}, ${bucket}, ${start}, ${endStore}, ${goal}, ${note}, ${source_id}, ${owner}, ${openEnded}, ${email}, now())
       ON CONFLICT (id) DO UPDATE SET
         store_code = EXCLUDED.store_code, title = EXCLUDED.title, kind = EXCLUDED.kind,
         bucket = EXCLUDED.bucket, start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
-        goal = EXCLUDED.goal, note = EXCLUDED.note, set_by = EXCLUDED.set_by, set_at = now()`;
+        goal = EXCLUDED.goal, note = EXCLUDED.note, owner = EXCLUDED.owner,
+        open_ended = EXCLUDED.open_ended, set_by = EXCLUDED.set_by, set_at = now()`;
     await logAudit(env, email, "plan.set", id, title);
-    return json({ ok: true, plan: { id, store_code, title, kind, bucket, start, end, goal, note, source_id, by: email } });
+    return json({ ok: true, plan: { id, store_code, title, kind, bucket, start, end: endStore, goal, note, source_id, owner, open_ended: openEnded, by: email } });
   }
 
   return json({ error: "method" }, 405);
@@ -557,12 +627,16 @@ async function handleTargets(request, env, who) {
   const sql = neon(env.DATABASE_URL);
 
   if (request.method === "GET") {
-    const rows = await sql`SELECT campaign_id, target_value, set_by, set_at FROM promo_targets`;
-    const targets = {};
+    const rows = await sql`SELECT campaign_id, metric, target_value, set_by, set_at FROM promo_targets`;
+    const targets = {};       // 後方互換：売上のみ campaign_id → {value,by,at}
+    const byMetric = {};      // 全指標：campaign_id → { metric: {value,by,at} }
     for (const r of rows) {
-      targets[r.campaign_id] = { value: Number(r.target_value), by: r.set_by, at: r.set_at };
+      const metric = r.metric || "sales";
+      const cell = { value: Number(r.target_value), by: r.set_by, at: r.set_at };
+      (byMetric[r.campaign_id] = byMetric[r.campaign_id] || {})[metric] = cell;
+      if (metric === "sales") targets[r.campaign_id] = cell;
     }
-    return json({ targets });
+    return json({ targets, targets_by_metric: byMetric });
   }
 
   if (request.method === "POST") {
@@ -577,22 +651,25 @@ async function handleTargets(request, env, who) {
     }
     const id = typeof body.id === "string" ? body.id.slice(0, 128) : "";
     if (!id) return json({ error: "no-id" }, 400);
+    // 指標。未指定は sales（後方互換）。英数・小文字と _ のみ許可。
+    const metric = (typeof body.metric === "string" && /^[a-z0-9_]{1,32}$/.test(body.metric))
+      ? body.metric : "sales";
 
     const t = body.target;
     if (t === null || t === undefined || t === "") {
-      await sql`DELETE FROM promo_targets WHERE campaign_id = ${id}`;
-      await logAudit(env, email, "target.clear", id, "");
-      return json({ ok: true, id, target: null });
+      await sql`DELETE FROM promo_targets WHERE campaign_id = ${id} AND metric = ${metric}`;
+      await logAudit(env, email, "target.clear", `${id}#${metric}`, "");
+      return json({ ok: true, id, metric, target: null });
     }
-    const value = Math.round(Number(t));
+    const value = Number(t);
     if (!Number.isFinite(value) || value < 0) return json({ error: "bad-target" }, 400);
     await sql`
-      INSERT INTO promo_targets (campaign_id, target_value, set_by, set_at)
-      VALUES (${id}, ${value}, ${email}, now())
-      ON CONFLICT (campaign_id) DO UPDATE
+      INSERT INTO promo_targets (campaign_id, metric, target_value, set_by, set_at)
+      VALUES (${id}, ${metric}, ${value}, ${email}, now())
+      ON CONFLICT (campaign_id, metric) DO UPDATE
         SET target_value = EXCLUDED.target_value, set_by = EXCLUDED.set_by, set_at = now()`;
-    await logAudit(env, email, "target.set", id, String(value));
-    return json({ ok: true, id, target: value, by: email });
+    await logAudit(env, email, "target.set", `${id}#${metric}`, String(value));
+    return json({ ok: true, id, metric, target: value, by: email });
   }
 
   return json({ error: "method" }, 405);

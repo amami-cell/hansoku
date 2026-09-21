@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from ..analytics import RATIO_METRICS, actual_cost_by_month, ratio
 from ..db.warehouse import AggregateQuery, Warehouse
 from ..model import (
     DEPT_BUCKETS,
+    GRAIN_DAY,
     GRAIN_HOUR,
     GRAIN_MONTH,
     METRIC_COVERS,
@@ -26,6 +28,9 @@ from ..model import (
     METRIC_DRINK_THEORY_COST,
     METRIC_FOOD_SALES,
     METRIC_FOOD_THEORY_COST,
+    METRIC_PRODUCT_COST,
+    METRIC_PRODUCT_GROSS,
+    METRIC_PRODUCT_QTY,
     METRIC_PRODUCT_SALES,
     METRIC_SALES,
     METRIC_SALES_BUDGET,
@@ -66,8 +71,29 @@ def load_store_categories(path: Path | None = None) -> dict:
     return stores if isinstance(stores, dict) else {}
 
 
-def classify_category(name: str, rules: dict) -> str:
-    """商品名を、その店の品目区分ルールで1つの区分に割り当てる。先に一致した区分が勝ち。"""
+def _group_label(group: str | None) -> str:
+    """FWの区分見出し（例 "20:テイクアウトジェラート"）から先頭の "NN:" を落とした名前。"""
+    if not group:
+        return ""
+    return re.sub(r"^\s*\d+\s*[:：]\s*", "", group).strip()
+
+
+def classify_category(name: str, rules: dict, group: str | None = None) -> str:
+    """商品名を、その店の品目区分ルールで1つの区分に割り当てる。先に一致した区分が勝ち。
+
+    group（FWの区分見出し。例 "20:テイクアウトジェラート"）が rules["groups"] に載っていれば
+    そちらを優先する。全商品グリッドに出ない内訳（テイクアウトジェラートの風味選択など）は
+    素の風味名だと商品名から区分を当てられないため、FW自身の区分見出しで束ねる。"""
+    # 商品名の完全一致で区分を上書き（最優先）。見出し/キーワードで誤爆する実売れ商品を個別に矯正。
+    # 例: "2000ミニパフェ＆スコーンタルトセット"（"パフェ"を含むが実体はフード）→ フード。
+    name_cat = (rules.get("name_category") or {}).get(name or "")
+    if name_cat:
+        return name_cat
+    gmap = rules.get("groups") or {}
+    if group:
+        label = _group_label(group)
+        if label in gmap:
+            return gmap[label]
     nm = name or ""
     for cat in rules.get("categories", []):
         for kw in cat.get("keywords", []):
@@ -82,12 +108,13 @@ def _categories_for_month(items: list[dict], rules: dict, total_sales: float) ->
     出数（数量）は商品単位では取れない（FWは商品別に売上のみ）ので品目数（SKU数）を出す。
     区分の並びは categories の定義順→その他 を末尾に。
     """
-    order = [c["name"] for c in rules.get("categories", [])]
     other = rules.get("other", "その他")
-    order.append(other)
+    # 区分名で重複を除く（同名の区分が2つ定義されていても1行にまとめる）。
+    # 例: ルクアは「フード」の定義が2つあり、放置すると部門が二重に出る。
+    order = list(dict.fromkeys([c["name"] for c in rules.get("categories", [])] + [other]))
     agg: dict[str, dict] = {}
     for it in items:
-        cat = classify_category(it.get("name", ""), rules)
+        cat = classify_category(it.get("name", ""), rules, it.get("group"))
         a = agg.setdefault(cat, {"sales": 0.0, "count": 0})
         a["sales"] += it.get("sales", 0)
         a["count"] += 1
@@ -106,6 +133,180 @@ def _categories_for_month(items: list[dict], rules: dict, total_sales: float) ->
             }
         )
     return out
+
+
+ZERO_SUB_OTHER_PARENT = "その他の内訳"
+
+
+def _match_sub_parent(name: str | None, exact: dict, contains: dict) -> str | None:
+    """商品名からサブ→親メイン商品名を引く。完全一致優先→キーワード部分一致。
+
+    完全一致(exact)と部分一致(contains)を分けているのは、風味名など短い語を部分一致に
+    使うと別商品（例: "ピスタチオ" が "苺とピスタチオのフレジェ"）まで巻き込むため。
+    部分一致は接頭辞など衝突しない語だけに使う（例: "SN)"）。一致しなければ None。"""
+    if not name:
+        return None
+    if exact and name in exact:
+        return exact[name]
+    if contains:
+        for kw, parent in contains.items():
+            if kw and kw in name:
+                return parent
+    return None
+
+
+def _nest_zero_subs(items: list[dict], rules: dict | None) -> list[dict]:
+    """0円サブ（選択メニュー内訳）や商品名指定のサブを、親メイン商品の下に畳む。
+
+    サブになるのは次のいずれか:
+    - FW区分見出し（group="NN:名前"）を持つ商品（例: テイクアウトジェラートの風味選択）。
+      rules["zero_groups"]（見出しラベル→親メイン商品名）で親を引く。
+    - FW見出しを持たず売上つきでトップに出る内訳（例: "ピスタチオ" 単品, "イチゴ増し",
+      セットの "スコーン単品"）。rules["sub_products"]（商品名の完全一致→親）と
+      rules["sub_products_contains"]（部分一致→親）で親を引く。
+    どのルールも無い店は素通し（従来どおり内訳もトップに並ぶ）。
+
+    - 親名が実在商品ならその下に、無ければ表示専用の親ノード（synthetic:True）を作って束ねる。
+    - サブは親の `subs`（{name, qty, sales, cost?, gross?}）に入れ、トップ階層からは外す。
+    - 売上ロールアップ: サブに売上があれば親の「売上」にのみ +計上（点数は足さない＝二重計上回避）。
+    - FW見出しはあるが未マップの見出しは暫定「その他の内訳」に集約（zero_groups がある店のみ）。
+    - rules["sub_qty_rollup"]（親名の一覧）に載る親は、点数(qty)＝サブ点数の合計を表示する
+      （例: "Pドリンク" ＝ 練習打ち等 "P・…" の合計出数を1メインの数量として出す）。
+    返り値は畳んだあとのトップ階層の商品リスト。"""
+    zero_groups = (rules or {}).get("zero_groups") or {}
+    sub_exact = (rules or {}).get("sub_products") or {}
+    sub_contains = (rules or {}).get("sub_products_contains") or {}
+    qty_rollup = set((rules or {}).get("sub_qty_rollup") or [])
+    merge_cfg = (rules or {}).get("sub_merge_prefixes") or {}
+    no_nest = tuple(str(s) for s in ((rules or {}).get("no_nest_contains") or []) if s)
+    # 見出し→親（ただし売上0の選択キーだけ畳む）。実売れ商品が同居する見出し
+    # （例 08:アフタヌーンセットに2000セット本体やティーフリーが同居）で、0円キーだけを内訳化。
+    zero_only = (rules or {}).get("zero_groups_zero_only") or {}
+    small_cat = (rules or {}).get("sub_small_cat") or {}
+    if not zero_groups and not sub_exact and not sub_contains and not zero_only:
+        return items
+    by_name: dict[str, dict] = {}
+    for it in items:
+        nm = it.get("name")
+        if nm and nm not in by_name:
+            by_name[nm] = it
+    tops: list[dict] = []
+    synthetic: dict[str, dict] = {}
+    for it in items:
+        group = it.get("group")
+        # 0) 見出しが zero_groups でも「畳まずトップに残す」商品（例: セット券見出しに紛れ込む
+        #    "ジェラートドリンク…" は実売れの飲料なので、区分（ドリンク）で単品表示する）。
+        nm0 = it.get("name") or ""
+        if no_nest and any(s in nm0 for s in no_nest):
+            tops.append(it)
+            continue
+        parent_name: str | None = None
+        # 1) 商品名でのサブ指定（完全一致→部分一致）を最優先。マップ済み見出しや
+        #    「その他の内訳」送りより先に判定する（例 "P・…"→"Pドリンク", "ICE"→その他の内訳,
+        #    "ペアリングリキュール…"→ペアリング）。見出しでの束ねを名前で上書きできる。
+        parent_name = _match_sub_parent(it.get("name"), sub_exact, sub_contains)
+        # 2) 次にマップ済みFW見出し → 親メインへ。
+        if parent_name is None and group and zero_groups:
+            label = _group_label(group)
+            if label in zero_groups:
+                parent_name = zero_groups[label]
+        # 2.5) 見出しの売上0キーだけ畳む（実売れ商品が同居する見出し用）。売上つきはトップに残す。
+        if parent_name is None and group and zero_only and not ((it.get("sales") or 0) > 0):
+            label = _group_label(group)
+            if label in zero_only:
+                parent_name = zero_only[label]
+        # 3) それでも決まらず、未マップ見出し かつ 売上0 ＝ 真の0円選択だけ「その他の内訳」へ。
+        #    未マップ見出しでも売上のある実売れ商品（13:紅茶=レモン, 14:アルコール等）は
+        #    トップに残す＝品目区分で正しく分類する（groups で上書き可）。
+        if parent_name is None and group and zero_groups:
+            label = _group_label(group)
+            if label not in zero_groups and not ((it.get("sales") or 0) > 0):
+                parent_name = ZERO_SUB_OTHER_PARENT
+        if parent_name is None:
+            tops.append(it)   # メイン商品（サブでない）はそのまま
+            continue
+        parent = by_name.get(parent_name) or synthetic.get(parent_name)
+        if parent is None:
+            # 実在しない親は表示専用ノードを新設（品目区分は親名で分類される）。
+            parent = {"name": parent_name, "sales": 0, "qty": None,
+                      "rank": None, "subs": [], "synthetic": True}
+            synthetic[parent_name] = parent
+        sub = {"name": it.get("name"), "qty": it.get("qty"), "sales": it.get("sales", 0)}
+        if "cost" in it:
+            sub["cost"] = it["cost"]
+        if "gross" in it:
+            sub["gross"] = it["gross"]
+        parent.setdefault("subs", []).append(sub)
+        s = it.get("sales") or 0
+        if s > 0:                       # 売上のあるサブだけ親の売上に足す（点数は足さない）
+            parent["sales"] = (parent.get("sales") or 0) + s
+    tops.extend(synthetic.values())     # 新設した親をトップに加える
+    # 指定の親は、サブを正規化名で合算する（例 "TOシングル ピスタチオ" と "ピスタチオ" を
+    # 1つに＝数量・売上を合計）。接頭辞違いの同一風味をまとめて見せる。
+    if merge_cfg:
+        for p in tops:
+            pfx = merge_cfg.get(p.get("name"))
+            if pfx and p.get("subs"):
+                p["subs"] = _merge_subs(p["subs"], pfx)
+    # 指定の親は 点数＝サブ点数の合計 を数量として持たせる（合計出数を1メインで見せる）。
+    if qty_rollup:
+        for p in tops:
+            if p.get("name") in qty_rollup and p.get("subs"):
+                p["qty"] = sum((s.get("qty") or 0) for s in p["subs"])
+    # 指定の親は、各サブに小カテゴリ(scat)を付ける（内訳を タルト・スコーン/紅茶/… で束ねて表示）。
+    if small_cat:
+        for p in tops:
+            cfg = small_cat.get(p.get("name"))
+            if cfg and p.get("subs"):
+                for s in p["subs"]:
+                    s["scat"] = _small_cat_of(s.get("name"), cfg)
+                p["scat_order"] = list(cfg.get("order") or [])
+    return tops
+
+
+def _small_cat_of(name: str | None, cfg: dict) -> str:
+    """サブ名を小カテゴリに割り当てる。cfg["rules"] を上から見て最初に当たった cat。
+    どれにも当たらなければ cfg["fallback"]（無ければ ""）。rule: {cat, contains:[...] , prefix:[...]}。"""
+    nm = name or ""
+    for rule in cfg.get("rules", []):
+        for kw in rule.get("prefix", []):
+            if kw and nm.startswith(kw):
+                return rule["cat"]
+        for kw in rule.get("contains", []):
+            if kw and kw in nm:
+                return rule["cat"]
+    return cfg.get("fallback", "")
+
+
+def _merge_subs(subs: list[dict], strip_prefixes) -> list[dict]:
+    """サブを正規化名で合算する。接頭辞（例 "TOシングル "）を落とした名前をキーに、
+    数量・売上・原価・粗利を合計。表示名は正規化名。並びは初出順。"""
+    prefixes = [p for p in (strip_prefixes or []) if p]
+
+    def norm(n: str | None) -> str:
+        s = (n or "").strip()
+        for p in prefixes:
+            if s.startswith(p):
+                return s[len(p):].strip()
+        return s
+
+    order: list[str] = []
+    groups: dict[str, dict] = {}
+    for s in subs:
+        key = norm(s.get("name"))
+        g = groups.get(key)
+        if g is None:
+            g = {"name": key, "qty": None, "sales": 0}
+            groups[key] = g
+            order.append(key)
+        q = s.get("qty")
+        if q is not None:
+            g["qty"] = (g["qty"] or 0) + q
+        g["sales"] = (g.get("sales") or 0) + (s.get("sales") or 0)
+        for k in ("cost", "gross"):
+            if k in s:
+                g[k] = (g.get(k) or 0) + s[k]
+    return [groups[k] for k in order]
 
 
 def load_lunch(path: Path | None = None) -> list[dict]:
@@ -337,6 +538,15 @@ METRICS = [
     METRIC_DRINK_THEORY_COST,
 ]
 
+# 税込→税抜の除数。店長会シート（税抜）と月別日別売上推移（税込）が両方そろう月で
+# 実測すると、全店・全月で ちょうど 税込 = 税抜 × 1.10（warehouse.py 参照）。
+# 画面の金額を税抜に統一するため、税込で入っている指標だけを 1.10 で割る。
+#   割る（税込）  : 売上(METRIC_SALES＝月別推移で統一)・ABC部門売上・ABC商品売上
+#   割らない(税抜): 予算・理論原価・F売上/D売上（いずれも店長会シート由来）・客数(人)
+NET_DIVISOR = 1.10
+# 税込で入っており税抜へ割り戻す対象の指標。
+NET_ADJUST_METRICS = frozenset({METRIC_SALES, METRIC_DEPT_SALES, METRIC_PRODUCT_SALES})
+
 
 def _assemble_departments(depts: dict[str, dict]) -> dict:
     """1店・1ヶ月ぶんの生部門（{部門名:{sales,qty,rate}}）を、標準バケット構成
@@ -399,6 +609,45 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
     }
 
 
+def _build_campaign_actuals(
+    warehouse: Warehouse, master: StoreMaster, date_from: date, date_to: date
+) -> dict:
+    """施策の“販売時期”実績。abc-campaign が焼いた source=fw_abc_camp / grain=day /
+    product_category=施策id の行を、施策idごとに {items:[{name,sales(税抜),qty}], sales, qty}
+    に束ねる。丸ごとの月ではなく登録期間レンジで取った実績なので、施策詳細はこれを優先表示する。"""
+    tmp: dict[str, dict[str, dict]] = {}
+    for metric, key in ((METRIC_PRODUCT_SALES, "sales"), (METRIC_PRODUCT_QTY, "qty")):
+        for row in warehouse.aggregate(
+            AggregateQuery(
+                date_from=date_from,
+                date_to=date_to,
+                grain=GRAIN_DAY,
+                metrics=[metric],
+                store_codes=list(master.active_codes),
+                group_by=("product_category", "product_name"),
+                sources=["fw_abc_camp"],
+            )
+        ):
+            cid = row["product_category"]
+            nm = row["product_name"]
+            if not cid or not nm:
+                continue
+            d = tmp.setdefault(cid, {}).setdefault(nm, {"name": nm, "sales": 0, "qty": 0})
+            if key == "sales":
+                d["sales"] = round(row["value"] / NET_DIVISOR)  # 税込→税抜
+            else:
+                d["qty"] = round(row["value"])
+    out: dict[str, dict] = {}
+    for cid, items in tmp.items():
+        arr = sorted(items.values(), key=lambda p: (-(p["sales"] or 0), -(p["qty"] or 0)))
+        out[cid] = {
+            "items": arr,
+            "sales": sum(p["sales"] for p in arr),
+            "qty": sum(p["qty"] for p in arr),
+        }
+    return out
+
+
 def _build_abc_by_month(
     warehouse: Warehouse,
     master: StoreMaster,
@@ -435,7 +684,7 @@ def _build_abc_by_month(
             .setdefault(m, {})
             .setdefault(row["product_name"], {"sales": 0.0, "qty": 0.0, "rate": rate})
         )
-        d["sales"] += row["value"]
+        d["sales"] += row["value"] / NET_DIVISOR   # 税込→税抜
         if rate is not None:
             d["rate"] = rate
     # 部門数量（店×月×部門）
@@ -473,15 +722,86 @@ def _build_abc_by_month(
         prod_tmp.setdefault(row["store_code"], {}).setdefault(m, []).append(
             {
                 "name": row["product_name"],
-                "sales": round(row["value"]),
+                "sales": round(row["value"] / NET_DIVISOR),   # 税込→税抜
                 "rank": row["product_category"],
             }
         )
+    # 商品別の販売点数（数量）。税抜換算しない。同じ (店,月,商品名) の売上行に qty を足す。
+    # product_category も引く：店別ABC取込の点数行には FWの区分見出し（例
+    # "20:テイクアウトジェラート"）を載せてある（内訳＝素の風味名を正しい区分へ束ねる用）。
+    qty_map: dict[tuple, float] = {}
+    group_map: dict[tuple, str] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_MONTH,
+            metrics=[METRIC_PRODUCT_QTY],
+            store_codes=codes,
+            group_by=("store_code", "date", "product_name", "product_category"),
+        )
+    ):
+        m = row["date"].strftime("%Y-%m")
+        key = (row["store_code"], m, row["product_name"])
+        qty_map[key] = qty_map.get(key, 0.0) + row["value"]
+        cat = row.get("product_category")
+        # 区分見出し（"NN:名前"）のときだけグループとして採る。ランク(A/B/C)は無視。
+        if cat and re.match(r"^\s*\d+\s*[:：]", str(cat)):
+            group_map[key] = str(cat)
+    # 商品別の原価金額・粗利金額（FW ABCグリッド由来）。売上と同じ (店,月,商品名) で束ねる。
+    # 売上金額は税込なので、原価/粗利も税抜へ割り戻して 売上=原価+粗利・原価率=原価÷売上 を
+    # 商品の税抜売上とそろえる。未取込の店/月は空＝cost/gross を付けない（後方互換）。
+    cost_map: dict[tuple, float] = {}
+    gross_map: dict[tuple, float] = {}
+    for metric, acc in ((METRIC_PRODUCT_COST, cost_map), (METRIC_PRODUCT_GROSS, gross_map)):
+        for row in warehouse.aggregate(
+            AggregateQuery(
+                date_from=date_from,
+                date_to=date_to,
+                grain=GRAIN_MONTH,
+                metrics=[metric],
+                store_codes=codes,
+                group_by=("store_code", "date", "product_name"),
+            )
+        ):
+            m = row["date"].strftime("%Y-%m")
+            key = (row["store_code"], m, row["product_name"])
+            acc[key] = acc.get(key, 0.0) + row["value"] / NET_DIVISOR  # 税込→税抜
+    # 売上行のある商品に qty・原価・粗利を足す。
+    seen: set[tuple] = set()
+    for code, months in prod_tmp.items():
+        for m, items in months.items():
+            for it in items:
+                key = (code, m, it["name"])
+                seen.add(key)
+                q = qty_map.get(key)
+                if q:
+                    it["qty"] = round(q)
+                if key in cost_map:
+                    it["cost"] = round(cost_map[key])
+                if key in gross_map:
+                    it["gross"] = round(gross_map[key])
+                if key in group_map:
+                    it["group"] = group_map[key]
+    # 売価0円だが点数がある商品（例: テイクアウトジェラートの内訳）を、点数だけの
+    # 商品として追加する（売上行が無いので上のループには入っていない）。所属区分も付ける。
+    for (code, m, name), q in qty_map.items():
+        if (code, m, name) in seen or not q:
+            continue
+        prod_tmp.setdefault(code, {}).setdefault(m, []).append(
+            {"name": name, "sales": 0, "rank": None, "qty": round(q),
+             "group": group_map.get((code, m, name))}
+        )
+
     products_monthly: dict[str, dict[str, list]] = {}
     categories_monthly: dict[str, dict[str, list]] = {}
     for code, months in prod_tmp.items():
         rules = store_categories.get(code)
         for m, items in months.items():
+            # 0円サブ（選択メニュー内訳）を親メイン商品の下に畳む（zero_groups のある店だけ）。
+            # サブをトップから外し、売上を親へロールアップしてから、区分集計・売れ筋切りを行う。
+            # こうすると品目数（品目区分の count）にサブが二重に乗らない。
+            items = _nest_zero_subs(items, rules)
             items.sort(key=lambda p: p["sales"], reverse=True)
             # 品目区分（店ごとのルールがある店だけ）。全商品で束ねてから売れ筋を切る。
             if rules:
@@ -489,7 +809,16 @@ def _build_abc_by_month(
                 cats = _categories_for_month(items, rules, total)
                 if cats:
                     categories_monthly.setdefault(code, {})[m] = cats
-            products_monthly.setdefault(code, {})[m] = items[:MONTHLY_PRODUCTS_N]
+            # 売れ筋 top-N に加え、内訳（FW区分見出し付き＝選択商品）・内訳を畳んだ親
+            # （subs 持ち）・売価0円だが点数のある商品は必ず残す。内訳は点数が本体なので
+            # top-N から切れても消さない。
+            keep = items[:MONTHLY_PRODUCTS_N]
+            kept = {id(p) for p in keep}
+            extra = [p for p in items[MONTHLY_PRODUCTS_N:]
+                     if id(p) not in kept
+                     and (p.get("group") or p.get("subs")
+                          or (not p.get("sales") and p.get("qty")))]
+            products_monthly.setdefault(code, {})[m] = keep + extra
     return departments_monthly, products_monthly, categories_monthly
 
 
@@ -520,8 +849,9 @@ def build(
     for row in rows:
         month = row["date"].strftime("%Y-%m")
         months.add(month)
+        val = row["value"] / NET_DIVISOR if row["metric"] in NET_ADJUST_METRICS else row["value"]
         monthly.setdefault(row["store_code"], {}).setdefault(month, {})[row["metric"]] = (
-            round(row["value"])
+            round(val)
         )
 
     # 売上予算（FW 月別予算登録）。予算対比の基準。指標選択には出さず別枠で持つ。
@@ -571,8 +901,9 @@ def build(
         )
     ):
         h = str(int(row["hour"]))
+        hval = row["value"] / NET_DIVISOR if row["metric"] in NET_ADJUST_METRICS else row["value"]
         hourly.setdefault(row["store_code"], {}).setdefault(h, {})[row["metric"]] = round(
-            row["value"]
+            hval
         )
     # 代表月（何月ぶんの時間帯プロファイルか）をラベル用に1つ拾う
     for row in warehouse.aggregate(
@@ -586,6 +917,29 @@ def build(
         )
     ):
         hourly_month = row["date"].strftime("%Y-%m")
+
+    # 時間帯別を「月別」に分けて持つ（各月の代表日1日ぶん＝月初に焼いてある）。
+    # 時間帯目標を「販促期間内の1日平均（前年同期）」で振り返れるようにするための材料。
+    # 上の hourly は全月合算（ピーク形の把握用）なので、こちらは月で割って別に持つ。
+    hourly_by_month: dict[str, dict[str, dict[str, dict[str, int]]]] = {}
+    for row in warehouse.aggregate(
+        AggregateQuery(
+            date_from=date_from,
+            date_to=date_to,
+            grain=GRAIN_HOUR,
+            metrics=[METRIC_SALES, METRIC_COVERS],
+            store_codes=master.active_codes,
+            group_by=("store_code", "date", "hour", "metric"),
+        )
+    ):
+        m = row["date"].strftime("%Y-%m")
+        h = str(int(row["hour"]))
+        hval = row["value"] / NET_DIVISOR if row["metric"] in NET_ADJUST_METRICS else row["value"]
+        (
+            hourly_by_month.setdefault(row["store_code"], {})
+            .setdefault(m, {})
+            .setdefault(h, {})
+        )[row["metric"]] = round(hval)
 
     # 全店（グループ全体）の売れ筋。ABC分析は既定で「全店」集計なので、擬似店舗
     # コード "_group" に入れてある。おすすめ料理候補としてTOPページに出す。
@@ -605,7 +959,7 @@ def build(
         group_by_month.setdefault(row["date"].strftime("%Y-%m"), []).append(
             {
                 "name": row["product_name"],
-                "sales": round(row["value"]),
+                "sales": round(row["value"] / NET_DIVISOR),   # 税込→税抜
                 "rank": row["product_category"],
             }
         )
@@ -648,6 +1002,8 @@ def build(
     departments_monthly, products_monthly, categories_monthly = _build_abc_by_month(
         warehouse, master, date_from, date_to, store_categories
     )
+    # 施策の販売時期実績（abc-campaign 由来）。登録期間レンジで取った施策別の実績。
+    campaign_actuals = _build_campaign_actuals(warehouse, master, date_from, date_to)
 
     # 店舗詳細の「部門構成」「売れ筋商品」は “直近1ヶ月” を名乗る表なので、月次
     # シリーズの最新月をそのまま使う。以前は date_from〜date_to を丸ごと SUM した
@@ -677,6 +1033,39 @@ def build(
         {"name": r, "stores": [s.store_code for s in master.in_region(r)]}
         for r in master.regions
     ]
+
+    # 原価率（損益）が「なぜ出ないか」を店ごとに判定する。画面で「―」を素で出さず、
+    # 理由（新レジ未接続／新店・反映待ち／FW未反映／直近のみ）を添えるための材料。
+    def _ym_minus(ym: str, k: int) -> str:
+        y, m = int(ym[:4]), int(ym[5:7])
+        idx = y * 12 + (m - 1) - k
+        return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
+
+    cost_status: dict[str, dict] = {}
+    for s in master.active:
+        c = s.store_code
+        cr_months = sorted(cost_rates.get(c, {}).keys())
+        sales_months = sorted(monthly.get(c, {}).keys())
+        n = len(cr_months)
+        latest_cr = cr_months[-1] if cr_months else None
+        latest_sales = sales_months[-1] if sales_months else None
+        has_recent = bool(set(sales_months[-2:]) & set(cr_months)) if sales_months else False
+        if not sales_months:
+            continue  # 売上自体が無い店は has_actuals=false 側で扱う
+        if has_recent and n >= 1:
+            continue  # 直近に原価率あり＝正常。理由は出さない。
+        # 開店が直近4ヶ月以内なら「新店」
+        opened_ym = (s.opened or "")[:7]
+        is_new = bool(opened_ym) and latest_sales is not None and opened_ym >= _ym_minus(latest_sales, 4)
+        if s.pos and s.pos != "fw":
+            status = "pos"       # 新Uレジ/ダイニー等。FW共有シート経路外。
+        elif is_new:
+            status = "new"       # 開店後の損益がまだ共有シートに載っていない。
+        elif n == 0:
+            status = "none"      # FW店だが損益が1件も無い（店長会資料DL未反映）。
+        else:
+            status = "partial"   # 一部月のみ（FW側に過去分が無く直近だけ）。
+        cost_status[c] = {"status": status, "months": n, "latest": latest_cr}
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -719,6 +1108,9 @@ def build(
         # 実原価（金額と率）。理論原価率(cost_rate)と並べると差＝不明ロスが見える。
         # {店コード: {"YYYY-MM": {food, drink, total, rate}}}
         "actual_cost": actual_cost,
+        # 原価率（損益）が出ない店の理由。{code:{status,months,latest}}。
+        # status: pos=新レジ未接続 / new=新店・反映待ち / none=FW未反映 / partial=直近のみ。
+        "cost_status": cost_status,
         # 店舗の月次売上予算（FW月別予算登録）。まだ取り込み前は空。
         "budget": budget,
         # 店舗の月次客数（FW月別日別売上推移）。集客の前年比・前月比に使う。空でも可。
@@ -726,6 +1118,8 @@ def build(
         # 店舗の時間帯別 売上・客数（FW時間帯別売上）。時間帯別販促の検討に使う。
         "hourly": hourly,
         "hourly_month": hourly_month,
+        # 時間帯別を月別に（各月の代表日1日ぶん）。時間帯目標の期間内1日平均に使う。
+        "hourly_by_month": hourly_by_month,
         # 店舗の売れ筋商品 上位（FW ABC分析・店舗別）。今は空でも可（全店を使う）。
         "products": products,
         # 全店（グループ全体）の売れ筋商品 上位。おすすめ料理候補としてTOPに出す。
@@ -748,6 +1142,9 @@ def build(
         "store_categories": store_categories,
         # 施策スケジュール（config/schedule.yaml 由来）。空でも画面は成立する。
         "campaigns": campaigns or [],
+        # 施策の“販売時期”実績（abc-campaign 由来）。施策id→{items,sales,qty}。登録期間レンジで
+        # 取った実績で、施策詳細は丸ごとの月ではなくこれを優先表示する。空でも画面は成立する。
+        "campaign_actuals": campaign_actuals,
         # 制作物ギャラリー（config/creatives.yaml 由来）。空でも画面は成立する。
         "creatives": creatives or [],
         # ランチ効果分析（config/lunch_analysis.json 由来・店舗別）。空でも画面は成立する。
