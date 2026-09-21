@@ -181,7 +181,8 @@ function _metricOverMonths(metric, code, months) {
   if (metric === "sales") return sN ? Math.round(sales) : null;
   if (metric === "covers") return cN ? Math.round(covers) : null;
   if (metric === "avg_check") return (covers > 0 && sN) ? Math.round(sales / covers) : null;
-  if (metric === "cost_rate") return costDen ? +(costNum / costDen).toFixed(1) : null;
+  // DATA.cost_rate は割合（0.30＝30%）で入っている。目標は％で入力するので％へ揃える。
+  if (metric === "cost_rate") return costDen ? +((costNum / costDen) * 100).toFixed(1) : null;
   return null; // food/drink 原価率は現状データ源なし
 }
 // 販促の「現状/参考」値（薄字）。通常＝前年同期、常設（終了日なし）＝開始〜直近の実績。

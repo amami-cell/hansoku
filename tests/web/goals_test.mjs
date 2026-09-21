@@ -69,7 +69,8 @@ const base = {
   monthly: { "1160": { "2026-07": { sales: 14000000 }, "2026-08": { sales: 15000000 },
     "2025-07": { sales: 13000000 }, "2025-08": { sales: 13500000 } } },
   covers: { "1160": { "2026-07": 29000, "2026-08": 30000, "2025-07": 27000, "2025-08": 28000 } },
-  cost_rate: { "1160": { "2026-07": 30, "2026-08": 31, "2025-07": 29, "2025-08": 30 } },
+  // DATA.cost_rate は割合（0.30＝30%）で入る（店ページの粗利=1-原価率が根拠）。
+  cost_rate: { "1160": { "2026-07": 0.30, "2026-08": 0.31, "2025-07": 0.29, "2025-08": 0.30 } },
   hourly: { "1160": { "12": { sales: 100000, covers: 200 } } },
   hourly_month: "2026-08", metrics: ["sales"], campaigns: [], cost_status: {},
 };
@@ -92,6 +93,12 @@ await test("達成率：売上は 実績/目標、原価率は 目標/実績（�
   assert.equal(cr.good, false, "原価率30%>目標28% は未達（反転）");
   const cr2 = call(`targetAchievement(TARGET_METRICS.find(m=>m.key==="cost_rate"), 32, 30)`);
   assert.equal(cr2.good, true, "原価率30%<目標32% は達成（反転で緑）");
+});
+
+await test("原価率の実績は割合(0.31)を％(31.0)に換算して返す", () => {
+  const { call } = loadForm(base);
+  const v = call(`actualTargetValue("cost_rate","1160","2026-08","2026-08",false)`);
+  assert.equal(v, 31, "0.31→31%（目標は％入力なので揃える）");
 });
 
 console.log("損益の理由表示（cost_status → costReason）");
