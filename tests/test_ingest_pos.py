@@ -171,3 +171,15 @@ class Test取り込み元の優先順位:
         # 最優先にしても安全なのは、FW連動店に行を作らないから。
         rows, _ = build_rows(rd(row(name="NagaGutsu", code="1151", pos="dinii")), master)
         assert rows == []
+
+
+class Test採用順:
+    """集計の採用順は ① 確定かどうか → ② SOURCE_PRIORITY → ③ 取込日時。
+    **kind が先に効く**ので、付け忘れるとFWの「確定の 0」に無条件で負ける。
+    優先順位だけ上げても出番が来ない（実際そうなった）。"""
+
+    def test_確定として入れる(self, master):
+        from hansoku.model import KIND_FINAL
+
+        rows, _ = build_rows(rd(row()), master)
+        assert rows and all(r.kind == KIND_FINAL for r in rows)

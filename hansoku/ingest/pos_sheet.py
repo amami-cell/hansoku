@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from ..model import GRAIN_MONTH, METRIC_COVERS, METRIC_SALES, ActualRow
+from ..model import GRAIN_MONTH, KIND_FINAL, METRIC_COVERS, METRIC_SALES, ActualRow
 from ..normalize import normalize_text, parse_amount, parse_year_month
 from ..stores import StoreMaster
 from .fw_sheet import IngestReport
@@ -129,6 +129,12 @@ def build_rows(
                     grain=GRAIN_MONTH,
                     metric=metric,
                     value=parse_amount(text),
+                    # **確定として入れる。** 集計の採用順は
+                    #   ① 確定かどうか → ② SOURCE_PRIORITY → ③ 取込日時
+                    # で、kind が先に効く。付け忘れると、FWが書いた「確定の 0」に
+                    # 無条件で負けて、優先順位を上げても出番が来ない（実際そうなった）。
+                    # 締まった月のPOSの数字なので確定で正しい。
+                    kind=KIND_FINAL,
                     source=SOURCE,
                     ingested_at=ingested_at,
                 )
