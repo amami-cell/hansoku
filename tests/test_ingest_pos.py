@@ -85,3 +85,50 @@ class Test形が違うとき:
         rows, report = build_rows(reader, master)
         assert {r.date.strftime("%Y-%m") for r in rows} == {"2026-08"}
         assert report.skipped
+
+
+class Test読む列の範囲:
+    """**列の範囲は最後の列で決まる。** 広げ忘れると、その列だけ黙って空になる。
+
+    実際に踏んだ: 既定の A:E のままだったので POS売上タブの `客数`（F列）が
+    読めず、売上だけが入った。**エラーにならない**ので気づきにくい。
+    """
+
+    def test_既定はE列まで(self):
+        # 既存の取り込み（FWタブ・月次集計）はE列で収まる。挙動を変えない。
+        from hansoku.ingest.sheets_client import sheet_range
+
+        assert sheet_range("月次集計") == "'月次集計'!A:E"
+
+    def test_広げられる(self):
+        from hansoku.ingest.sheets_client import sheet_range
+
+        assert sheet_range("POS売上", "Z") == "'POS売上'!A:Z"
+
+    def test_POS売上はE列より右を使う(self):
+        # 客数はF列。ここが E のままだと取れない。
+        from hansoku.ingest.pos_sheet import HEADER_TO_METRIC
+
+        assert HEADER_TO_METRIC["客数"]
+        assert HEADER.index("客数") > HEADER.index("フード原価")
+
+
+class Test中断の判断:
+    """**マスタに無い店は取りこぼしではない。** このタブにはよその会社の店が
+    大量に入るのが正常。他の取り込みと同じ基準で止めると、毎回失敗する。"""
+
+    def test_よその店があっても中断しない(self, master, warehouse):
+        from hansoku.ingest.pos_sheet import ingest
+
+        reader = rd(row(), row(name="喰人梅田東通り店", code=""))
+        report = ingest(reader, master, warehouse, strict=True)
+        assert report.unknown_stores          # 記録はする
+        assert report.rows_loaded == 2        # 1766 の売上・客数は入る
+
+    def test_タブが無ければ中断する(self, master, warehouse):
+        import pytest as _pytest
+
+        from hansoku.ingest.pos_sheet import ingest
+
+        with _pytest.raises(RuntimeError):
+            ingest(FixtureSheetReader({}), master, warehouse, strict=True)

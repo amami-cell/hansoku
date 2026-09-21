@@ -149,8 +149,15 @@ def ingest(
     """「POS売上」タブを読み、f_actuals へ冪等に投入する。"""
     rows, report = build_rows(reader, master, year_months=year_months)
 
-    if strict and not report.ok:
+    # **マスタに無い店は「取りこぼし」ではない。** このタブにはよその会社の店が
+    # 大量に入る（ダイニーのアカウントは90店舗ぶん見えている）ので、
+    # unknown_stores があることは正常。他の取り込みと違って中断の理由にしない。
+    # タブが無い・行を読み飛ばした、のほうが異常なのでそちらで判断する。
+    if strict and (report.tabs_missing or report.skipped):
         raise RuntimeError("POS売上の取り込みに取りこぼしがあります:\n" + report.summary())
+    if report.unknown_stores:
+        print(f"[{TAB}] マスタに無い店 {len(report.unknown_stores)}件は飛ばしました"
+              "（よその会社の店。ダイニーは90店舗ぶん見えています）")
 
     warehouse.ensure_schema()
     # 取れた店・取れた指標だけを入れ替える。FW連動店の売上を巻き添えにしない。

@@ -190,8 +190,12 @@ def cmd_ingest_pos(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
-        reader = GoogleSheetReader(sheet_id, settings.sources.service_account_json)
-        print("[source] POS取込シート「POS売上」タブ（読み取りのみ）")
+        # 既定の A:E だと F列の「客数」が読めない（実測で売上だけ入った）。
+        # 列は末尾に増える運用なので、余裕を持って Z まで取る。
+        reader = GoogleSheetReader(
+            sheet_id, settings.sources.service_account_json, last_column="Z"
+        )
+        print("[source] POS取込シート「POS売上」タブ（読み取りのみ・A:Z）")
 
     months = set(args.month) if args.month else None
     try:
