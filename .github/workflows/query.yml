@@ -146,6 +146,7 @@ jobs:
                 --date-from ${{ inputs.date_from }} \
                 --date-to ${{ inputs.date_to }}"
           [ -n "${{ inputs.store }}" ] && args="$args --store ${{ inputs.store }}"
+          [ -n "${{ inputs.source }}" ] && args="$args --source ${{ inputs.source }}"
           args="$args --group-by ${{ inputs.group_by }}"
           # 実行結果はジョブのサマリにも残す（ログを掘らなくても読める）
           {

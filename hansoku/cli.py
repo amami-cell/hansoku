@@ -116,6 +116,7 @@ def cmd_aggregate(args: argparse.Namespace) -> int:
                 metrics=[args.metric],
                 store_codes=args.store or None,
                 hours=args.hour or None,
+                sources=args.source or None,
                 group_by=tuple(args.group_by),
             )
         )
@@ -814,6 +815,9 @@ def build_parser() -> argparse.ArgumentParser:
     agg.add_argument("--date-from", required=True, type=_date, dest="date_from")
     agg.add_argument("--date-to", required=True, type=_date, dest="date_to")
     agg.add_argument("--store", action="append", help="店舗コード（複数指定可）")
+    # 取り込み口を指定して引く。「投入は成功しているのに集計に出ない」ときに、
+    # 値が入っていないのか、別の取り込み口に負けているのかを切り分ける。
+    agg.add_argument("--source", action="append", help="取り込み口（fw_sheet / pos_sheet など）")
     agg.add_argument("--grain", default=GRAIN_MONTH, choices=GRAINS)
     agg.add_argument("--hour", action="append", type=int, help="時（0-23、複数指定可）")
     agg.add_argument(
@@ -823,7 +827,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=list(AggregateQuery.ALLOWED_GROUP_BY),
         help="束ね方（複数指定可。既定は store_code）。date を指定すると月別の推移が見られる",
     )
-    agg.set_defaults(func=cmd_aggregate, group_by=None)
+    agg.set_defaults(func=cmd_aggregate, group_by=None, source=None)
 
     im = sub.add_parser(
         "ingest-infomart", help="インフォマート棚卸（月次集計タブ）から実績を取り込む"
