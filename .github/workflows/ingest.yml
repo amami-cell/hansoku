@@ -105,3 +105,26 @@ jobs:
           [ -n "${{ inputs.month }}" ] && args="$args --month ${{ inputs.month }}"
           [ "${{ inputs.lenient }}" = "true" ] && args="$args --lenient"
           python -m hansoku.cli ingest-infomart $args
+
+      # FW未連動の店（1766 ぎふや福岡天神）は、ここからしか数字が来ない。
+      # POS_SPREADSHEET_ID が未設定なら何もせず飛ばす（他の取り込みは通す）。
+      - name: POS取込シートから取り込む（FW未連動店）
+        env:
+          HANSOKU_ENV: cloud
+          BIGQUERY_PROJECT: ${{ secrets.BIGQUERY_PROJECT }}
+          BIGQUERY_DATASET: ${{ secrets.BIGQUERY_DATASET }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          POS_SPREADSHEET_ID: ${{ secrets.POS_SPREADSHEET_ID }}
+        run: |
+          if [ -z "$POS_SPREADSHEET_ID" ]; then
+            echo "POS_SPREADSHEET_ID が未設定なので飛ばします"
+            exit 0
+          fi
+          args=""
+          [ -n "${{ inputs.month }}" ] && args="$args --month ${{ inputs.month }}"
+          [ "${{ inputs.lenient }}" = "true" ] && args="$args --lenient"
+          python -m hansoku.cli ingest-pos $args
