@@ -173,3 +173,71 @@ creatives:
     date: "2026-06-01"
     file: creatives/2026/r1160-collab-kaeru/r1160-collab-kaeru_sched.png
 
+
+  # ── ルクアLargo（1160）2026確定POP（Drive共有後に追加取込・2026-09-22）──
+  - id: r1160-cake-2603_milcrepe
+    title: ミルクレープ POP
+    campaign: r1160-cake-2603
+    date: "2026-03-19"
+    file: creatives/2026/r1160-cake-2603/r1160-cake-2603_milcrepe.png
+
+  - id: r1160-cake-2605_56gatsu
+    title: 5.6月ケーキ POP
+    campaign: r1160-cake-2605
+    date: "2026-05-01"
+    file: creatives/2026/r1160-cake-2605/r1160-cake-2605_56gatsu.png
+
+  - id: r1160-cake-2607_78gatsu
+    title: 7.8月ケーキ POP
+    campaign: r1160-cake-2607
+    date: "2026-07-01"
+    file: creatives/2026/r1160-cake-2607/r1160-cake-2607_78gatsu.png
+
+  - id: r1160-cake-2609_akicake
+    title: 秋ケーキ POP
+    campaign: r1160-cake-2609
+    date: "2026-09-01"
+    file: creatives/2026/r1160-cake-2609/r1160-cake-2609_akicake.png
+
+  - id: r1160-cake-2609_rouge
+    title: ルージュ POP
+    campaign: r1160-cake-2609
+    date: "2026-09-01"
+    file: creatives/2026/r1160-cake-2609/r1160-cake-2609_rouge.png
+
+  - id: r1160-parfait-2603_ichigo2
+    title: いちご2種 POP
+    campaign: r1160-parfait-2603
+    date: "2026-03-02"
+    file: creatives/2026/r1160-parfait-2603/r1160-parfait-2603_ichigo2.png
+
+  - id: r1160-parfait-2605_melon
+    title: メロン POP
+    campaign: r1160-parfait-2605
+    date: "2026-05-08"
+    file: creatives/2026/r1160-parfait-2605/r1160-parfait-2605_melon.png
+
+  - id: r1160-parfait-2607_snow4
+    title: スノー4種 POP
+    campaign: r1160-parfait-2607
+    date: "2026-07-01"
+    file: creatives/2026/r1160-parfait-2607/r1160-parfait-2607_snow4.png
+
+  - id: r1160-parfait-2609_ichijiku
+    title: いちじく POP
+    campaign: r1160-parfait-2609
+    date: "2026-09-16"
+    file: creatives/2026/r1160-parfait-2609/r1160-parfait-2609_ichijiku.png
+
+  - id: r1160-collab-kaeru_kaeru
+    title: かえる POP
+    campaign: r1160-collab-kaeru
+    date: "2026-06-12"
+    file: creatives/2026/r1160-collab-kaeru/r1160-collab-kaeru_kaeru.png
+
+  - id: r1160-collab-hakuto26_hakuto
+    title: 白桃 POP
+    campaign: r1160-collab-hakuto26
+    date: "2026-07-21"
+    file: creatives/2026/r1160-collab-hakuto26/r1160-collab-hakuto26_hakuto.png
+
