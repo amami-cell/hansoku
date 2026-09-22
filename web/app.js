@@ -4610,9 +4610,13 @@ function storeAnnualChart(code, year) {
       .sort((a, b) => a.start < b.start ? -1 : 1);
     const crs = creativesForMonth(code, m);
     const cls = (m === CURRENT_MONTH ? " now" : "") + (m > CURRENT_MONTH ? " prov" : "");
+    // POP欄の空表示。これからの月（当月以降）の販促はPOP未作成＝「予定」、
+    // 過ぎた月で無いものは「なし」。販促自体が無い月はプレースホルダを出さない。
     const pops = crs.length
       ? `<div class="pcar-pops">${crs.map(popThumb).join("")}</div>`
-      : `<div class="pcar-pops empty"><span class="pcar-none">POP・制作物なし</span></div>`;
+      : inMonth.length
+        ? `<div class="pcar-pops empty"><span class="pcar-none">${m >= CURRENT_MONTH ? "予定（POPは作成後に反映）" : "POP・制作物なし"}</span></div>`
+        : "";
     const chips = inMonth.length
       ? `<div class="pcar-camps">${inMonth.map(campChip).join("")}</div>`
       : `<div class="pcar-camps empty"><span class="pcar-none">この月の販促なし</span></div>`;
