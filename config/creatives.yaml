@@ -45,3 +45,131 @@ creatives:
     date: "2026-08-24"
     file: creatives/2026/r1151-lunch/NG2_lunch_2608.pdf
 
+
+  # ── ルクアLargo（1160）POP（年間販促資料.xlsx のDriveリンク由来・2026-09-22取込）──
+  - id: c1160-cake-2601_1gatsu
+    title: 1月ケーキ POP
+    campaign: c1160-cake-2601
+    date: "2026-01-01"
+    file: creatives/2026/c1160-cake-2601/c1160-cake-2601_1gatsu.png
+
+  - id: c1160-cake-2602_2gatsu
+    title: 2月ケーキ POP
+    campaign: c1160-cake-2602
+    date: "2026-02-15"
+    file: creatives/2026/c1160-cake-2602/c1160-cake-2602_2gatsu.png
+
+  - id: c1160-cake-2505_5gatsu
+    title: 5月ケーキ POP
+    campaign: c1160-cake-2505
+    date: "2025-05-26"
+    file: creatives/2025/c1160-cake-2505/c1160-cake-2505_5gatsu.png
+
+  - id: c1160-cake-2509_9gatsu
+    title: 9月ケーキ POP
+    campaign: c1160-cake-2509
+    date: "2025-09-22"
+    file: creatives/2025/c1160-cake-2509/c1160-cake-2509_9gatsu.png
+
+  - id: c1160-cake-2512_xmas
+    title: クリスマスケーキ POP
+    campaign: c1160-cake-2512
+    date: "2025-11-27"
+    file: creatives/2025/c1160-cake-2512/c1160-cake-2512_xmas.png
+
+  - id: r1160-cake-2701_1gatsu
+    title: 1月ケーキ POP
+    campaign: r1160-cake-2701
+    date: "2026-12-26"
+    file: creatives/2026/r1160-cake-2701/r1160-cake-2701_1gatsu.png
+
+  - id: r1160-cake-2702_valentine
+    title: バレンタインケーキ POP
+    campaign: r1160-cake-2702
+    date: "2027-02-01"
+    file: creatives/2027/r1160-cake-2702/r1160-cake-2702_valentine.png
+
+  - id: c1160-cake-2602v_valentine
+    title: 2月ケーキ（バレンタイン）POP
+    campaign: c1160-cake-2602v
+    date: "2026-02-01"
+    file: creatives/2026/c1160-cake-2602v/c1160-cake-2602v_valentine.png
+
+  - id: c1160-parfait-mikan_mikan
+    title: みかんパフェ POP
+    campaign: c1160-parfait-mikan
+    date: "2026-01-02"
+    file: creatives/2026/c1160-parfait-mikan/c1160-parfait-mikan_mikan.png
+
+  - id: c1160-parfait-shortcake_short
+    title: ショートケーキパフェ POP
+    campaign: c1160-parfait-shortcake
+    date: "2026-02-02"
+    file: creatives/2026/c1160-parfait-shortcake/c1160-parfait-shortcake_short.png
+
+  - id: c1160-parfait-lychee_lychee
+    title: ライチパフェ POP
+    campaign: c1160-parfait-lychee
+    date: "2025-05-08"
+    file: creatives/2025/c1160-parfait-lychee/c1160-parfait-lychee_lychee.png
+
+  - id: c1160-parfait-snow_snow
+    title: パフェスノー POP
+    campaign: c1160-parfait-snow
+    date: "2025-06-01"
+    file: creatives/2025/c1160-parfait-snow/c1160-parfait-snow_snow.png
+
+  - id: c1160-parfait-halloween_hw
+    title: ハロウィンパフェ POP
+    campaign: c1160-parfait-halloween
+    date: "2025-09-30"
+    file: creatives/2025/c1160-parfait-halloween/c1160-parfait-halloween_hw.png
+
+  - id: c1160-parfait-ichijiku_fig
+    title: いちじくパフェ POP
+    campaign: c1160-parfait-ichijiku
+    date: "2025-10-31"
+    file: creatives/2025/c1160-parfait-ichijiku/c1160-parfait-ichijiku_fig.png
+
+  - id: c1160-parfait-noel_noel
+    title: ノエル（クリスマスパフェ）POP
+    campaign: c1160-parfait-noel
+    date: "2025-12-02"
+    file: creatives/2025/c1160-parfait-noel/c1160-parfait-noel_noel.png
+
+  - id: r1160-parfait-2701_mikan
+    title: みかんパフェ POP
+    campaign: r1160-parfait-2701
+    date: "2026-12-26"
+    file: creatives/2026/r1160-parfait-2701/r1160-parfait-2701_mikan.png
+
+  - id: r1160-parfait-2702_short
+    title: 苺/ショートケーキパフェ POP
+    campaign: r1160-parfait-2702
+    date: "2027-02-01"
+    file: creatives/2027/r1160-parfait-2702/r1160-parfait-2702_short.png
+
+  - id: c1160-collab-hakuto_hakuto
+    title: 白桃DaysコラボPOP
+    campaign: c1160-collab-hakuto
+    date: "2025-07-25"
+    file: creatives/2025/c1160-collab-hakuto/c1160-collab-hakuto_hakuto.png
+
+  - id: c1160-collab-kumamon_kumamoto
+    title: くまもとモンコラボPOP
+    campaign: c1160-collab-kumamon
+    date: "2025-11-01"
+    file: creatives/2025/c1160-collab-kumamon/c1160-collab-kumamon_kumamoto.png
+
+  - id: r1160-collab-kaeru_teian
+    title: かえるのピクルス 提案書
+    campaign: r1160-collab-kaeru
+    date: "2026-06-01"
+    file: creatives/2026/r1160-collab-kaeru/r1160-collab-kaeru_teian.png
+
+  - id: r1160-collab-kaeru_sched
+    title: かえるのピクルス スケジュール
+    campaign: r1160-collab-kaeru
+    date: "2026-06-01"
+    file: creatives/2026/r1160-collab-kaeru/r1160-collab-kaeru_sched.png
+
