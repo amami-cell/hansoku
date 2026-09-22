@@ -993,6 +993,16 @@ test("storeAnnualChart：販促は月カルーセル（上POP・下販促）と�
   assert.ok(/data-smonth="1160:2025-09"/.test(html), "月見出しはその月の詳細へ飛べる");
   // 制作物が無い月は「POP・制作物なし」のプレースホルダ（サムネ枠は上に置く設計）
   assert.ok(html.includes("POP・制作物なし"), "POPが無い月はプレースホルダ");
+  // 表示切替（月ごと／年間チャート）がある
+  assert.ok(/data-pcview="carousel"/.test(html) && /data-pcview="gantt"/.test(html), "販促チャートの表示切替タブ");
+});
+
+test("storeAnnualChart：年間チャート（帯・一覧）に切り替えると帯で出る", () => {
+  const ctx = loadApp(annualData);
+  const html = call(ctx, `PROMO_CHART_VIEW="gantt"; storeAnnualChart("1160","2025")`);
+  assert.ok(html.includes('class="panel gantt"'), "帯（ガント）で表示");
+  assert.ok(html.includes('data-camp="snow"'), "販促の帯");
+  assert.ok(/class="gbar[^"]*"[^>]*data-tip="[^"]*｜/.test(html), "帯に構造化ツールチップ(data-tip)");
 });
 
 test("renderStoreMonth：予算があれば売上カードに予算比ピル＋予算サブが出る（Steppy風）", () => {

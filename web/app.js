@@ -66,6 +66,7 @@ let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"
 let YEAR = null;                   // 年間販促ビューで表示中の年（数値）
 let STORE_YEAR = null;             // 店ページの年間スケジュールで見ている年（文字列 "YYYY"）
 let STORE_ANNUAL_VIEW = "chart"; // 店ページ年間スケジュールの表示（chart=既定・月次一覧＋帯 / calendar=開いて詳しく）
+let PROMO_CHART_VIEW = "carousel"; // 販促チャートの表示：carousel=月ごと（カード・既定） / gantt=年間チャート（帯・一覧）
 let PANEL_SORT = "share";          // 品目構成比パネルの並び：share=売上構成比順（既定） / qty=出品数(点数)順
 let PANEL_PCT = "dept";            // 品目構成比パネルの％基準：dept=部門別構成比（既定） / total=売上構成比（その月の全体比）
 let ANNUAL_OPEN = {};              // カレンダー一覧の開閉状態（"code:month" と "code:month:区分" を鍵に）
@@ -1131,6 +1132,8 @@ function render() {
     }));
   app.querySelectorAll("[data-savw]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); STORE_ANNUAL_VIEW = el.dataset.savw; render(); }));
+  app.querySelectorAll("[data-pcview]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); PROMO_CHART_VIEW = el.dataset.pcview; render(); }));
   app.querySelectorAll("[data-syear]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); STORE_YEAR = el.dataset.syear; render(); }));
   app.querySelectorAll("[data-psort]").forEach(el =>
@@ -4551,11 +4554,68 @@ function storeAnnualChart(code, year) {
       `${pops}${chips}</div>`;
   }).join("");
 
+  // 年間チャート（帯・一覧）＝1年を一望。区分ごとに1レーン、帯＝実施期間（横軸＝月）。
+  // 月がたまたま同じでも“日付”が重ならなければ同じ行、重なるときだけ「パフェ2」と行を分ける。
+  const makeBar = (c, col) => {
+    const st = campStatus(c);
+    const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
+    const monthFrac = (ds, end = false) => {
+      let dd = ds < ys ? ys : (ds > ye ? ye : ds);
+      const mo = +dd.slice(5, 7), day = +dd.slice(8, 10);
+      const dim = new Date(+dd.slice(0, 4), mo, 0).getDate();
+      return Math.min(1, Math.max(0, ((mo - 1) + (end ? day : day - 1) / dim) / 12));
+    };
+    const left = monthFrac(s) * 100;
+    const w = Math.max(1.2, (monthFrac(e, true) - monthFrac(s)) * 100);
+    const ef = storeCampEffect(c, code);
+    const mark = ef.mark || (VERDICT_MARK[campVerdict(c).tone] || "");
+    const tone = ef.mark ? ef.tone : campVerdict(c).tone;
+    let tip = `${c.title}｜${campRange(c)}`;
+    if (ef.measured) {
+      tip += `｜${ef.label} ${man(ef.cur)}円・昨対${signed(ef.pct)}%`;
+      const prevOcc = campPrevOccurrence(c);
+      if (prevOcc) { const pb = campTargeted(prevOcc, code); if (pb && pb.cur) tip += `・前回${signed((ef.cur / pb.cur - 1) * 100)}%`; }
+    } else if (ef.state) { tip += `｜${ef.state}`; }
+    return `<button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${col}"
+      data-tip="${esc(tip)}">${mark ? `<span class="gvm ${tone}">${mark}</span>` : ""}<span class="gbt">${esc(c.title)}</span></button>`;
+  };
+  const ganttHead = Array.from({ length: 12 }, (_, i) =>
+    `<button class="gmh" data-smonth="${code}:${year}-${String(i + 1).padStart(2, "0")}">${i + 1}</button>`).join("");
+  const laneHtml = [];
+  for (const cat of catOrder) {
+    const col = laneColor[cat];
+    const list = byCat.get(cat).slice().sort((a, b) => a.start < b.start ? -1 : 1);
+    const sub = [];
+    for (const c of list) {
+      const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
+      let lane = sub.find(L => L.lastEnd < s);
+      if (!lane) { lane = { lastEnd: "", bars: [] }; sub.push(lane); }
+      lane.bars.push(makeBar(c, col)); if (e > lane.lastEnd) lane.lastEnd = e;
+    }
+    sub.forEach((L, idx) => {
+      const label = idx === 0 ? cat : `${cat}${idx + 1}`;
+      laneHtml.push(`<div class="grow"><div class="glabel gcat"><span class="kdot" style="background:${col}"></span>${esc(label)}</div><div class="gtrack">${L.bars.join("")}</div></div>`);
+    });
+  }
+  const ganttHtml = `<div class="panel gantt">
+    <div class="grow ghead"><div class="glabel gh">区分</div><div class="gmonths">${ganttHead}</div></div>
+    ${camps.length ? laneHtml.join("") : `<div class="empty">${year}年に走った販促はありません。</div>`}
+  </div>`;
+
+  // 表示切替：月ごと（カード・既定）／年間チャート（帯・一覧）。
+  const pv = PROMO_CHART_VIEW === "gantt" ? "gantt" : "carousel";
+  const pvTabs = `<div class="viewtabs pvtabs">
+    <button class="vtab${pv === "carousel" ? " on" : ""}" data-pcview="carousel">月ごと（カード）</button>
+    <button class="vtab${pv === "gantt" ? " on" : ""}" data-pcview="gantt">年間チャート（帯・一覧）</button></div>`;
+  const promoBody = pv === "gantt" ? ganttHtml : `<div class="pcar" role="list">${carCards}</div>`;
+
   // 凡例（その年に出ている種類）＋見方（誰が見ても操作が分かるように）
   const legend = catOrder.length
     ? `<div class="glegend">${catOrder.map(cc => `<span class="glg"><i style="background:${laneColor[cc]}"></i>${esc(cc)}</span>`).join("")}
         <span class="glg"><i class="gvm good">◎</i>効果あり</span><span class="glg"><i class="gvm warn">△</i>要改善</span></div>
-       <div class="ghelp">色＝品目区分。カードを<b>左右にスクロール</b>すると前後の月が両端にチラ見えします。上＝その月のPOP・制作物（押すと拡大）、下＝その月の販促（押すと詳細）。<b>◯月</b>を押すとその月の詳細（構成比・POP）へ。◎/△は対象区分の前年比で自動判定。</div>`
+       <div class="ghelp">色＝品目区分。${pv === "gantt"
+         ? "帯＝実施期間（横軸＝月）。同じ区分で期間が重なる販促は「パフェ2」のように行を分けます。<b>帯や販促名</b>を押すと詳細、<b>上の月番号</b>を押すとその月の詳細（構成比・POP）へ。"
+         : "カードを<b>左右にスクロール</b>すると前後の月が両端にチラ見えします。上＝その月のPOP・制作物（押すと拡大）、下＝その月の販促（押すと詳細）。<b>◯月</b>を押すとその月の詳細（構成比・POP）へ。"}◎/△は対象区分の前年比で自動判定。</div>`
     : "";
 
   // 年サマリ（確定分の売上合計・前年比・予算達成の平均・販促◎/△）。チャートの頭に置いて、
@@ -4580,8 +4640,9 @@ function storeAnnualChart(code, year) {
   </div>`;
 
   return `${yearSummary}${storeYearMatrix(code, year)}
-    <div class="mmhd" style="margin-top:16px">販促 年間チャート<span class="mmhint">横スクロールで月移動（前後の月が両端にチラ見え）。上＝その月のPOP・制作物、下＝その月の販促。押すと詳細へ。◎効いた/△要改善</span></div>
-    <div class="pcar" role="list">${carCards}</div>${legend}`;
+    <div class="mmhd" style="margin-top:16px">販促 年間チャート<span class="mmhint">${pv === "gantt" ? "帯＝実施期間（横軸＝月）。帯や販促名を押すと詳細へ。" : "横スクロールで月移動（前後の月がチラ見え）。上＝POP、下＝販促。"}◎効いた/△要改善</span></div>
+    ${pvTabs}
+    ${promoBody}${legend}`;
 }
 
 // 月次の推移を「1行＝1ヶ月」の一覧にする。年間まとめではなく、月ごとの結果（売上・前年比・
