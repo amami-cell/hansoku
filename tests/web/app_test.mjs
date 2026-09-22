@@ -1033,6 +1033,15 @@ test("creativesForMonth：実施中の各施策1枚だけ＋同じ資料は月�
   };
   const ctx2 = loadApp(shared);
   assert.equal(call(ctx2, `creativesForMonth("1160","2025-09").length`), 1, "同一URLは月内で1枚に畳む");
+
+  // 未来の月（当月より先）はPOPを出さない＝まだ販売していない予定販促にPOPが並ばない。
+  const future = {
+    ...annualData,
+    campaigns: [{ id: "xmas", stores: ["1160"], scope_all: false, title: "クリスマス", kind: "dev", bucket: "ケーキ", start: "2099-12-01", end: "2099-12-25" }],
+    creatives: [{ id: "x1", campaign_id: "xmas", mime: "image/png", url: "/creatives/xmas.png", thumb: "/creatives/xmas.png", title: "クリスマスPOP" }],
+  };
+  const cf = loadApp(future);
+  assert.equal(call(cf, `creativesForMonth("1160","2099-12").length`), 0, "未来の月はPOPを出さない（予定扱い）");
 });
 
 test("creativesForCampaign：同じ資料（画像POPとPDFが同名）はURLが違っても1枚に畳む", () => {

@@ -1956,9 +1956,12 @@ function dedupeCreatives(list) {
 // 施策に紐づく制作物（台帳＋アップロード両方）。同じ資料は1枚に畳む。
 const creativesForCampaign = id => dedupeCreatives(allCreatives().filter(cr => cr.campaign_id === id));
 // その店・その月（YYYY-MM）に出す制作物。＝その月に販売している（実施中の）施策のPOP。
-// ルール：その月に実施中の施策ごとに「1枚だけ」出す。さらに同じ資料（同一URL）は
-// 施策をまたいで重複表示しない。＝1つの月に同じPOPが2〜3枚並ぶのを防ぐ。
+// ルール：
+//   ・未来の月（当月より先）にはPOPを出さない。まだ販売していない予定販促にPOPが
+//     並ぶのはおかしいので、当月までに実施中の販促だけPOPを出す（先の月は「予定」）。
+//   ・その月に実施中の施策ごとに1枚だけ。同じ資料（同一URL/同名）は月内で被らせない。
 function creativesForMonth(code, m) {
+  if (m > CURRENT_MONTH) return [];   // 未来の月はPOPを出さない（予定扱い）
   const camps = (DATA.campaigns || []).filter(c =>
     (c.stores || []).includes(code) && c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m);
   const seenUrl = new Set(), seenSig = new Set(); const out = [];
@@ -4615,7 +4618,7 @@ function storeAnnualChart(code, year) {
     const pops = crs.length
       ? `<div class="pcar-pops">${crs.map(popThumb).join("")}</div>`
       : inMonth.length
-        ? `<div class="pcar-pops empty"><span class="pcar-none">${m >= CURRENT_MONTH ? "予定（POPは作成後に反映）" : "POP・制作物なし"}</span></div>`
+        ? `<div class="pcar-pops empty"><span class="pcar-none">${m > CURRENT_MONTH ? "予定" : "POP・制作物なし"}</span></div>`
         : "";
     const chips = inMonth.length
       ? `<div class="pcar-camps">${inMonth.map(campChip).join("")}</div>`
