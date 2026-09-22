@@ -1005,6 +1005,24 @@ test("storeAnnualChart：年間チャート（帯・一覧）に切り替える�
   assert.ok(/class="gbar[^"]*"[^>]*data-tip="[^"]*｜/.test(html), "帯に構造化ツールチップ(data-tip)");
 });
 
+test("creativesForMonth：同じ画像（同一URL）が別施策に紐づいても月内で1枚に畳む", () => {
+  const dup = {
+    ...annualData,
+    creatives: [
+      { id: "a1", campaign_id: "snow", mime: "image/png", url: "/creatives/pop.png", thumb: "/creatives/pop.png", title: "共通POP" },
+      { id: "a2", campaign_id: "cake9", mime: "image/png", url: "/creatives/pop.png", thumb: "/creatives/pop.png", title: "共通POP(別施策登録)" },
+      { id: "b1", campaign_id: "snow", mime: "image/png", url: "/creatives/other.png", thumb: "/creatives/other.png", title: "別POP" },
+    ],
+  };
+  const ctx = loadApp(dup);
+  // 2025-09 は snow と cake9 の両方が実施中。同一URLは1枚、別URLはもう1枚＝計2枚。
+  const n = call(ctx, `creativesForMonth("1160","2025-09").length`);
+  assert.equal(n, 2, "同一URLは1枚に畳む（重複を出さない）");
+  // snow のみ実施中の 2025-08 は共通POP＋別POP＝2枚（cake9由来の重複は出ない）。
+  const n8 = call(ctx, `creativesForMonth("1160","2025-08").length`);
+  assert.equal(n8, 2, "1施策の月でも同一URLは重複しない");
+});
+
 test("renderStoreMonth：予算があれば売上カードに予算比ピル＋予算サブが出る（Steppy風）", () => {
   const withBud = { ...annualData, budget: { 1160: { "2025-08": 8000000 } } };
   const ctx = loadApp(withBud);

@@ -1937,7 +1937,8 @@ const allCreatives = () => (DATA.creatives || []).concat(UPLOADED_CREATIVES);
 // 施策に紐づく制作物（台帳＋アップロード両方）
 const creativesForCampaign = id => allCreatives().filter(cr => cr.campaign_id === id);
 // その店・その月（YYYY-MM）に掛かる制作物。＝その月に実施中の施策に紐づくPOP/PDFを集める。
-// 同じ制作物が複数施策にまたがっても1回だけ（id→urlで重複排除）。
+// 同じ画像ファイルが複数施策にまたがって登録されていても1枚だけにする。重複判定は
+// ファイル実体（url→thumb）を優先（同じ画像は id が違っても1枚に畳む）。
 function creativesForMonth(code, m) {
   const ids = new Set((DATA.campaigns || [])
     .filter(c => (c.stores || []).includes(code) && c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m)
@@ -1945,7 +1946,7 @@ function creativesForMonth(code, m) {
   const seen = new Set(); const out = [];
   for (const cr of allCreatives()) {
     if (!ids.has(cr.campaign_id)) continue;
-    const key = cr.id || cr.url; if (seen.has(key)) continue;
+    const key = cr.url || cr.thumb || cr.id; if (seen.has(key)) continue;
     seen.add(key); out.push(cr);
   }
   return out;
