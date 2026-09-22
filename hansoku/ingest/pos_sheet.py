@@ -78,6 +78,7 @@ def build_rows(
     rows: list[ActualRow] = []
     header: list[str] | None = None
 
+    zeros: list[str] = []
     for index, raw in enumerate(reader.values(TAB), start=1):
         if not raw:
             continue
@@ -122,13 +123,31 @@ def build_rows(
             text = at.get(name, "")
             if not text:
                 continue      # 空欄は「未取得」。0 として入れない
+            value = parse_amount(text)
+            if value <= 0:
+                # ⚠️ **0 は「売上ゼロ」ではなく「まだその口に無い」。**
+                # 実測（2026-09-22）で 1766 の 2026-04〜07 が 0 だった。店が
+                # 動いていればあり得ない数字で、新Uレジを使い始める前の月という
+                # 意味しかない。
+                #
+                # それでも 0 を入れると危ない。この口は kind=確定 かつ
+                # SOURCE_PRIORITY 最優先なので、**あとからFWが本当の値を入れても
+                # この 0 が勝ち続ける**（画面は 0 のまま）。1766 はFW連携が予定
+                # されているので、近いうちに必ず踏む。
+                #
+                # pos-sync 側で原価 0 を「未登録」として載せないのと同じ扱いにする。
+                # ⚠️ **report.skipped には入れない。** looks_broken() が
+                # skipped を異常とみなすので、0 が1件あるだけでジョブが赤くなる。
+                # 0 は異常ではなく「まだ無い」。黙らせずに印字だけする。
+                zeros.append(f"{store.store_code} {period:%Y-%m} の{name}")
+                continue
             rows.append(
                 ActualRow(
                     store_code=store.store_code,
                     date=period,
                     grain=GRAIN_MONTH,
                     metric=metric,
-                    value=parse_amount(text),
+                    value=value,
                     # **確定として入れる。** 集計の採用順は
                     #   ① 確定かどうか → ② SOURCE_PRIORITY → ③ 取込日時
                     # で、kind が先に効く。付け忘れると、FWが書いた「確定の 0」に
@@ -141,6 +160,11 @@ def build_rows(
             )
 
     report.rows_built = len(rows)
+    if zeros:
+        # **0 を黙って捨てない。** どの店のどの月の何が来ていないかを毎回出す。
+        # 「入れなかった」と「そもそも無かった」を後から区別できるようにする。
+        print(f"[{TAB}] 0 は未取得として入れませんでした（{len(zeros)}件）: "
+              + " / ".join(zeros[:12]) + (" …" if len(zeros) > 12 else ""))
     return rows, report
 
 
