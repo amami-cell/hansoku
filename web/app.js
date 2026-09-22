@@ -1940,21 +1940,34 @@ async function fetchServerCreatives() {
   } catch (e) { /* API 無し → 台帳ぶんだけ表示 */ }
 }
 const allCreatives = () => (DATA.creatives || []).concat(UPLOADED_CREATIVES);
-// 施策に紐づく制作物（台帳＋アップロード両方）
-const creativesForCampaign = id => allCreatives().filter(cr => cr.campaign_id === id);
+// 同じ資料の重複を畳む。URLが違っても（例：台帳の画像POPとアップロードのPDFが同じデザイン）、
+// 「同じ施策 × ほぼ同じ名前」なら1枚に集約する。名前は POP/PDF/資料 等の飾り語と空白を無視。
+const creativeSig = cr => (cr.campaign_id || "") + "|" +
+  String(cr.title || "").replace(/\s+/g, "").replace(/POP|ＰＯＰ|PDF|ＰＤＦ|資料|チラシ|告知|画像/gi, "");
+function dedupeCreatives(list) {
+  const seenUrl = new Set(), seenSig = new Set(); const out = [];
+  for (const cr of list) {
+    const u = cr.url || cr.thumb, sig = creativeSig(cr);
+    if ((u && seenUrl.has(u)) || seenSig.has(sig)) continue;
+    if (u) seenUrl.add(u); seenSig.add(sig); out.push(cr);
+  }
+  return out;
+}
+// 施策に紐づく制作物（台帳＋アップロード両方）。同じ資料は1枚に畳む。
+const creativesForCampaign = id => dedupeCreatives(allCreatives().filter(cr => cr.campaign_id === id));
 // その店・その月（YYYY-MM）に出す制作物。＝その月に販売している（実施中の）施策のPOP。
 // ルール：その月に実施中の施策ごとに「1枚だけ」出す。さらに同じ資料（同一URL）は
 // 施策をまたいで重複表示しない。＝1つの月に同じPOPが2〜3枚並ぶのを防ぐ。
 function creativesForMonth(code, m) {
   const camps = (DATA.campaigns || []).filter(c =>
     (c.stores || []).includes(code) && c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m);
-  const seen = new Set(); const out = [];
+  const seenUrl = new Set(), seenSig = new Set(); const out = [];
   for (const c of camps) {
     for (const cr of allCreatives()) {
       if (cr.campaign_id !== c.id) continue;
-      const key = cr.url || cr.thumb || cr.id;
-      if (seen.has(key)) continue;   // 既に出した資料は飛ばして、その施策の別の資料を探す
-      seen.add(key); out.push(cr);
+      const u = cr.url || cr.thumb, sig = creativeSig(cr);
+      if ((u && seenUrl.has(u)) || seenSig.has(sig)) continue;  // 既出の資料は飛ばす
+      if (u) seenUrl.add(u); seenSig.add(sig); out.push(cr);
       break;                          // この施策のPOPは1枚だけ
     }
   }

@@ -1035,6 +1035,21 @@ test("creativesForMonth：実施中の各施策1枚だけ＋同じ資料は月�
   assert.equal(call(ctx2, `creativesForMonth("1160","2025-09").length`), 1, "同一URLは月内で1枚に畳む");
 });
 
+test("creativesForCampaign：同じ資料（画像POPとPDFが同名）はURLが違っても1枚に畳む", () => {
+  // 同じ施策の同じデザインが、台帳の画像POPとアップロードPDFで二重登録されるケース。
+  const dup = {
+    ...annualData,
+    creatives: [
+      { id: "img", campaign_id: "cake9", mime: "image/png", url: "/creatives/a.png", thumb: "/creatives/a.png", title: "5月ケーキ POP" },
+      { id: "pdf", campaign_id: "cake9", mime: "application/pdf", url: "/creatives/a.pdf", title: "5月ケーキ" },
+      { id: "other", campaign_id: "cake9", mime: "image/png", url: "/creatives/b.png", thumb: "/creatives/b.png", title: "9月ケーキ 裏面" },
+    ],
+  };
+  const ctx = loadApp(dup);
+  // 「5月ケーキ POP」と「5月ケーキ」は同施策×同名(飾り語無視)→1枚。別デザイン(9月ケーキ)は残る＝計2。
+  assert.equal(call(ctx, `creativesForCampaign("cake9").length`), 2, "同名の重複は畳み、別資料は残す");
+});
+
 test("renderStoreMonth：予算があれば売上カードに予算比ピル＋予算サブが出る（Steppy風）", () => {
   const withBud = { ...annualData, budget: { 1160: { "2025-08": 8000000 } } };
   const ctx = loadApp(withBud);
