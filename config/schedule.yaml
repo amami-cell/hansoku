@@ -123,21 +123,32 @@ campaigns:
   - { id: r1154-bounenkai, stores: ["1154"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" }
 
   # ── ルクアLargo（1160）─────────────────────────────
-  # NOTE: 画像3「日別スケジュール(largo)」の2026年間ライン（ケーキ/パフェ/コラボ）は
-  #       このルクアLargo が対象。ただし2026は変更が出る可能性あり → 確定版が来たら
-  #       ここに追記する（2025は確定実績。前年比較の土台に使う）。
-  - { id: r1160-osusume, stores: ["1160"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-09-30",
-      note: "秋の対象商品リストが決まり次第 items に入れて効果を計測します（現在は店長リスト待ちで保留）。" }
-  # ケーキ/パフェ/ジェラートはFWの"部門"として独立（1160の直近ABCで確認）。bucket=部門名で
-  # 部門実績＋構成比を月次表示、items=商品キーワードで「表示」に商品内訳を出す。
-  # 前年2025-12は『クリスマスケーキプレート』¥76,800 が立っている（12月はこれで見る）。
-  - { id: r1160-cake, stores: ["1160"], title: ケーキ, kind: dev, bucket: ケーキ,
-      items: ["ケーキ", "タルト", "フレジェ", "バスク", "シャルロット", "ベイクドアラスカ", "ミルフィーユ"],
-      start: "2026-09-01", end: "2026-09-30", note: "FW部門『ケーキ』。LARGOケーキプレート/白桃のジュエルタルト等" }
-  - { id: r1160-parfait, stores: ["1160"], title: パフェ（うち“パフェスノー”は夏限定おすすめ）, kind: dev, bucket: パフェ,
-      items: ["パフェ"],
-      start: "2026-09-15", end: "2026-10-31",
-      note: "FW部門『パフェ』（当店最大）。“パフェスノー”(夏いちご/マンゴー/メロン等)は夏限定のおすすめ→夏のみ計上、春など直近非シーズンは空欄。月次の商品内訳(表示)で季節性がそのまま見えます。" }
+  # NOTE: 2026 の確定販促（スプレッドシート「日別スケジュールlargo（実績一覧）」）を 2026-09-22 に反映。
+  #   bucket=FW部門（ケーキ/パフェ/コラボ）で部門実績＋構成比を月次表示、items=商品キーワードで昨対比。
+  #   KPI（区分×月）は施策ごとに「その販売期間がまたぐ月のKPI合計」を売上目標にして promo_targets へ取込
+  #   （scripts/import_largo_targets.py）。実績はFWから自動。制作物POPはファイルが来たら creatives.yaml で紐づけ。
+  # ── ケーキ（bucket=ケーキ）──
+  - { id: r1160-cake-2603, stores: ["1160"], title: フォンダン⇒ミルクレープ切替, kind: dev, bucket: ケーキ, items: [ミルクレープ, フォンダン], start: "2026-03-19", end: "2026-04-30" }
+  - { id: r1160-cake-2605, stores: ["1160"], title: ケーキ 2種新規2種既存, kind: dev, bucket: ケーキ, start: "2026-05-01", end: "2026-06-30" }
+  - { id: r1160-cake-2607, stores: ["1160"], title: 夏ケーキ, kind: dev, bucket: ケーキ, start: "2026-07-01", end: "2026-08-31" }
+  - { id: r1160-cake-2609, stores: ["1160"], title: 秋ケーキ4種（ルージュヴェール）, kind: dev, bucket: ケーキ, items: [ルージュ, ヴェール, 栗, いちじく, シャインマスカット], start: "2026-09-01", end: "2026-11-30" }
+  - { id: r1160-cake-2612, stores: ["1160"], title: クリスマスケーキ, kind: dev, bucket: ケーキ, items: [クリスマス, ノエル, サンタ], start: "2026-12-01", end: "2026-12-25" }
+  - { id: r1160-cake-2701, stores: ["1160"], title: 1月ケーキ（既存より選定）, kind: dev, bucket: ケーキ, start: "2026-12-26", end: "2027-01-31" }
+  - { id: r1160-cake-2702, stores: ["1160"], title: バレンタイン⇒いちごケーキ, kind: dev, bucket: ケーキ, items: [バレンタイン, いちご, 苺], start: "2027-02-01", end: "2027-02-14" }
+  # ── 季節パフェ（bucket=パフェ）──
+  - { id: r1160-parfait-2603, stores: ["1160"], title: 苺パフェ2種（ショートケーキ/ミルフィーユ）, kind: dev, bucket: パフェ, items: [ショートケーキ, ミルフィーユ, 苺], start: "2026-03-02", end: "2026-05-07" }
+  - { id: r1160-parfait-2605, stores: ["1160"], title: メロンパフェ, kind: dev, bucket: パフェ, items: [メロン], start: "2026-05-08", end: "2026-07-12" }
+  - { id: r1160-parfait-2607, stores: ["1160"], title: パフェスノー（夏限定・4種）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー, スパークリング], start: "2026-07-01", end: "2026-09-15", note: "スノー系＋スパークリングジュレのパフェも対象" }
+  - { id: r1160-parfait-2609, stores: ["1160"], title: いちじくパフェ, kind: dev, bucket: パフェ, items: [オトンヌ, アペティ, いちじく, イチジク, 無花果], start: "2026-09-16", end: "2026-10-31" }
+  - { id: r1160-parfait-halloween26, stores: ["1160"], title: ハロウィンパフェ, kind: dev, bucket: パフェ, items: [ポイズン, ハロウィン], start: "2026-10-19", end: "2026-10-31" }
+  - { id: r1160-parfait-2611, stores: ["1160"], title: シャインマスカット→11月末ルレクチェ, kind: dev, bucket: パフェ, items: [シャインマスカット, ルレクチェ, ル・レクチェ, レクチェ], start: "2026-11-01", end: "2026-11-30" }
+  - { id: r1160-parfait-2612, stores: ["1160"], title: ノエル（クリスマスパフェ）, kind: dev, bucket: パフェ, items: [ノエル, クリスマス, サンタ], start: "2026-12-01", end: "2026-12-25" }
+  - { id: r1160-parfait-2701, stores: ["1160"], title: みかんパフェ, kind: dev, bucket: パフェ, items: [マンダリン, みかん, 蜜柑], start: "2026-12-26", end: "2027-01-31" }
+  - { id: r1160-parfait-2702, stores: ["1160"], title: 苺パフェ, kind: dev, bucket: パフェ, items: [苺, いちご, ショートケーキ], start: "2027-02-01", end: "2027-02-28" }
+  # ── コラボ（bucket=コラボ）──
+  - { id: r1160-collab-kaeru, stores: ["1160"], title: かえるのピクルスコラボ, kind: dev, bucket: コラボ, items: [かえる, ピクルス], start: "2026-06-12", end: "2026-06-25" }
+  - { id: r1160-collab-hakuto26, stores: ["1160"], title: 白桃DAYSコラボ, kind: dev, bucket: コラボ, items: [白桃, アンシャンター], start: "2026-07-21", end: "2026-07-26" }
+  - { id: r1160-collab-kumamoto26, stores: ["1160"], title: 熊本コラボ, kind: dev, bucket: コラボ, items: [くまもと, くまモン, クマモン, パタット, 晩白柚], start: "2026-11-01", end: "2026-11-30" }
 
   # ── ルクアLargo 2025→2026サイクルの「回」（前年実績＋POPの受け皿）─────────
   #   ケーキ枠・パフェ枠・コラボ枠を回ごとに。各回のページにPOPを紐づけて貼る。
@@ -268,10 +279,8 @@ campaigns:
   - { id: s1137-natsu, stores: ["1137"], title: 夏のおすすめ（新規）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
   - { id: s1154-natsu, stores: ["1154"], title: 夏のおすすめ（新規）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
   # 兄弟枠に合わせて測り方を補完（bucket/items 未設定だと効果が出ない）。
-  #   パフェ（スノー）=夏のスノーパフェ → c1160-parfait-snow と同じ items で昨対・前回比。
-  #   ケーキ=夏のケーキ枠 → c1160-cake-* と同じく bucket=ケーキ。
-  - { id: s1160-parfait, stores: ["1160"], title: パフェ（スノー）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー, スパークリング], start: "2026-07-01", end: "2026-09-23", note: "スノー系＋スパークリングジュレのパフェも対象" }
-  - { id: s1160-cake, stores: ["1160"], title: ケーキ, kind: dev, bucket: ケーキ, start: "2026-07-01", end: "2026-08-31" }
+  #   ※1160の夏枠（旧 s1160-parfait/s1160-cake）は 2026確定販促（r1160-*-2607 夏ケーキ／
+  #     r1160-parfait-2607 パフェスノー）へ統合したため削除。
   - { id: s1713-kakigori, stores: ["1713"], title: かき氷フェア, kind: dev, start: "2026-07-13", end: "2026-09-04" }
   - { id: s1162-natsu, stores: ["1162"], title: 夏おすすめ（1品新規）, kind: osusume, start: "2026-07-01", end: "2026-08-31" }
   - { id: s1739-natsu, stores: ["1739"], title: ランチ&夏おすすめ（ランチ2品・夏新規）, kind: osusume, start: "2026-06-15", end: "2026-08-31" }
