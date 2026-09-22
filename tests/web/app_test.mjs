@@ -1005,24 +1005,34 @@ test("storeAnnualChart：年間チャート（帯・一覧）に切り替える�
   assert.ok(/class="gbar[^"]*"[^>]*data-tip="[^"]*｜/.test(html), "帯に構造化ツールチップ(data-tip)");
 });
 
-test("creativesForMonth：POPは施策の開始月だけに出す（毎月被らない）＋同一URLは1枚に畳む", () => {
-  // snow=開始2025-06、cake9=開始2025-09（annualData）。
+test("creativesForMonth：実施中の各施策1枚だけ＋同じ資料は月内で被らせない", () => {
+  // snow=2025-06〜09、cake9=2025-09〜11（annualData）。snowにPOP2枚（同月でも1枚に絞る）。
   const dup = {
     ...annualData,
     creatives: [
-      { id: "a1", campaign_id: "snow", mime: "image/png", url: "/creatives/pop.png", thumb: "/creatives/pop.png", title: "共通POP" },
-      { id: "a2", campaign_id: "snow", mime: "image/png", url: "/creatives/pop.png", thumb: "/creatives/pop.png", title: "共通POP(重複登録)" },
-      { id: "b1", campaign_id: "snow", mime: "image/png", url: "/creatives/other.png", thumb: "/creatives/other.png", title: "別POP" },
-      { id: "c1", campaign_id: "cake9", mime: "image/png", url: "/creatives/cake.png", thumb: "/creatives/cake.png", title: "ケーキPOP" },
+      { id: "a1", campaign_id: "snow", mime: "image/png", url: "/creatives/snow1.png", thumb: "/creatives/snow1.png", title: "snowPOP1" },
+      { id: "a2", campaign_id: "snow", mime: "image/png", url: "/creatives/snow2.png", thumb: "/creatives/snow2.png", title: "snowPOP2" },
+      { id: "c1", campaign_id: "cake9", mime: "image/png", url: "/creatives/cake.png", thumb: "/creatives/cake.png", title: "cakePOP" },
     ],
   };
   const ctx = loadApp(dup);
-  // 開始月 2025-06：snowのPOP。同一URL(pop.png)は1枚＋other.png＝計2枚。
-  assert.equal(call(ctx, `creativesForMonth("1160","2025-06").length`), 2, "開始月は出す・同一URLは1枚");
-  // 実施中でも“開始しない”月（2025-07）は出さない＝毎月被らせない（今回の要点）。
-  assert.equal(call(ctx, `creativesForMonth("1160","2025-07").length`), 0, "実施中でも開始月でなければ出さない");
-  // 別施策 cake9 の開始月 2025-09 は cake9 のPOPだけ。
-  assert.equal(call(ctx, `creativesForMonth("1160","2025-09").length`), 1, "他施策の開始月はその施策のPOPだけ");
+  // 実施中の月（snowのみ）は、snowのPOPが何枚あっても1枚だけ。
+  assert.equal(call(ctx, `creativesForMonth("1160","2025-07").length`), 1, "実施中でも各施策1枚だけ");
+  // 実施中でない月は出さない。
+  assert.equal(call(ctx, `creativesForMonth("1160","2025-05").length`), 0, "実施していない月は出さない");
+  // snow+cake9 の両方が実施中の月は各1枚＝2枚（施策ごと）。
+  assert.equal(call(ctx, `creativesForMonth("1160","2025-09").length`), 2, "実施中の施策ごとに1枚");
+
+  // 同じ資料(URL)が別施策にまたがっても、月内では1枚だけ（被らせない）。
+  const shared = {
+    ...annualData,
+    creatives: [
+      { id: "s1", campaign_id: "snow", mime: "image/png", url: "/creatives/same.png", thumb: "/creatives/same.png", title: "共通POP" },
+      { id: "s2", campaign_id: "cake9", mime: "image/png", url: "/creatives/same.png", thumb: "/creatives/same.png", title: "共通POP(別施策)" },
+    ],
+  };
+  const ctx2 = loadApp(shared);
+  assert.equal(call(ctx2, `creativesForMonth("1160","2025-09").length`), 1, "同一URLは月内で1枚に畳む");
 });
 
 test("renderStoreMonth：予算があれば売上カードに予算比ピル＋予算サブが出る（Steppy風）", () => {

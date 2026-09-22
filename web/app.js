@@ -1942,19 +1942,21 @@ async function fetchServerCreatives() {
 const allCreatives = () => (DATA.creatives || []).concat(UPLOADED_CREATIVES);
 // 施策に紐づく制作物（台帳＋アップロード両方）
 const creativesForCampaign = id => allCreatives().filter(cr => cr.campaign_id === id);
-// その店・その月（YYYY-MM）に出す制作物。＝その月に「開始する」施策に紐づくPOP/PDF。
-// 販売期間が複数月にまたがる施策のPOPを毎月出すと、同じPOPが3月・4月…と延々に被って
-// しまうため、POPは施策の“開始月（掲出タイミング）”にだけ1回出す。
-// 同じ画像ファイルが複数施策に登録されていても1枚に畳む（url→thumb→id で重複判定）。
+// その店・その月（YYYY-MM）に出す制作物。＝その月に販売している（実施中の）施策のPOP。
+// ルール：その月に実施中の施策ごとに「1枚だけ」出す。さらに同じ資料（同一URL）は
+// 施策をまたいで重複表示しない。＝1つの月に同じPOPが2〜3枚並ぶのを防ぐ。
 function creativesForMonth(code, m) {
-  const ids = new Set((DATA.campaigns || [])
-    .filter(c => (c.stores || []).includes(code) && c.start.slice(0, 7) === m)
-    .map(c => c.id));
+  const camps = (DATA.campaigns || []).filter(c =>
+    (c.stores || []).includes(code) && c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m);
   const seen = new Set(); const out = [];
-  for (const cr of allCreatives()) {
-    if (!ids.has(cr.campaign_id)) continue;
-    const key = cr.url || cr.thumb || cr.id; if (seen.has(key)) continue;
-    seen.add(key); out.push(cr);
+  for (const c of camps) {
+    for (const cr of allCreatives()) {
+      if (cr.campaign_id !== c.id) continue;
+      const key = cr.url || cr.thumb || cr.id;
+      if (seen.has(key)) continue;   // 既に出した資料は飛ばして、その施策の別の資料を探す
+      seen.add(key); out.push(cr);
+      break;                          // この施策のPOPは1枚だけ
+    }
   }
   return out;
 }
