@@ -702,7 +702,8 @@ def cmd_creatives_sync(args: argparse.Namespace) -> int:
             print(f"[creatives] 既にR2にあり（スキップ）: {key}")
             skipped += 1
             continue
-        ctype = "application/pdf" if local.suffix.lower() == ".pdf" else "application/octet-stream"
+        from .web.export import _mime_for_key
+        ctype = _mime_for_key(key) or "application/octet-stream"
         store.put(key, local.read_bytes(), content_type=ctype)
         print(f"[creatives] R2へ: {key}（{local.stat().st_size:,} bytes）")
         put += 1

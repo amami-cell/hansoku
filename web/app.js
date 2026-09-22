@@ -2722,6 +2722,28 @@ function rerenderPanels() {
   if (SHEET_TABS.length) renderSheet();
 }
 
+// ⛶：品目構成の中身を、実ブラウザの新規タブに単独ページとして開く（アプリ内全画面にしない）。
+// 同一オリジンなので styles.css をそのまま読み込む。表示専用（並び替え等の操作は小窓側で）。
+function openPanelInNewTab(desc) {
+  const c = panelContent(desc);
+  const w = window.open("", "_blank");
+  if (!w) { alert("ブラウザにポップアップを止められました。ポップアップを許可すると別タブで開けます。"); return; }
+  const doc = `<!doctype html><html lang="ja"><head><meta charset="utf-8">` +
+    `<meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<title>${esc(c.title)}｜品目構成</title>` +
+    `<link rel="stylesheet" href="styles.css?v=__BUILD__">` +
+    `<style>body{margin:0;padding:16px 16px 40px;background:var(--surface,#fff);color:var(--ink,#111);` +
+    `font:14px/1.5 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;}` +
+    `.fwtabwrap{max-width:760px;margin:0 auto;}` +
+    `.fwtab-h{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:16px;}` +
+    `.fwtab-h .fw-sub{font-size:12px;color:var(--ink-3,#888);font-weight:400;}` +
+    `.fw-list{list-style:none;margin:0;padding:0;}</style></head><body>` +
+    `<div class="fwtabwrap"><div class="fwtab-h"><span class="fw-dot" style="background:${c.color};width:12px;height:12px;border-radius:3px;display:inline-block"></span>` +
+    `<b>${esc(c.title)}</b><span class="fw-sub">${c.sub}</span></div>` +
+    `<ul class="fw-list">${c.list}</ul></div></body></html>`;
+  w.document.open(); w.document.write(doc); w.document.close();
+}
+
 // ── PC：浮く小ウインドウ（複数・ドラッグ移動・角で自由リサイズ・⤢で既定サイズ）──────
 // 小窓の中身（頭・トグル・一覧）を描画して配線。トグル操作の再描画でも使い回す。
 function renderWindowBody(win) {
@@ -2746,15 +2768,11 @@ function renderWindowBody(win) {
     win.style.top = tall ? "8px" : win.style.top; // 上端に寄せて縦を使い切る
     fwinFront(win);
   });
-  // ⛶＝全画面（別タブで開いたときのイメージ）。対応ブラウザは Fullscreen API、
-  // 使えないときは擬似全画面（画面いっぱいの固定オーバーレイ）にフォールバックする。
+  // ⛶＝この中身を「別のブラウザタブ」で開く（アプリ内の全画面ではなく、実ブラウザの新規タブ）。
+  // 端末の既定ブラウザ／新規タブで大きく見たい・印刷したい向け。ポップアップ阻止時は案内する。
   win.querySelector(".fw-full").addEventListener("click", e => {
     e.stopPropagation();
-    if (document.fullscreenElement === win) { document.exitFullscreen && document.exitFullscreen(); return; }
-    if (win.classList.contains("fw-full-fb")) { win.classList.remove("fw-full-fb"); return; }
-    if (win.requestFullscreen) win.requestFullscreen().catch(() => win.classList.add("fw-full-fb"));
-    else win.classList.add("fw-full-fb");
-    fwinFront(win);
+    openPanelInNewTab(win._desc);
   });
   fwinDrag(win, win.querySelector(".fw-head"));
   wirePanelRows(win);
