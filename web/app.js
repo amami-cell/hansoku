@@ -2722,26 +2722,52 @@ function rerenderPanels() {
   if (SHEET_TABS.length) renderSheet();
 }
 
-// ⛶：品目構成の中身を、実ブラウザの新規タブに単独ページとして開く（アプリ内全画面にしない）。
-// 同一オリジンなので styles.css をそのまま読み込む。表示専用（並び替え等の操作は小窓側で）。
+// ⛶：品目構成の中身を、実ブラウザの新規タブに「フル機能の単独ページ(panel.html)」で開く。
+// panel.html は同じ app.js を読み込み、並び替え・構成比基準・内訳の開閉まで小窓と同じに動く。
 function openPanelInNewTab(desc) {
+  const p = new URLSearchParams();
+  p.set("kind", desc.kind);
+  p.set("code", desc.code);
+  p.set("m", desc.m);
+  if (desc.kind === "cat" && desc.cat != null) p.set("cat", desc.cat);
+  const w = window.open("panel.html?" + p.toString(), "_blank");
+  if (!w) alert("ブラウザにポップアップを止められました。ポップアップを許可すると別タブで開けます。");
+}
+// panel.html 専用の起動。品目構成パネルだけを1ページに、フル機能（並び替え・構成比基準・
+// 内訳の開閉・区分ドリル）で描く。DATA は index と同じ <script> 先読み経路で読む。
+async function bootPanel() {
+  DATA = await loadDashboard();
+  if (!DATA) return;   // 失敗時は loadDashboard が理由を出す
+  const q = new URLSearchParams(location.search);
+  const kind = q.get("kind") === "month" ? "month" : "cat";
+  const desc = kind === "month"
+    ? { kind: "month", code: q.get("code"), m: q.get("m") }
+    : { kind: "cat", code: q.get("code"), m: q.get("m"), cat: q.get("cat") || "" };
+  renderPanelPage(desc);
+}
+function renderPanelPage(desc) {
   const c = panelContent(desc);
-  const w = window.open("", "_blank");
-  if (!w) { alert("ブラウザにポップアップを止められました。ポップアップを許可すると別タブで開けます。"); return; }
-  const doc = `<!doctype html><html lang="ja"><head><meta charset="utf-8">` +
-    `<meta name="viewport" content="width=device-width,initial-scale=1">` +
-    `<title>${esc(c.title)}｜品目構成</title>` +
-    `<link rel="stylesheet" href="styles.css?v=__BUILD__">` +
-    `<style>body{margin:0;padding:16px 16px 40px;background:var(--surface,#fff);color:var(--ink,#111);` +
-    `font:14px/1.5 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;}` +
-    `.fwtabwrap{max-width:760px;margin:0 auto;}` +
-    `.fwtab-h{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:16px;}` +
-    `.fwtab-h .fw-sub{font-size:12px;color:var(--ink-3,#888);font-weight:400;}` +
-    `.fw-list{list-style:none;margin:0;padding:0;}</style></head><body>` +
-    `<div class="fwtabwrap"><div class="fwtab-h"><span class="fw-dot" style="background:${c.color};width:12px;height:12px;border-radius:3px;display:inline-block"></span>` +
+  document.title = `${c.title}｜品目構成`;
+  const el = document.getElementById("panelpage");
+  el.innerHTML =
+    `<div class="fwtab-h"><span class="fw-dot" style="background:${c.color}"></span>` +
     `<b>${esc(c.title)}</b><span class="fw-sub">${c.sub}</span></div>` +
-    `<ul class="fw-list">${c.list}</ul></div></body></html>`;
-  w.document.open(); w.document.write(doc); w.document.close();
+    panelCtrl() +
+    `<ul class="fw-list">${c.list}</ul>`;
+  // 並び替え・構成比基準：変更したらこのページを描き直す（小窓の rerenderPanels と同じ役割）。
+  el.querySelectorAll("[data-panelsort]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); PANEL_SORT = b.dataset.panelsort; renderPanelPage(desc);
+  }));
+  el.querySelectorAll("[data-panelpct]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); PANEL_PCT = b.dataset.panelpct; renderPanelPage(desc);
+  }));
+  // 区分（部門別）の行を押すと、その区分の商品内訳へ同ページ内でドリルする。
+  el.querySelectorAll("[data-compocell]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); const p = b.dataset.compocell.split(":");
+    renderPanelPage({ kind: "cat", code: p[0], m: p[1], cat: decodeURIComponent(p.slice(2).join(":")) });
+  }));
+  // 内訳（詳細表示）の開閉（本体と同じ wireSubToggle）。
+  wireSubToggle(el);
 }
 
 // ── PC：浮く小ウインドウ（複数・ドラッグ移動・角で自由リサイズ・⤢で既定サイズ）──────
@@ -6384,4 +6410,8 @@ function fillNotice() {
      <p class="fine">最終更新 ${gen}</p>`;
 }
 
-document.addEventListener("DOMContentLoaded", boot);
+document.addEventListener("DOMContentLoaded", () => {
+  // panel.html（⛶で開く単独ページ）は品目構成パネルだけを描く。それ以外は通常のアプリ。
+  if (document.getElementById("panelpage")) bootPanel();
+  else boot();
+});
