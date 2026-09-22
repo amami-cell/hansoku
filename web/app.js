@@ -877,13 +877,6 @@ async function boot() {
   GOALS = loadGoals();
   NOTES = loadNotes();
   LOCAL_STATUS = loadStatus();
-  await fetchServerTargets();   // 本番は Neon の共有目標を読む。無ければ端末内保存で動く
-  await fetchServerNotes();     // 要因メモも同様（本番=共有、無ければ端末内）
-  await fetchServerStatus();    // 手動ステータス（本番=共有、無ければ端末内）
-  await fetchServerCreatives(); // アップロード制作物（本番のみ・無ければ台帳ぶんだけ）
-  await fetchServerPlans();     // アプリ内で起票した販促プラン（本番のみ・台帳と統合）
-  await fetchServerMe();        // 誰でログイン中か・書き込めるか（WRITE_OK を確定）
-  paintAccount();
   // URL が指定されていればそれに従う。無ければ「うちの店」。それも無ければ全店。
   if (location.hash && location.hash !== "#") {
     VIEW = hashToView(location.hash);
@@ -895,9 +888,22 @@ async function boot() {
   buildStoreJump();
   wireNav();
   wireSearch();
+  // ① まず先読みDATA＋端末内保存だけで即描画する（サーバ往復＝/api/* を待たない）。
+  //    以前は目標/メモ/ステータス/制作物/プラン/ログインの6往復を直列awaitしてから
+  //    描画していたため、Neon の起き上がり待ち等で初期表示が大きく遅れていた。
   render();
   syncHash(true);
   fillNotice();
+  // ② 共有データ（目標・メモ・ステータス・制作物・プラン・ログイン）は並列で取得し、
+  //    揃った時点で1回だけ描き直す。1本が遅くても初期表示は止めない（allSettled）。
+  Promise.allSettled([
+    fetchServerTargets(),   // Neon の共有目標（無ければ端末内保存）
+    fetchServerNotes(),     // 要因メモ
+    fetchServerStatus(),    // 手動ステータス
+    fetchServerCreatives(), // アップロード制作物
+    fetchServerPlans(),     // アプリ内で起票した販促プラン
+    fetchServerMe(),        // 誰でログイン中か・書き込めるか（WRITE_OK）
+  ]).then(() => { paintAccount(); render(); });
   // 戻る/進むで画面が動くようにする。
   window.addEventListener("popstate", () => {
     if (SUPPRESS_HASH) return;
@@ -1936,12 +1942,13 @@ async function fetchServerCreatives() {
 const allCreatives = () => (DATA.creatives || []).concat(UPLOADED_CREATIVES);
 // 施策に紐づく制作物（台帳＋アップロード両方）
 const creativesForCampaign = id => allCreatives().filter(cr => cr.campaign_id === id);
-// その店・その月（YYYY-MM）に掛かる制作物。＝その月に実施中の施策に紐づくPOP/PDFを集める。
-// 同じ画像ファイルが複数施策にまたがって登録されていても1枚だけにする。重複判定は
-// ファイル実体（url→thumb）を優先（同じ画像は id が違っても1枚に畳む）。
+// その店・その月（YYYY-MM）に出す制作物。＝その月に「開始する」施策に紐づくPOP/PDF。
+// 販売期間が複数月にまたがる施策のPOPを毎月出すと、同じPOPが3月・4月…と延々に被って
+// しまうため、POPは施策の“開始月（掲出タイミング）”にだけ1回出す。
+// 同じ画像ファイルが複数施策に登録されていても1枚に畳む（url→thumb→id で重複判定）。
 function creativesForMonth(code, m) {
   const ids = new Set((DATA.campaigns || [])
-    .filter(c => (c.stores || []).includes(code) && c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m)
+    .filter(c => (c.stores || []).includes(code) && c.start.slice(0, 7) === m)
     .map(c => c.id));
   const seen = new Set(); const out = [];
   for (const cr of allCreatives()) {
