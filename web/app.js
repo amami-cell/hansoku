@@ -418,13 +418,97 @@ async function saveGoalMap(gkey, map) {
     } catch (e) { /* 1指標の失敗で全体を止めない */ }
   }
 }
+// 目標の「▽で選ぶ行」の共通コントローラ。起票フォームと目標ダイアログの両方で使う。
+// getCtx() は「販促風オブジェクト」（stores/bucket/items/start/end/open_ended）を返す。
+function makeGoalRows(container, getCtx, forceEl) {
+  const mtByKey = _mtByKey();
+  const fmtVal = (mt, v) => v == null ? "―" : mt.unit === "円" ? money(v) : mt.unit === "%" ? v + "%" : ten(v) + mt.unit;
+  const bandOptsHtml = selBand => {
+    const code = (getCtx().stores || [])[0] || "";
+    const op = storeBands(code);
+    let list = (forceEl && forceEl.checked) ? TIME_BANDS.slice() : op.slice();
+    if (!list.length) list = TIME_BANDS.slice();
+    if (selBand && !list.some(b => b.key === selBand)) { const b = TIME_BANDS.find(x => x.key === selBand); if (b) list.push(b); }
+    const def = selBand || (list.find(b => b.key === "dinner") || list[0] || {}).key;
+    return list.map(b => `<option value="${b.key}"${b.key === def ? " selected" : ""}>${esc(b.label)}（${esc(b.range)}）</option>`).join("");
+  };
+  const renumber = () => [...container.querySelectorAll(".gr-n")].forEach((el, i) => el.textContent = `目標${i + 1}`);
+  const usedBases = () => [...container.querySelectorAll(".gr-cat")].map(s => s.value);
+  const addRow = (selKey, val) => {
+    const parsed = splitMetric(selKey || "");
+    const base0 = GOAL_CAT_OPTS.some(o => o.key === parsed.base) ? parsed.base : null;
+    const def = base0 || (GOAL_CAT_OPTS.find(o => !usedBases().includes(o.key)) || GOAL_CAT_OPTS[0]).key;
+    const selBand = parsed.band ? parsed.band.key : null;
+    const row = document.createElement("div"); row.className = "gr";
+    row.innerHTML = `<div class="gr-top">
+        <span class="gr-n">目標</span>
+        <select class="pf-in gr-cat">${GOAL_CAT_OPTS.map(o => `<option value="${o.key}"${o.key === def ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select>
+        <select class="pf-in gr-band"${HOUR_METRICS.has(def) ? "" : " hidden"}>${bandOptsHtml(selBand)}</select>
+        <input class="pf-in gr-val" type="number" inputmode="decimal" step="any" value="${val != null && val !== "" ? val : ""}">
+        <button type="button" class="gr-fill" title="目安（直近実績±2%）を入れる">目安</button>
+        <button type="button" class="gr-del" title="この目標を削除" aria-label="削除">×</button>
+      </div>
+      <div class="gr-help"></div>`;
+    container.appendChild(row);
+    const sel = row.querySelector(".gr-cat"), bandSel = row.querySelector(".gr-band");
+    const inp = row.querySelector(".gr-val"), help = row.querySelector(".gr-help");
+    const effKey = () => HOUR_METRICS.has(sel.value) ? `${sel.value}#${bandSel.value}` : sel.value;
+    row._effKey = effKey;
+    const refresh = () => {
+      const c = getCtx();
+      const mt = mtByKey[sel.value]; if (!mt) return;
+      const isHour = HOUR_METRICS.has(sel.value);
+      bandSel.hidden = !isHour;
+      const ref = goalRef(c, effKey());
+      const base = ref.base;
+      const f = mt.higher ? 1.02 : 0.98;
+      const suggest = base == null ? null : (mt.unit === "%" ? Math.round(base * f * 10) / 10 : Math.round(base * f));
+      inp.dataset.suggest = suggest == null ? "" : suggest;
+      inp.placeholder = suggest == null ? "―（データなし）" : fmtVal(mt, suggest);
+      let ratio = "";
+      if (ref.prevPct != null) ratio = ref.isRate
+        ? `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}pt`
+        : `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}%`;
+      const bandObj = isHour ? TIME_BANDS.find(b => b.key === bandSel.value) : null;
+      const bandName = bandObj ? `${bandObj.label}（${bandObj.range}時）の` : "";
+      const avTail = isHour ? "　※時間帯は「1日あたり平均(A/V)」で入力・判定します" : "";
+      help.textContent = base == null
+        ? (sel.value === "sales"
+            ? "この販促は対象部門/商品が未設定のため実績が出せません。『店全体の売上』を選ぶか、狙う値を入力してください。"
+            : isHour
+              ? `この時間帯（${bandObj ? bandObj.range + "時" : ""}）の直近実績がありません（営業時間外かも）。狙う値を入力してください。`
+              : "この指標の直近実績がありません。狙う値を入力してください。")
+        : `直近${bandName}${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）${avTail}`;
+    };
+    row._refresh = refresh;
+    sel.addEventListener("change", () => { if (HOUR_METRICS.has(sel.value)) bandSel.innerHTML = bandOptsHtml(null); refresh(); });
+    bandSel.addEventListener("change", refresh);
+    row.querySelector(".gr-fill").addEventListener("click", () => { if (inp.dataset.suggest) inp.value = inp.dataset.suggest; });
+    row.querySelector(".gr-del").addEventListener("click", () => { row.remove(); renumber(); });
+    refresh();
+  };
+  if (forceEl) forceEl.addEventListener("change", () => {
+    container.querySelectorAll(".gr-band").forEach(bs => { const cur = bs.value; bs.innerHTML = bandOptsHtml(cur); });
+  });
+  const refreshAll = () => container.querySelectorAll(".gr").forEach(r => r._refresh && r._refresh());
+  const collect = () => {
+    const map = {}; let err = "";
+    for (const row of container.querySelectorAll(".gr")) {
+      const key = row._effKey ? row._effKey() : row.querySelector(".gr-cat").value;
+      const raw = (row.querySelector(".gr-val").value || "").replace(/[,，\s]/g, "");
+      if (raw === "") continue;
+      const v = Number(raw), lbl = metricLabel(key), isRate = key.indexOf("cost_rate") >= 0;
+      if (!isFinite(v)) { err = `「${lbl}」の目標が数値ではありません。`; break; }
+      if (isRate && (v <= 0 || v > 100)) { err = `「${lbl}」は 0〜100% で入れてください。`; break; }
+      if (!isRate && v < 0) { err = `「${lbl}」は0以上で入れてください。`; break; }
+      map[key] = v;
+    }
+    return { map, err };
+  };
+  return { addRow, renumber, refreshAll, collect };
+}
 function openGoalGrid(c) {
   const gkey = campKey(c);
-  const mtByKey = _mtByKey();
-  const fmtVal = (mt, v) => v == null ? "―"
-    : mt.unit === "円" ? money(v)
-    : mt.unit === "%" ? v + "%"
-    : ten(v) + mt.unit;
   // 既存の保存済み目標→初期行（時間帯バンド hour_sales#dinner 等も含めて全キーから）。
   const savedMap = SERVER_TARGETS_M[gkey] || SERVER_TARGETS_M[c.id] || {};
   const saved = [];
@@ -487,93 +571,13 @@ function openGoalGrid(c) {
     if (skipNote) skipNote.hidden = !skip.checked;
   });
   const rowsEl = ov.querySelector("#gg-rows");
-  const gcode = (c.stores || [])[0] || "";
-  const opBands = storeBands(gcode);
-  const forceOn = () => { const f = ov.querySelector("#gg-force"); return !!(f && f.checked); };
-  // バンドの選択肢。基本は営業している時間帯だけ。強制表示ONで全時間帯。選択中は必ず含める。
-  const bandOptsHtml = selBand => {
-    let list = forceOn() ? TIME_BANDS.slice() : opBands.slice();
-    if (!list.length) list = TIME_BANDS.slice();
-    if (selBand && !list.some(b => b.key === selBand)) { const b = TIME_BANDS.find(x => x.key === selBand); if (b) list.push(b); }
-    const def = selBand || (list.find(b => b.key === "dinner") || list[0] || {}).key;
-    return list.map(b => `<option value="${b.key}"${b.key === def ? " selected" : ""}>${esc(b.label)}（${esc(b.range)}）</option>`).join("");
-  };
-  const renumber = () => [...rowsEl.querySelectorAll(".gr-n")].forEach((el, i) => el.textContent = `目標${i + 1}`);
-  const usedBases = () => [...rowsEl.querySelectorAll(".gr-cat")].map(s => s.value);
-  const addRow = (selKey, val) => {
-    const parsed = splitMetric(selKey || "");
-    const base0 = GOAL_CAT_OPTS.some(o => o.key === parsed.base) ? parsed.base : null;
-    const def = base0 || (GOAL_CAT_OPTS.find(o => !usedBases().includes(o.key)) || GOAL_CAT_OPTS[0]).key;
-    const selBand = parsed.band ? parsed.band.key : null;
-    const row = document.createElement("div"); row.className = "gr";
-    row.innerHTML = `<div class="gr-top">
-        <span class="gr-n">目標</span>
-        <select class="pf-in gr-cat">${GOAL_CAT_OPTS.map(o => `<option value="${o.key}"${o.key === def ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select>
-        <select class="pf-in gr-band"${HOUR_METRICS.has(def) ? "" : " hidden"}>${bandOptsHtml(selBand)}</select>
-        <input class="pf-in gr-val" type="number" inputmode="decimal" step="any" value="${val != null && val !== "" ? val : ""}">
-        <button type="button" class="gr-fill" title="目安（直近実績±2%）を入れる">目安</button>
-        <button type="button" class="gr-del" title="この目標を削除" aria-label="削除">×</button>
-      </div>
-      <div class="gr-help"></div>`;
-    rowsEl.appendChild(row);
-    const sel = row.querySelector(".gr-cat"), bandSel = row.querySelector(".gr-band");
-    const inp = row.querySelector(".gr-val"), help = row.querySelector(".gr-help");
-    const effKey = () => HOUR_METRICS.has(sel.value) ? `${sel.value}#${bandSel.value}` : sel.value;
-    row._effKey = effKey;
-    const refresh = () => {
-      const mt = mtByKey[sel.value]; if (!mt) return;
-      const isHour = HOUR_METRICS.has(sel.value);
-      bandSel.hidden = !isHour;
-      const key = effKey();
-      const ref = goalRef(c, key);
-      const base = ref.base;
-      const f = mt.higher ? 1.02 : 0.98;
-      const suggest = base == null ? null : (mt.unit === "%" ? Math.round(base * f * 10) / 10 : Math.round(base * f));
-      inp.dataset.suggest = suggest == null ? "" : suggest;
-      inp.placeholder = suggest == null ? "―（データなし）" : fmtVal(mt, suggest);
-      let ratio = "";
-      if (ref.prevPct != null) ratio = ref.isRate
-        ? `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}pt`
-        : `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}%`;
-      const bandObj = isHour ? TIME_BANDS.find(b => b.key === bandSel.value) : null;
-      const bandName = bandObj ? `${bandObj.label}（${bandObj.range}時）の` : "";
-      const avTail = isHour ? "　※時間帯は「1日あたり平均(A/V)」で入力・判定します" : "";
-      help.textContent = base == null
-        ? (sel.value === "sales"
-            ? "この販促は対象部門/商品が未設定のため実績が出せません。『店全体の売上』を選ぶか、狙う値を入力してください。"
-            : isHour
-              ? `この時間帯（${bandObj ? bandObj.range + "時" : ""}）の直近実績がありません（営業時間外かも）。狙う値を入力してください。`
-              : "この指標の直近実績がありません。狙う値を入力してください。")
-        : `直近${bandName}${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）${avTail}`;
-    };
-    sel.addEventListener("change", () => { if (HOUR_METRICS.has(sel.value)) bandSel.innerHTML = bandOptsHtml(null); refresh(); });
-    bandSel.addEventListener("change", refresh);
-    row.querySelector(".gr-fill").addEventListener("click", () => { if (inp.dataset.suggest) inp.value = inp.dataset.suggest; });
-    row.querySelector(".gr-del").addEventListener("click", () => { row.remove(); renumber(); });
-    refresh();
-  };
-  // 強制表示の切替でバンド選択肢を作り直す（選択は保つ）。
-  const forceEl = ov.querySelector("#gg-force");
-  if (forceEl) forceEl.addEventListener("change", () => {
-    rowsEl.querySelectorAll(".gr-band").forEach(bs => { const cur = bs.value; bs.innerHTML = bandOptsHtml(cur); });
-  });
-  initRows.forEach(r => addRow(r.key, r.val));
-  renumber();
-  ov.querySelector("#gg-add").addEventListener("click", () => { addRow(null, ""); renumber(); });
+  const rows = makeGoalRows(rowsEl, () => c, ov.querySelector("#gg-force"));
+  initRows.forEach(r => rows.addRow(r.key, r.val));
+  rows.renumber();
+  ov.querySelector("#gg-add").addEventListener("click", () => { rows.addRow(null, ""); rows.renumber(); });
   ov.addEventListener("click", e => { if (e.target.hasAttribute("data-goalclose")) ov.remove(); });
   ov.querySelector("#gg-save").addEventListener("click", async () => {
-    const map = {}; let err = "";
-    for (const row of rowsEl.querySelectorAll(".gr")) {
-      const key = row._effKey ? row._effKey() : row.querySelector(".gr-cat").value;
-      const raw = (row.querySelector(".gr-val").value || "").replace(/[,，\s]/g, "");
-      if (raw === "") continue;
-      const v = Number(raw), lbl = metricLabel(key);
-      const isRate = key.indexOf("cost_rate") >= 0;
-      if (!isFinite(v)) { err = `「${lbl}」の目標が数値ではありません。`; break; }
-      if (isRate && (v <= 0 || v > 100)) { err = `「${lbl}」は 0〜100% で入れてください。`; break; }
-      if (!isRate && v < 0) { err = `「${lbl}」は0以上で入れてください。`; break; }
-      map[key] = v;   // 同じ指標＋時間帯が複数行あれば後の行で上書き
-    }
+    const { map, err } = rows.collect();
     const msg = ov.querySelector("#pf-msg");
     if (err) { if (msg) { msg.textContent = err; msg.hidden = false; } return; }
     if (msg) { msg.textContent = "保存中…"; msg.hidden = false; }
@@ -2484,21 +2488,14 @@ function openPlanEditor(seed) {
   // 複製起票では、複製元の目標を初期値として引き継ぐ（seed.__seedTargets）。既存プランの
   // 保存済み目標があればそちらを優先。どちらも「入れた項目だけ保存」なので後で消せる。
   const seedT = s.__seedTargets || null;
-  let inherited = 0;
-  const tgRows = TARGET_METRICS.map(mt => {
-    const saved = camp ? targetMetricOf(camp, mt.key) : null;
-    const seedVal = (saved == null && seedT && seedT[mt.key] != null) ? seedT[mt.key] : null;
-    if (seedVal != null) inherited += 1;
-    const val = saved != null ? saved : (seedVal != null ? seedVal : "");
-    const suf = mt.unit === "円" ? "円" : mt.unit === "%" ? "％" : mt.unit;
-    return `<div class="pf-tg">
-      <span class="pf-tg-l">${esc(mt.label)}<span class="pf-tg-u">${esc(suf)}</span>${mt.higher ? "" : '<span class="pf-tg-rev" title="低いほど良い">↓良</span>'}</span>
-      <input class="pf-in pf-tg-in" id="pf-tg-${mt.key}" type="number" inputmode="decimal" step="any" value="${val !== "" ? val : ""}">
-      <button type="button" class="pf-tg-fill" data-fillcur="${mt.key}" title="目安（直近実績±2%）を目標欄に入れる">目安</button>
-      <span class="pf-tg-help" id="pf-tghelp-${mt.key}"></span>
-      <span class="pf-tg-diff" id="pf-tgdiff-${mt.key}"></span>
-    </div>`;
-  }).join("");
+  // 初期の目標行（▽で選ぶ形）。編集は既存の全キー（時間帯バンド含む）、複製は seedT から。
+  const initGoalRows = [];
+  if (camp) {
+    const sm2 = (SERVER_TARGETS_M[campKey(camp)] || SERVER_TARGETS_M[camp.id] || {});
+    for (const k of Object.keys(sm2)) { const v = sm2[k] && sm2[k].value; if (typeof v === "number") initGoalRows.push({ key: k, val: v }); }
+  }
+  if (!initGoalRows.length && seedT) for (const k of Object.keys(seedT)) { if (seedT[k] != null) initGoalRows.push({ key: k, val: seedT[k] }); }
+  const inherited = (!camp && seedT) ? Object.keys(seedT).length : 0;
   ov.innerHTML = `<div class="crprev-bd" data-planclose></div>
     <div class="crprev-box planbox" role="dialog" aria-modal="true">
       <div class="crprev-bar"><span class="crprev-title">${s.id ? "販促プランを編集" : "販促プランを起票"}</span>
@@ -2520,8 +2517,10 @@ function openPlanEditor(seed) {
         <label class="pf-l">販促物（PDF・画像）<input class="pf-in" id="pf-pdf" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*,application/pdf"></label>
         <div id="pf-goalhint" class="pf-goalhint">↑「販促名」と「開始月」を入れると、その期間の目安つきで目標欄が出ます。</div>
         <div id="pf-goalsec" class="pf-goalsec" hidden>
-          <div class="pf-tg-head">目標数値（入れた項目だけ保存。薄字＝直近実績＋2%の目安／原価率は−2%。「目安」ボタンで入る）${inherited ? `<span class="pf-tg-inherit">複製元から${inherited}件引き継ぎ（要確認）</span>` : ""}</div>
-          <div class="pf-tg-grid">${tgRows}</div>
+          <div class="pf-tg-head">目標数値（カテゴリを▽で選んで打ち込む。薄字＝直近実績＋2%の目安／原価率は−2%）${inherited ? `<span class="pf-tg-inherit">複製元から${inherited}件引き継ぎ（要確認）</span>` : ""}</div>
+          <div class="gg-rows" id="pf-goalrows"></div>
+          <label class="gg-force"><input type="checkbox" id="pf-goalforce"> 営業時間外の時間帯（深夜・早朝など）も選べるようにする</label>
+          <button type="button" class="gg-add" id="pf-goaladd">＋ 目標を追加</button>
         </div>
         <label class="pf-l">メモ（任意）<textarea class="pf-in" id="pf-note" rows="2" placeholder="狙い・段取りなど">${esc(s.note || "")}</textarea></label>
         <div class="pf-msg" id="pf-msg" hidden></div>
@@ -2539,27 +2538,30 @@ function openPlanEditor(seed) {
   ov.querySelector("#pf-save").addEventListener("click", () => savePlanFromForm(s));
   const del = ov.querySelector("[data-plandelete]");
   if (del) del.addEventListener("click", () => deletePlan(del.dataset.plandelete));
+  // フォームの入力値から「販促風オブジェクト」を作り、目標行の薄字算出に使う。
+  const gv = id => { const el = ov.querySelector("#" + id); return el ? el.value : ""; };
+  const getPseudoCtx = () => {
+    const code = gv("pf-store"), sm = gv("pf-start"), em = gv("pf-end"), bucket = gv("pf-bucket"), kind = gv("pf-kind");
+    return { id: s.id ? bareId(s.id) : "__new__", stores: code ? [code] : [], bucket, items: [], kind,
+      start: sm ? sm + "-01" : "", end: em ? em + "-28" : (sm ? sm + "-01" : ""), open_ended: !em };
+  };
+  // 目標行（▽で選ぶ形）を共通コントローラで作る。起票フォームでも時間帯バンドが選べる。
+  const pfRows = makeGoalRows(ov.querySelector("#pf-goalrows"), getPseudoCtx, ov.querySelector("#pf-goalforce"));
+  ov._goalRows = pfRows;
+  (initGoalRows.length ? initGoalRows : [{ key: "sales", val: "" }]).forEach(r => pfRows.addRow(r.key, r.val));
+  pfRows.renumber();
+  ov.querySelector("#pf-goaladd").addEventListener("click", () => { pfRows.addRow(null, ""); pfRows.renumber(); });
   // 期間（開始月）を入れたら目標欄を出す（算出は一瞬なのでそのまま表示）。
   const updateGoalSection = () => {
     const start = ov.querySelector("#pf-start"), sec = ov.querySelector("#pf-goalsec"), hint = ov.querySelector("#pf-goalhint");
     const has = !!(start && start.value);
     if (sec) sec.hidden = !has;
     if (hint) hint.hidden = has;
-    if (has) refreshTargetPlaceholders();
+    if (has) pfRows.refreshAll();
   };
-  // 店舗・期間・対象区分を変えたら薄字（現状値）を計算し直す＋目標欄の表示を更新。
+  // 店舗・期間・対象区分を変えたら薄字を計算し直す＋目標欄の表示を更新。
   ["pf-store", "pf-start", "pf-end", "pf-bucket"].forEach(id => {
     const el = ov.querySelector("#" + id); if (el) el.addEventListener("change", updateGoalSection);
-  });
-  // 「現状を入れる」チップ：薄字の値を目標欄にコピー。
-  ov.querySelectorAll("[data-fillcur]").forEach(btn => btn.addEventListener("click", () => {
-    const k = btn.dataset.fillcur, sug = TG_SUGGEST[k], inp = document.getElementById("pf-tg-" + k);
-    if (inp && sug != null) { inp.value = sug; updateTargetDiff(k); }
-  }));
-  // 目標を打つと「現状比 +X%」を即時表示（達成の妥当性が直感で分かる）。
-  TARGET_METRICS.forEach(mt => {
-    const inp = ov.querySelector("#pf-tg-" + mt.key);
-    if (inp) inp.addEventListener("input", () => updateTargetDiff(mt.key));
   });
   updateGoalSection();
   const t = ov.querySelector("#pf-title"); if (t) t.focus();
@@ -2589,7 +2591,9 @@ async function savePlanFromForm(seed) {
   if (!code) return show("店舗を選んでください。");
   if (!title) return show("販促名を入れてください。");
   if (!sm) return show("開始月を入れてください。");
-  const tgErr = validateTargetInputs();
+  const ovForm = document.getElementById("planedit");
+  const goalRows = ovForm && ovForm._goalRows;
+  const { map: goalMap, err: tgErr } = goalRows ? goalRows.collect() : { map: {}, err: null };
   if (tgErr) return show(tgErr);
   // 終了月が空＝常設（終了日なし）。ご指定どおり確認ポップアップ→Yesで無期限に進む。
   let openEnded = false;
@@ -2626,10 +2630,10 @@ async function savePlanFromForm(seed) {
       if (i >= 0) PLANS[i] = plan; else PLANS.push(plan);
       applyPlans();
     }
-    // 目標（指標別）を保存。鍵は施策キー（id@開始年）。空欄は削除扱い。
+    // 目標（指標別・時間帯バンド含む）を保存。鍵は施策キー（id@開始年）。空欄は削除扱い。
     if (plan) {
       const key = campKey(planToCamp(plan));
-      await saveTargetsFromForm(key);
+      await saveGoalMap(key, goalMap);
       // 販促物PDF/画像があれば添付（プラン保存後、確定した id にひも付け）。
       const pf = g("pf-pdf"); const file = pf && pf.files && pf.files[0];
       if (file) { try { await uploadCreative(file, plan.id, code); } catch (e) { /* 添付失敗は握りつぶさず後述メッセージ */ } }

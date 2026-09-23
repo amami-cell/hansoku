@@ -59,7 +59,7 @@ function loadForm(data) {
   const ctx = vm.createContext(sandbox);
   vm.runInContext(src, ctx, { filename: "app.js" });
   vm.runInContext(`DATA=${JSON.stringify(data)}; PLANS=[]; PLANS_API_OK=true; ME={name:"テスト担当"}; BASE_CAMPAIGNS=null; render=function(){};`, ctx);
-  return { ctx, byId, CAP, getEl, call: (e) => vm.runInContext(e, ctx), lastOverlay: () => created[created.length - 1] };
+  return { ctx, byId, CAP, getEl, call: (e) => vm.runInContext(e, ctx), lastOverlay: () => created[created.length - 1], allCreated: () => created };
 }
 
 const base = {
@@ -127,9 +127,9 @@ await test("常設で起票：目標が採番後IDのキーで保存され、再
   Object.assign(h.getEl("pf-bucket"), { value: "" });
   Object.assign(h.getEl("pf-owner"), { value: "テスト担当" });
   Object.assign(h.getEl("pf-note"), { value: "実地テスト" });
-  Object.assign(h.getEl("pf-tg-sales"), { value: "16,000,000" });  // カンマ入り
-  Object.assign(h.getEl("pf-tg-cost_rate"), { value: "28" });
   h.getEl("pf-pdf").files = [];
+  // 目標は「▽で選ぶ行」コントローラの collect() から来る（DOMは軽量モックなので値を直接注入）。
+  h.getEl("planedit")._goalRows = { collect: () => ({ map: { sales: 16000000, cost_rate: 28 }, err: null }) };
 
   await h.call("savePlanFromForm({})");
 
@@ -254,7 +254,8 @@ await test("複製起票：複製元の目標が初期値として引き継が�
   h.call(`SERVER_TARGETS_M = {"src@2025":{sales:{value:16000000}, cost_rate:{value:28}}};
     DATA.campaigns=[{id:"src",stores:["1160"],title:"昨年の秋パフェ",kind:"osusume",start:"2025-11-01",end:"2025-12-31"}];`);
   h.call(`duplicatePlan("src","1160")`);
-  const html = h.lastOverlay().innerHTML || "";
+  // 目標行は動的生成（各行が別の created 要素）。オーバーレイ＋全行の innerHTML をまとめて確認。
+  const html = h.allCreated().map(e => e.innerHTML || "").join("\n");
   assert.ok(html.includes("複製元から") && html.includes("引き継ぎ"), "引き継ぎ注記が出る");
   assert.ok(html.includes('value="16000000"'), "売上目標が初期値に入る");
   assert.ok(html.includes('value="28"'), "原価率目標が初期値に入る");
