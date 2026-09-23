@@ -535,14 +535,16 @@ function openGoalGrid(c) {
       if (ref.prevPct != null) ratio = ref.isRate
         ? `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}pt`
         : `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}%`;
-      const bandName = isHour ? `${(TIME_BANDS.find(b => b.key === bandSel.value) || {}).label || ""}の` : "";
+      const bandObj = isHour ? TIME_BANDS.find(b => b.key === bandSel.value) : null;
+      const bandName = bandObj ? `${bandObj.label}（${bandObj.range}時）の` : "";
+      const avTail = isHour ? "　※時間帯は「1日あたり平均(A/V)」で入力・判定します" : "";
       help.textContent = base == null
         ? (sel.value === "sales"
             ? "この販促は対象部門/商品が未設定のため実績が出せません。『店全体の売上』を選ぶか、狙う値を入力してください。"
             : isHour
-              ? `この時間帯の直近実績がありません（営業時間外かも）。狙う値を入力してください。`
+              ? `この時間帯（${bandObj ? bandObj.range + "時" : ""}）の直近実績がありません（営業時間外かも）。狙う値を入力してください。`
               : "この指標の直近実績がありません。狙う値を入力してください。")
-        : `直近${bandName}${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）`;
+        : `直近${bandName}${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）${avTail}`;
     };
     sel.addEventListener("change", () => { if (HOUR_METRICS.has(sel.value)) bandSel.innerHTML = bandOptsHtml(null); refresh(); });
     bandSel.addEventListener("change", refresh);
@@ -4165,15 +4167,28 @@ function renderTargetReview(c) {
   const periodNote = openEnded ? `${sm}〜${em}（継続中）` : (sm === em ? sm : `${sm}〜${em}`);
 
   const isCostMetric = k => k === "cost_rate" || k === "food_cost_rate" || k === "drink_cost_rate";
+  let hasHourCum = false;
   const rows = set.map(({ mt, key, target }) => {
     const actual = actualTargetValue(key, code, sm, em, openEnded);
     const ach = targetAchievement(mt, target, actual);
     const dir = mt.higher ? "" : `<span class="tr-dir" title="低いほど良い">↓が良い</span>`;
     // 原価率の実績が出ない店は「―」で終わらせず、理由（新レジ未接続など）を添える。
     const cr = (actual == null && isCostMetric(mt.key) && codes.length === 1) ? costReason(codes[0]) : null;
-    const actHtml = cr
-      ? `<span class="pf-cr" title="${esc(cr.tip)}">${esc(cr.label)}</span>`
-      : fmtMetricVal(mt, actual);
+    // 時間帯（A/V）は「累計を大きく・1日A/Vを小さく」。累計＝A/V×期間の営業日数の概算。
+    const baseM = splitMetric(key).base;
+    const isHourM = HOUR_METRICS.has(baseM);
+    const fmtCum = v => mt.unit === "円" ? money(v) : ten(v) + mt.unit;
+    let actHtml;
+    if (cr) actHtml = `<span class="pf-cr" title="${esc(cr.tip)}">${esc(cr.label)}</span>`;
+    else if (isHourM && actual != null && baseM !== "hour_avg_check") {
+      const code0 = (Array.isArray(code) ? code[0] : code) || (c.stores || [])[0];
+      const mip = (openEnded ? monthsBetween(sm, campEndM(c)) : monthsBetween(sm, em))
+        .filter(m => m < CURRENT_MONTH && (((DATA.hourly_by_month || {})[code0]) || {})[m]);
+      const days = mip.reduce((a, m) => a + lastDayOfMonth(m), 0);
+      const cum = days ? Math.round(actual * days) : null;
+      if (cum) { hasHourCum = true; actHtml = `<b>累計 約${fmtCum(cum)}</b><div class="tr-sub">1日A/V ${fmtMetricVal(mt, actual)}</div>`; }
+      else actHtml = `${fmtMetricVal(mt, actual)}<div class="tr-sub">1日A/V</div>`;
+    } else actHtml = fmtMetricVal(mt, actual);
     const rateHtml = ach
       ? `<span class="tr-rate ${ach.good ? "good" : "bad"}">${ach.rate}%${ach.good ? " ✓" : ""}</span>`
       : `<span class="tr-rate muted">―</span>`;
@@ -4184,7 +4199,7 @@ function renderTargetReview(c) {
       : "";
     return `<tr>
       <td class="tr-l">${esc(metricLabel(key))}${dir}</td>
-      <td class="tr-v">${fmtMetricVal(mt, target)}${metaHtml}</td>
+      <td class="tr-v">${fmtMetricVal(mt, target)}${isHourM ? '<div class="tr-sub">1日A/V目標</div>' : ""}${metaHtml}</td>
       <td class="tr-v">${actHtml}</td>
       <td class="tr-a">${rateHtml}</td></tr>`;
   }).join("");
@@ -4197,7 +4212,7 @@ function renderTargetReview(c) {
         <thead><tr><th class="tr-l">指標</th><th class="tr-v">目標</th><th class="tr-v">実績</th><th class="tr-a">達成率</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <div class="tr-note">実績は販促期間の確定月で集計（時間帯は期間内の1日平均＝A/V）。達成率は 客数・売上・客単価＝実績/目標、原価率＝目標/実績。</div>
+      <div class="tr-note">実績は販促期間の確定月で集計（時間帯は期間内の1日平均＝A/V）。達成率は 客数・売上・客単価＝実績/目標、原価率＝目標/実績。${hasHourCum ? "<br>時間帯の「累計 約◯」＝1日A/V×期間の営業日数の概算（目標・達成率は1日A/Vで判定）。" : ""}</div>
     </div></section>`;
 }
 function renderReview(c) {
