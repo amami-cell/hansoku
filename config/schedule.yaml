@@ -166,7 +166,8 @@ campaigns:
   - { id: c1160-parfait-snow, stores: ["1160"], title: パフェスノー（夏限定・4種）, kind: dev, bucket: パフェ, items: [パフェスノー, スノー, スパークリング], start: "2025-06-01", end: "2025-09-30", note: "スノー系＋『丸ごと白桃/夏いちご…スパークリングジュレのパフェ』も対象" }
   - { id: c1160-parfait-halloween, stores: ["1160"], title: ハロウィンパフェ, kind: dev, bucket: パフェ, items: [ポイズン], start: "2025-09-30", end: "2025-10-31", note: "実体は仏名『パルフェ・オ・ポイズン・シュクレ・エトランゼ』（毒りんご風パフェ）" }
   - { id: c1160-parfait-ichijiku, stores: ["1160"], title: いちじくパフェ, kind: dev, bucket: パフェ, items: [オトンヌ, アペティ, いちじく, イチジク, 無花果], start: "2025-10-31", end: "2025-12-01", note: "実体は仏名『パルフェ・アペティ・ドゥ・オトンヌ』（Fig&Caramel）" }
-  - { id: c1160-parfait-noel, stores: ["1160"], title: ノエル（クリスマスパフェ）, kind: dev, bucket: パフェ, items: [ノエル, クリスマス, サンタ], start: "2025-12-02", end: "2025-12-25" }
+  # 監査: 販売実体はクリスマス「ケーキ」（アンヴタン・ド・ルージュ/ブランノエル等）。部門をケーキに合わせる。
+  - { id: c1160-parfait-noel, stores: ["1160"], title: ノエル（クリスマスパフェ）, kind: dev, bucket: ケーキ, items: [ノエル, クリスマス, サンタ], start: "2025-12-02", end: "2025-12-25" }
   - { id: c1160-parfait-mikan, stores: ["1160"], title: みかんパフェ, kind: dev, bucket: パフェ, items: [マンダリン, みかん, 蜜柑], start: "2026-01-02", end: "2026-02-01", note: "実体は仏名『パルフェ・ア・ラ・マンダリン…』" }
   - { id: c1160-parfait-shortcake, stores: ["1160"], title: ショートケーキパフェ, kind: dev, bucket: パフェ, items: [ショートケーキ], start: "2026-02-02", end: "2026-05-07" }
   # コラボ枠（bucket=コラボ で区分に束ね、items で該当商品を切り出す）
@@ -250,7 +251,8 @@ campaigns:
   - { id: c1160-gelato-2505, stores: ["1160"], title: ジェラート 5-6月, kind: dev, bucket: ジェラート, items: [ブルーベリーチーズケーキ, ミルキーメロン], start: "2025-05-15", end: "2025-07-03" }
   - { id: c1160-gelato-2507, stores: ["1160"], title: ジェラート 7-8月, kind: dev, bucket: ジェラート, items: [蜜香ウーロン, パイナップルケーキ], start: "2025-07-04", end: "2025-09-06" }
   - { id: c1160-gelato-2509, stores: ["1160"], title: ジェラート 9-10月, kind: dev, bucket: ジェラート, items: [かぼちゃプリンクラッシュ, 黒ごま豆乳もち], start: "2025-09-07", end: "2025-10-01" }
-  - { id: c1160-gelato-2511, stores: ["1160"], title: ジェラート 11-12月, kind: dev, bucket: ジェラート, items: [苺ティラミス, サングリア], start: "2025-10-02", end: "2026-01-09" }
+  # 監査: 「サングリア」はアルコール（ティーサングリア）でジェラートの効果測定に混入していたため除外。
+  - { id: c1160-gelato-2511, stores: ["1160"], title: ジェラート 11-12月, kind: dev, bucket: ジェラート, items: [苺ティラミス], start: "2025-10-02", end: "2026-01-09" }
   - { id: c1160-gelato-2601, stores: ["1160"], title: ジェラート 1-2月, kind: dev, bucket: ジェラート, items: [リッチ苺ミルク, ショコラノワゼット], start: "2026-01-10", end: "2026-03-08" }
   - { id: c1160-gelato-2603, stores: ["1160"], title: ジェラート 3-4月, kind: dev, bucket: ジェラート, items: [ドバイ・ピスタチオショコラ, 苺ブラン], start: "2026-03-09", end: "2026-05-08" }
   - { id: c1160-gelato-2605, stores: ["1160"], title: ジェラート 5-6月, kind: dev, bucket: ジェラート, items: [リッチマンゴー・ミルク, ソルティアナナ], start: "2026-05-09", end: "2026-06-30" }

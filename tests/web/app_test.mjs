@@ -1141,14 +1141,15 @@ test("renderStore：効果サマリー（◎効いた）と、販促一覧の判
   assert.ok(html.includes("cvm good"), "販促一覧の◎判定バッジ");
 });
 
-test("storeAnnualChart：年サマリ＋月次の推移（一覧・1行=1ヶ月）が頭に出る", () => {
+test("storeAnnualChart：月次の推移（一覧・1行=1ヶ月）が頭に出る／重複サマリは撤去", () => {
   const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
   const ctx = loadApp({ ...base, campaigns: [c] });
   const html = call(ctx, `storeAnnualChart("1006","2026")`);
-  assert.ok(html.includes("販促の効き"), "年サマリ");
+  assert.ok(!html.includes("販促の効き"), "「いまの状況」「販促一覧」と重複する年サマリは撤去");
   assert.ok(/一覧（縦＝指標／横＝月）/.test(html), "年間×月マトリクスの見出し");
   assert.ok(html.includes('class="ymxt"'), "マトリクス表");
   assert.ok(html.includes("前年比") && html.includes("予算") && html.includes("年計"), "指標行＋年計列");
+  assert.ok(html.includes("販促 年間チャート") && html.includes("chartfold"), "年間チャートは畳んで提供");
 });
 
 test("storeYearMatrix：縦＝指標・横＝月・右端に年計。月見出しから月詳細へ", () => {

@@ -4748,6 +4748,7 @@ function storeAnnualChart(code, year) {
     const inMonth = camps.filter(c => c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m)
       .sort((a, b) => a.start < b.start ? -1 : 1);
     const crs = creativesForMonth(code, m);
+    if (!inMonth.length && !crs.length) return "";   // 販促もPOPも無い月はカードを出さない（縦の無駄を省く）
     const cls = (m === CURRENT_MONTH ? " now" : "") + (m > CURRENT_MONTH ? " prov" : "");
     // POP欄の空表示。これからの月（当月以降）の販促はPOP未作成＝「予定」、
     // 過ぎた月で無いものは「なし」。販促自体が無い月はプレースホルダを出さない。
@@ -4828,31 +4829,15 @@ function storeAnnualChart(code, year) {
          : "カードを<b>左右にスクロール</b>すると前後の月が両端にチラ見えします。上＝その月のPOP・制作物（押すと拡大）、下＝その月の販促（押すと詳細）。<b>◯月</b>を押すとその月の詳細（構成比・POP）へ。"}◎/△は対象区分の前年比で自動判定。</div>`
     : "";
 
-  // 年サマリ（確定分の売上合計・前年比・予算達成の平均・販促◎/△）。チャートの頭に置いて、
-  // 下までスクロールしなくても要約が分かるように。
-  const yConf = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`)
-    .filter(m => m < CURRENT_MONTH && (DATA.monthly[code] || {})[m]);
-  let ySales = 0, yPrev = 0; const budRates = [];
-  for (const m of yConf) {
-    const sv = salesAtC(code, m); if (typeof sv !== "number") continue;
-    ySales += sv;
-    const pv = salesAtC(code, prevYearM(m)); if (typeof pv === "number") yPrev += pv;
-    const b = budgetAt(code, m); if (sv && b) budRates.push(sv / b * 100);
-  }
-  const yYoY = yPrev ? (ySales / yPrev - 1) * 100 : null;
-  const budAvg = budRates.length ? Math.round(budRates.reduce((a, b) => a + b, 0) / budRates.length) : null;
-  const cGood = camps.filter(c => { const e = storeCampEffect(c, code); return e.measured && e.pct >= 0; }).length;
-  const cWarn = camps.filter(c => { const e = storeCampEffect(c, code); return e.measured && e.pct < 0; }).length;
-  const yearSummary = `<div class="ysum">
-    <span class="ysum-i"><span class="ysl">${year}年 売上(確定)</span><b>${ySales ? man(ySales) + "円" : "―"}</b>${yYoY != null ? `<span class="${yYoY >= 0 ? "up" : "down"}">前年${signed(yYoY)}%</span>` : ""}</span>
-    ${budAvg != null ? `<span class="ysum-i"><span class="ysl">予算達成(平均)</span><b class="${budAvg >= 100 ? "up" : "down"}">${budAvg}%</b></span>` : ""}
-    <span class="ysum-i"><span class="ysl">販促の効き</span><b class="up">◎ ${cGood}</b> <b class="down">△ ${cWarn}</b></span>
-  </div>`;
-
-  return `${yearSummary}${storeYearMatrix(code, year)}
-    <div class="mmhd" style="margin-top:16px">販促 年間チャート<span class="mmhint">${pv === "gantt" ? "帯＝実施期間（横軸＝月）。帯や販促名を押すと詳細へ。" : "横スクロールで月移動（前後の月がチラ見え）。上＝POP、下＝販促。"}◎効いた/△要改善</span></div>
-    ${pvTabs}
-    ${promoBody}${legend}`;
+  // 年サマリ（売上・予算・販促◎/△）は「いまの状況」「販促一覧」と重複するため撤去。
+  // ここでは月次一覧（下の表）＋畳んだ年間チャートだけを出す。
+  return `${storeYearMatrix(code, year)}
+    <details class="chartfold" style="margin-top:14px">
+      <summary>販促 年間チャート（帯・カードで一望）を開く</summary>
+      <div class="mmhd" style="margin-top:10px">販促 年間チャート<span class="mmhint">${pv === "gantt" ? "帯＝実施期間（横軸＝月）。帯や販促名を押すと詳細へ。" : "横スクロールで月移動（前後の月がチラ見え）。上＝POP、下＝販促。"}◎効いた/△要改善</span></div>
+      ${pvTabs}
+      ${promoBody}${legend}
+    </details>`;
 }
 
 // 月次の推移を「1行＝1ヶ月」の一覧にする。年間まとめではなく、月ごとの結果（売上・前年比・
@@ -5625,11 +5610,18 @@ function renderStore(code) {
   </nav>`;
 
   // 販促一覧（縮小・1行）。押すとその販促の詳細（PDCA）へ。既定表示（畳まない）。
+  // 行の左の色ドットは「販促の種類」。凡例を一覧の頭に出して、色だけで迷わせない。
+  const kindsPresent = [...new Set(myCamps.map(c => c.kind))];
+  const kindLegend = kindsPresent.length
+    ? `<div class="klegend">${kindsPresent.map(k =>
+        `<span class="kleg"><span class="tl-dot" style="background:${kindOf(k).color}"></span>${esc(kindOf(k).label)}</span>`).join("")}</div>`
+    : "";
   const promoList = `<section class="block" id="promos">
     <div class="bhead"><h2>販促一覧</h2>
       <span class="bnote">${myCamps.length}件・実施中→予定→終了の順。行を押すと、その販促の詳細（PDCA）へ。</span>
       ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋販促を追加</button>` : ""}</div>
     ${effSummary}
+    ${kindLegend}
     ${promoBlock}
   </section>`;
 

@@ -1145,6 +1145,17 @@ html{overflow-anchor:none;}
 .ghelp{font-size:11.5px;color:var(--ink-3);line-height:1.55;margin-top:6px;padding:8px 10px;
   background:var(--surface-2);border:1px solid var(--line);border-radius:8px;}
 .glg i{width:10px;height:10px;border-radius:3px;display:inline-block;font-style:normal;font-size:11px;line-height:1;}
+/* 販促一覧の色ドット凡例（＝販促の種類）。ドットの色が何かを、一覧の頭で示す。 */
+.klegend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0 0 10px;font-size:12px;color:var(--ink-2);}
+.kleg{display:inline-flex;align-items:center;gap:6px;}
+/* 年間チャートの折りたたみ（既定は畳む）。月次一覧の下に置く開くボタン。 */
+.chartfold>summary{cursor:pointer;list-style:none;font-size:13px;color:var(--accent);font-weight:600;
+  padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);
+  min-height:44px;display:flex;align-items:center;gap:8px;}
+.chartfold>summary::-webkit-details-marker{display:none;}
+.chartfold>summary::before{content:"▸";}
+.chartfold[open]>summary::before{content:"▾";}
+.chartfold[open]>summary{margin-bottom:10px;}
 /* 販促 年間チャート＝月カルーセル。横スクロールで月移動、前後の月が両端にチラ見え。
    上＝その月のPOP・制作物サムネ、下＝その月の販促チップ。 */
 .pcar{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;
