@@ -183,3 +183,42 @@ class Test採用順:
 
         rows, _ = build_rows(rd(row()), master)
         assert rows and all(r.kind == KIND_FINAL for r in rows)
+
+
+class Test0は未取得:
+    """**0 は「売上ゼロ」ではなく「まだその口に無い」。**
+
+    実測（2026-09-22）で 1766 の 2026-04〜07 が 0 だった。店が動いていれば
+    あり得ない数字で、新Uレジを使い始める前の月という意味しかない。
+
+    ⚠️ **それでも 0 を入れると危ない。** この口は `kind=確定` かつ
+    SOURCE_PRIORITY 最優先なので、**あとからFWが本当の値を入れても
+    この 0 が勝ち続ける**（画面は 0 のまま）。1766 はFW連携が予定されているので、
+    近いうちに必ず踏む。
+    """
+
+    def test_売上0は入れない(self, master):
+        rows, _ = build_rows(rd(row(ym="2026-04", sales="0", covers="0")), master)
+        assert rows == []
+
+    def test_0の月を飛ばしても他の月は入る(self, master):
+        rows, _ = build_rows(
+            rd(row(ym="2026-04", sales="0", covers="0"), row(ym="2026-08")), master)
+        assert {r.date.strftime("%Y-%m") for r in rows} == {"2026-08"}
+
+    def test_売上だけ0なら客数は入れる(self, master):
+        # 指標ごとに見る。売上が未取得でも客数が取れていれば捨てない
+        rows, _ = build_rows(rd(row(sales="0", covers="4338")), master)
+        assert {(r.metric, r.value) for r in rows} == {(METRIC_COVERS, 4338.0)}
+
+    def test_0を飛ばしても異常あつかいしない(self, master):
+        # report.skipped に入れると looks_broken() が真になり、0 が1件あるだけで
+        # ジョブが赤くなる。0 は異常ではない
+        from hansoku.ingest.pos_sheet import looks_broken
+
+        _, report = build_rows(rd(row(sales="0", covers="0")), master)
+        assert not looks_broken(report)
+
+    def test_負の値も入れない(self, master):
+        rows, _ = build_rows(rd(row(sales="-100", covers="0")), master)
+        assert rows == []
