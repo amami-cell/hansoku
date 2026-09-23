@@ -5458,53 +5458,47 @@ function storeNextActions(code) {
     .sort((a, b) => (a.end || a.start) < (b.end || b.start) ? 1 : -1).slice(0, 5);
   const canWrite = WRITE_OK;
 
-  const todos = c => {
+  const todoChips = c => {
     const chips = [];
     if (goalEligible(c) && targetOf(c) == null)
-      chips.push(canWrite ? `<button class="goalbtn add" data-goal="${campKey(c)}">＋目標を入れる</button>` : `<span class="na-todo">目標未設定</span>`);
+      chips.push(canWrite ? `<button class="goalbtn add" data-goal="${campKey(c)}">＋目標</button>` : `<span class="na-todo">目標未設定</span>`);
     if (!creativesForCampaign(c.id).length)
-      chips.push((canWrite && CREATIVES_API_OK) ? `<button class="upbtn sm" data-upload="campaign:${c.id}">＋POPを追加</button>` : `<span class="na-todo">POP未登録</span>`);
-    return chips.length ? `<div class="na-todos">${chips.join("")}</div>` : `<div class="na-ok">✓ 準備OK</div>`;
+      chips.push((canWrite && CREATIVES_API_OK) ? `<button class="upbtn sm" data-upload="campaign:${c.id}">＋POP</button>` : `<span class="na-todo">POP未登録</span>`);
+    return chips.length ? chips.join("") : `<span class="na-ok">✓ 準備OK</span>`;
   };
-  const learn = c => {
+  // 去年の同じ回の学びは既定で畳む（開くと結果・要因メモ・次回提案）。行を増やさない。
+  const learnToggle = c => {
     const prev = campPrevOccurrence(c);
     if (!prev) return "";
     const e = storeCampEffect(prev, code);
     const res = e.mark ? `<span class="cvm ${e.tone}">${e.mark}${e.pct != null ? " " + signed(e.pct) + "%" : ""}</span>` : "";
     const memo = memoOf(prev);
-    const prop = proposalFor(prev.id);
-    const nx = prop && prop.next ? prop.next : "";
+    const nx = (proposalFor(prev.id) || {}).next || "";
     if (!res && !memo && !nx) return "";
-    return `<div class="na-learn"><span class="na-learn-l">去年「${esc(prev.title)}」 ${res}</span>${
+    return `<details class="na-learn"><summary>去年「${esc(prev.title)}」の学び ${res}</summary>${
       memo ? `<div class="na-m">${escBr(memo)}</div>` : ""}${
-      nx ? `<div class="na-n"><b>次回提案</b> ${escBr(nx)}</div>` : ""}</div>`;
+      nx ? `<div class="na-n"><b>次回提案</b> ${escBr(nx)}</div>` : ""}</details>`;
   };
   const nextList = nextCamps.length
     ? `<ul class="na-list">${nextCamps.map(c => {
         const k = kindOf(c.kind), st = campStatus(c);
-        return `<li data-camp="${c.id}"><div class="na-row">
+        return `<li><div class="na-row" data-camp="${c.id}">
           <span class="tl-dot" style="background:${k.color}"></span>
           <span class="na-nm">${c.title}${c.planned ? '<span class="plbadge">計画</span>' : ""}</span>
-          <span class="tl-rg">${campRange(c)}</span>
           <span class="cstat ${st.k}">${st.k === "soon" ? "来月開始" : st.label}</span></div>
-          ${todos(c)}${learn(c)}</li>`;
+          <div class="na-sub"><span class="na-chips">${todoChips(c)}</span>${learnToggle(c)}</div></li>`;
       }).join("")}</ul>`
-    : `<div class="empty">${monthLbl}に動く販促はまだありません。${(PLANS_API_OK && WRITE_OK) ? "右上の「＋起票」から追加できます。" : ""}</div>`;
-  const reviewBlock = review.length
-    ? `<div class="na-grp"><div class="tl-h na-wh">やりっぱなし（振り返り未記入）<span class="tl-n">${review.length}</span></div>
-        <ul class="na-list">${review.map(c => `<li data-camp="${c.id}"><div class="na-row">
-          <span class="tl-dot" style="background:${kindOf(c.kind).color}"></span>
-          <span class="na-nm">${c.title}</span><span class="tl-rg">${campRange(c)}</span></div>
-          ${canWrite ? `<div class="na-todos"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 振り返りを書く</button></div>` : `<span class="na-todo na-w">要振り返り</span>`}</li>`).join("")}</ul></div>`
+    : `<div class="empty">${monthLbl}に動く販促はまだありません。</div>`;
+  const reviewLine = review.length
+    ? `<div class="na-review"><span class="na-rl">⚠ やりっぱなし ${review.length}件</span>${
+        review.map(c => `<button class="na-rbtn" data-camp="${c.id}">${esc(c.title)}</button>`).join("")}</div>`
     : "";
   return `<section class="block" id="actions">
     <div class="bhead"><h2>来月（${monthLbl}）のアクション</h2>
-      <span class="bnote">来月動く販促の準備（目標・POP）＋去年の同じ回の学びを反映。やりっぱなしも解消。</span>
-      ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋ 販促を起票</button>` : ""}</div>
-    <div class="panel">
-      <div class="na-grp"><div class="tl-h">来月の販促・準備<span class="tl-n">${nextCamps.length}</span></div>${nextList}</div>
-      ${reviewBlock}
-    </div></section>`;
+      <span class="bnote">来月動く販促の準備と、去年の学び。</span>
+      ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋起票</button>` : ""}</div>
+    <div class="panel">${storeScoreStrip(code)}${nextList}${reviewLine}</div>
+  </section>`;
 }
 
 function renderStore(code) {
@@ -5652,125 +5646,25 @@ function renderStore(code) {
   </div>
   <div class="pterm">◎効いた=対象区分が前年同月より増／△要改善=減。<b>昨対比</b>=前年の同じ月と比較。<b>前回比</b>=前回の同じ枠と比較。</div>`;
   const promoBlock = !myCamps.length
-    ? `<div class="empty">この店の施策はまだ登録されていません。config/schedule.yaml に追記すると、ここと上の売上グラフに並びます。</div>`
+    ? `<div class="empty">この店の販促はまだ登録されていません。${(PLANS_API_OK && WRITE_OK) ? "「＋起票」から追加できます。" : ""}</div>`
     : !sorted.length
       ? `<div class="empty">この条件に当てはまる販促はありません。上のタブを「すべて」に戻してください。</div>`
-    : `<ul class="clist">${sorted.map(({ c, e }) => {
-        const k = kindOf(c.kind);
-        const range = campRange(c);
-        const st = campStatus(c);
+    : `<ul class="clist compact">${sorted.map(({ c, e }) => {
+        const k = kindOf(c.kind), st = campStatus(c);
         const vmark = e.mark
-          ? `<span class="cvm ${e.tone}" title="対象区分の前年比 ${signed(e.pct)}%">${e.mark} ${e.text}${e.pct != null ? " " + signed(e.pct) + "%" : ""}</span>`
+          ? `<span class="cvm ${e.tone}">${e.mark}${e.pct != null ? " " + signed(e.pct) + "%" : ""}</span>`
           : `<span class="cvm wait">${e.state}</span>`;
-        // この店ぶんの主指標（その施策が効く部門・商品）。店全体の売上を出すと、
-        // 同じ店に重なっている施策が全部そろって同じ数字になる（1728 は6件重なる）。
-        const tgt1 = campTargeted(c, code);
-        const eff = campEffect(code, c);
-        let effHtml = "";
-        if (tgt1) {
-          // 昨対%は上のバッジ（◎/△ +X%）に集約したので、ここでは実績金額と前年金額だけ。
-          // このリストは「前回の同じ販促と比べてどうだったか＋目標・POP・メモ」を担当する。
-          const prevTxt = tgt1.prev != null ? `<span class="sub">（前年 ${man(tgt1.prev)}円）</span>` : "";
-          effHtml = `<div class="ceff">${esc(tgt1.label)}（確定${tgt1.months}ヶ月）<b>${man(tgt1.cur)}円</b>${prevTxt}</div>`;
-          // 前回比（同じ枠の前回の回と、この店ぶんで比べる）。一覧でも一目で分かるように。
-          const prevOcc = campPrevOccurrence(c);
-          if (tgt1.cur && prevOcc) {
-            const pb = campTargeted(prevOcc, code);
-            if (pb && pb.cur) {
-              const d = (tgt1.cur / pb.cur - 1) * 100;
-              effHtml += `<div class="ceff sub2">前回比 <span class="${d >= 0 ? "up" : "down"}">${signed(d)}%</span><span class="sub">（前回 ${esc(prevOcc.title)}｜${man(pb.cur)}→${man(tgt1.cur)}円）</span></div>`;
-            }
-          }
-        } else if (!campBasis(c)) {
-          effHtml = `<div class="ceff muted">この販促を何で測るか未設定 — 対象の部門（例: コース）か商品名を決めると数字が出ます</div>`;
-        }
-        if (eff && METRIC !== "sales") {
-          effHtml += `<div class="ceff sub2">店全体の${METRIC_LABELS[METRIC]} ${man(eff.cur)}円<span class="sub">（${esc(overlapNote(c))}）</span></div>`;
-        }
-        if (eff) {
-          // 集客（客数）の効果。売上表示のときだけ、同じ期間の客数を前年比・前月比で添える
-          if (METRIC === "sales") {
-            const cov = campCovers(code, c);
-            if (cov) {
-              const cy = cov.pct != null
-                ? `<span class="${cov.pct >= 0 ? "up" : "down"}">前年比 ${signed(cov.pct)}%</span>` : "前年 ―";
-              const cmom = cov.momPct != null
-                ? `・<span class="${cov.momPct >= 0 ? "up" : "down"}">前月比 ${signed(cov.momPct)}%</span>` : "";
-              effHtml += `<div class="ceff sub2">期間中の集客 <b>${nin(cov.cur)}</b>・${cy}${cmom}</div>`;
-            }
-          }
-        } else if (st.k !== "soon" && !isRatioMetric(METRIC)) {
-          effHtml = `<div class="ceff muted">確定した月の売上が出たら、前年同月比を表示します（月単位で集計）。</div>`;
-        }
-        // 目標対比（アプリ内で入力した目標／schedule.yaml の目標）
-        const tgt = targetOf(c);
-        let goalHtml = "";   // 目標対象外の販促では空（旧: undefined が文字列で出ていた）
-        if (tgt != null) {
-          // 目標は施策ぜんぶに対して立てたもの。店1軒の数字で割らない。
-          const gr1 = campGoalRate(c);
-          const actual = gr1 ? gr1.cur : null;
-          const rate = gr1 ? gr1.rate : null;
-          const prog = rate != null
-            ? ` ・ 実績(確定) ${man(actual)}円 ・ <span class="${rate >= 100 ? "up" : "down"}">達成 ${rate.toFixed(0)}%</span>`
-            : ` ・ <span class="sub">実績は確定月が出てから</span>`;
-          goalHtml = `<div class="cgoal">目標 <b>${man(tgt)}円</b>${prog} <button class="goalbtn" data-goal="${campKey(c)}" title="目標を編集">✎</button></div>`;
-        } else if (goalEligible(c)) {
-          goalHtml = `<div class="cgoal muted"><button class="goalbtn add" data-goal="${campKey(c)}">＋ 目標を入力</button></div>`;
-        }
-        // 要因メモ（アプリ内で入力・共有）。終了して未記入なら「振り返り未記入」を強調（PDCAのCheck）。
-        const memo = memoOf(c);
-        const memoHtml = memo
-          ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${campKey(c)}" title="メモを編集">✎</button></div>`
-          : (needsReview(c)
-            ? `<div class="cmemo warn"><button class="goalbtn add" data-memo="${campKey(c)}">⚠ 振り返り未記入 — ＋要因メモを書く</button></div>`
-            : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`);
-        // 前回（同じ枠の前回の回）の学び＝要因メモ＋次回提案を、今回のカードに引き継ぎ表示。
-        // 「去年こうだったから今年こうする」を、企画時に必ず目に入れる（PDCAのAct→次のPlan）。
-        const prevOcc2 = campPrevOccurrence(c);
-        let prevLearnHtml = "";
-        if (prevOcc2) {
-          const pMemo = memoOf(prevOcc2);
-          const pProp = proposalFor(prevOcc2.id);
-          const pNext = pProp && pProp.next ? pProp.next : "";
-          if (pMemo || pNext) {
-            prevLearnHtml = `<div class="cprev"><span class="cprev-l">前回「${esc(prevOcc2.title)}」の学び</span>${
-              pMemo ? `<div class="cprev-m">${escBr(pMemo)}</div>` : ""}${
-              pNext ? `<div class="cprev-n"><b>次回提案</b> ${escBr(pNext)}</div>` : ""}</div>`;
-          }
-        }
-        // 出したPOP・資料を結果のとなりに。押すと小窓でプレビュー。未登録は実施中/予定だけ促す。
-        const crs = creativesForCampaign(c.id);
-        const addPop = (CREATIVES_API_OK && WRITE_OK) ? ` <button class="upbtn sm" data-upload="campaign:${c.id}">＋追加</button>` : "";
-        const popHtml = crs.length
-          ? `<div class="cpop"><span class="cpop-l">POP・資料 ${crs.length}</span><div class="cgrid mini">${crs.map(creativeCard).join("")}</div></div>`
-          : (st.k !== "done" ? `<div class="cpop muted">POP未登録${addPop}</div>` : "");
-        return `<li data-camp="${c.id}">
+        return `<li class="crow" data-camp="${c.id}">
           <span class="kchip" style="--kc:${k.color}">${k.label}</span>
-          <div class="cbody">
-            <div class="ctitle">${c.title}${c.planned ? '<span class="plbadge">計画</span>' : ""}${c.scope_all ? '<span class="tagx">全店</span>' : ""}<span class="cvm-wrap">${vmark}</span>${statusControl(c, st.label, st.k)}</div>
-            ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
-            ${c.planned && c.plan_note ? `<div class="cnote">${escBr(c.plan_note)}</div>` : ""}
-            ${c.planned && c.plan_goal ? `<div class="ceff">目標 <b>${man(c.plan_goal)}円</b><span class="sub">（計画）</span></div>` : ""}
-            ${effHtml}
-            ${popHtml}
-            ${campHeadline(c)}
-            ${goalHtml}
-            ${memoHtml}
-            ${prevLearnHtml}
-            ${(PLANS_API_OK && WRITE_OK) ? `<div class="pactions">${c.planned
-              ? `<button class="plbtn" data-planedit="${c.id}">✎ 編集</button>`
-              : `<button class="plbtn" data-plandup="${c.id}">⧉ 複製して起票</button>`}</div>` : ""}
-            <div class="cgo">詳細を確認 →</div>
-          </div>
-          <span class="crange">${range}</span>
-        </li>`;
+          <span class="crow-nm">${c.title}${c.planned ? '<span class="plbadge">計画</span>' : ""}</span>
+          ${vmark}<span class="cstat ${st.k}">${st.label}</span>
+          <span class="crow-rg">${campRange(c)}</span></li>`;
       }).join("")}</ul>`;
 
   // 販促アプリの店舗トップ：累計サマリー → 販促タイムライン → スケジュール → 販促リスト。
   // 分析系（売上推移・部門・商品・時間帯・近隣・販促エンジン等）は下の折りたたみへ。
   const summaryHtml = storePromoHero(code);
   const actionsHtml = storeNextActions(code);
-  const timelineHtml = storePromoTimeline(code);
   const annualHtml = storeAnnual(code);
   const enginesHtml = storeEngines(code);
   const heroHtml = storeHero(code);
@@ -5779,9 +5673,8 @@ function renderStore(code) {
   const navItems = [
     ["hero", "サマリー"],
     ["actions", "来月のアクション"],
-    ["timeline", "販促タイムライン"],
     annualHtml ? ["annual", "スケジュール"] : null,
-    myCamps.length ? ["promos", "販促リスト"] : null,
+    myCamps.length ? ["promos", "販促一覧"] : null,
     ["basics", "詳細データ"],
   ].filter(Boolean);
   const storeNav = `<nav class="snav" aria-label="店内ジャンプ">
@@ -5798,13 +5691,11 @@ function renderStore(code) {
     ${storeNav}
     ${summaryHtml}
     ${actionsHtml}
-    ${timelineHtml}
     ${annualHtml}
     <section class="block" id="promos">
-      <div class="bhead"><h2>この店の販促（個別のPDCA）</h2>
-        <span class="bnote">${myCamps.length}件・各販促の効果◎/△・前回比・目標・POP・メモ。効いた/要改善で並べ替え。</span>
-        ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋ 販促を起票</button>` : ""}</div>
-      ${myCamps.length ? promoSummary + promoControls : ""}
+      <div class="bhead"><h2>販促一覧</h2>
+        <span class="bnote">${myCamps.length}件・実施中→予定→終了。◎効いた/△要改善。押すと詳細（PDCA）へ。</span>
+        ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋起票</button>` : ""}</div>
       ${promoBlock}
     </section>
     ${myCreativesBlock}

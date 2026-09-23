@@ -1011,18 +1011,18 @@ test("renderStore：目標対象外の実施中販促でも literal 'undefined' 
   const ctx = loadApp({ ...base, campaigns: [c] });
   const html = call(ctx, `renderStore("1006")`);
   assert.ok(!/\bundefined\b/.test(html), "renderStore に undefined が混じらない");
-  assert.ok(html.includes("この店の販促"), "販促セクションはある");
+  assert.ok(html.includes("販促一覧"), "販促セクションはある");
 });
 
-test("renderStore：販促トップは累計サマリー→販促タイムラインで、詳細は折りたたみへ", () => {
+test("renderStore：販促トップは累計サマリー→来月のアクションで、詳細は折りたたみへ", () => {
   const ctx = loadApp(base);
   const html = call(ctx, `renderStore("1006")`);
   assert.ok(html.includes("累計サマリー"), "上部に累計サマリー（予算/実績・前年対比・客単価）");
-  assert.ok(html.includes("販促タイムライン"), "販促タイムライン");
+  assert.ok(html.includes("のアクション"), "来月のアクション");
   assert.ok(html.includes("詳細データを見る"), "分析系は details（詳細データ）へ格納");
   // 並び順はセクションidで確認（ナビのラベルと混同しないように）。
-  assert.ok(html.indexOf('id="hero"') < html.indexOf('id="timeline"'), "サマリーがタイムラインより先");
-  assert.ok(html.indexOf('id="timeline"') < html.indexOf('id="basics"'), "詳細は下（折りたたみ）");
+  assert.ok(html.indexOf('id="hero"') < html.indexOf('id="actions"'), "サマリーがアクションより先");
+  assert.ok(html.indexOf('id="actions"') < html.indexOf('id="basics"'), "詳細は下（折りたたみ）");
 });
 
 test("来月のアクション：来月動く販促に準備の抜けと去年の学び（メモ・次回提案）を出す", () => {
@@ -1067,14 +1067,13 @@ test("販促プラン：applyPlans で計画が DATA.campaigns に統合され�
   assert.equal(call(ctx, `DATA.campaigns.find(c=>c.id==="plan-x").planned`), true);
 });
 
-test("販促プラン：起票ボタン・計画バッジ・複製/編集が販促リストに出る（本番のみ）", () => {
+test("販促プラン：起票ボタン・計画バッジが販促一覧に出る（本番のみ）", () => {
   const c = camp({ id: "real", stores: ["1160"], bucket: "パフェ", start: "2026-01-01", end: "2026-01-31" });
   const ctx = loadApp({ ...luqa, campaigns: [c] });
   const html = call(ctx, `PLANS_API_OK=true; WRITE_OK=true; PLANS=[{id:"plan-x",store_code:"1160",title:"秋パフェ計画",kind:"osusume",bucket:"パフェ",start:"2026-09-01",end:"2026-10-31",goal:1500000,note:"狙い",by:"me"}]; BASE_CAMPAIGNS=null; applyPlans(); renderStore("1160")`);
-  assert.ok(html.includes('data-plannew="1160"'), "＋販促を起票ボタン");
+  assert.ok(html.includes('data-plannew="1160"'), "＋起票ボタン");
   assert.ok(html.includes("秋パフェ計画") && html.includes("plbadge"), "計画がバッジ付きで並ぶ");
-  assert.ok(html.includes('data-planedit="plan-x"'), "計画は編集ボタン");
-  assert.ok(html.includes('data-plandup="real"'), "確定販促は複製ボタン");
+  // 複製/編集の細かい操作は販促詳細ページ側へ移動（一覧は簡素化）。
 });
 
 test("販促プラン：閲覧専用（WRITE_OK=false）では起票・複製ボタンを出さない", () => {
@@ -1095,30 +1094,11 @@ test("renderStore：今月の共有カード（会議/LINE用・コピー用テ�
   assert.ok(html.includes('data-sharecopy="sharetext-1006"') && html.includes('id="sharetext-1006"'), "コピー用テキスト＋ボタン");
 });
 
-test("renderStore：販促カードに前回（同じ枠）の学び＝要因メモ/次回提案を引き継ぎ表示", () => {
-  const prev = camp({ id: "old", bucket: "コース", title: "去年の夏コース",
-    start: "2025-01-01", end: "2025-01-31", memo: "去年は品切れで機会損失。仕込み増やす。" });
-  const cur = camp({ id: "new", bucket: "コース", title: "今年の夏コース", start: "2026-01-01", end: "2026-01-31" });
-  const ctx = loadApp({ ...base, campaigns: [prev, cur], proposals: { old: { next: "開始1週間前にPOP掲出。" } } });
-  const html = call(ctx, `renderStore("1006")`);
-  assert.ok(html.includes("前回「去年の夏コース」の学び"), "前回の学びの見出し");
-  assert.ok(html.includes("仕込み増やす") && html.includes("開始1週間前にPOP"), "前回メモ＋次回提案を引き継ぐ");
-});
-
 test("renderStore：終了して未記入の販促は『振り返り未記入』を強調する", () => {
   const c = camp({ id: "d1", bucket: "コース", title: "終わった企画", start: "2026-01-01", end: "2026-01-31" });
   const ctx = loadApp({ ...base, campaigns: [c] });   // today=2026-09-06 → done、memo/proposal 無し
   const html = call(ctx, `renderStore("1006")`);
   assert.ok(html.includes("振り返り未記入"), "やりっぱなしを強調");
-});
-
-test("renderStore：販促カードに その販促のPOP（制作物）が結果と並んで出る", () => {
-  const c = camp({ id: "p1", bucket: "コース", title: "夏コース", start: "2026-01-01", end: "2026-01-31" });
-  const withCr = { ...base, campaigns: [c],
-    creatives: [{ id: "cr1", campaign_id: "p1", store_code: "1006", title: "夏POP", mime: "image/png", url: "x.png" }] };
-  const ctx = loadApp(withCr);
-  const html = call(ctx, `CREATIVES_API_OK=true; renderStore("1006")`);
-  assert.ok(html.includes("POP・資料") && html.includes("夏POP"), "販促カードにPOPが束ねて出る");
 });
 
 test("renderStore：縦長対策のジャンプナビ（各セクションへ飛べる）が出る", () => {
@@ -1153,22 +1133,12 @@ test("storeCampEffect：測り方未設定の販促は measured=false で理由�
   assert.equal(e.state, "測り方 未設定");
 });
 
-test("renderStore：この店の販促に効果サマリ（◎効いた）と並べ替え・判定バッジが出る", () => {
+test("renderStore：効果スコア（◎効いた）と、販促一覧の判定バッジが出る", () => {
   const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
   const ctx = loadApp({ ...base, campaigns: [c] });
   const html = call(ctx, `renderStore("1006")`);
-  assert.ok(html.includes("効いた"), "効果サマリ");
-  assert.ok(html.includes('data-psort="effect"'), "効果順の並べ替え");
-  assert.ok(html.includes('data-pfilter="live"'), "状態タブ");
-  assert.ok(html.includes("cvm good"), "◎判定バッジ");
-});
-
-test("renderStore：前回比が一覧に併記される（同じ枠の前回の回と比較）", () => {
-  const prev = camp({ id: "p", bucket: "コース", start: "2025-01-01", end: "2025-01-31" });
-  const curr = camp({ id: "c2", bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
-  const ctx = loadApp({ ...base, campaigns: [prev, curr] });
-  const html = call(ctx, `renderStore("1006")`);
-  assert.ok(html.includes("前回比"), "前回比が一覧に出る");
+  assert.ok(html.includes("効いた"), "効果スコア（storeScoreStrip）");
+  assert.ok(html.includes("cvm good"), "販促一覧の◎判定バッジ");
 });
 
 test("storeAnnualChart：年サマリ＋月次の推移（一覧・1行=1ヶ月）が頭に出る", () => {
