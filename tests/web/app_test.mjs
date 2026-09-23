@@ -1014,11 +1014,11 @@ test("renderStore：目標対象外の実施中販促でも literal 'undefined' 
   assert.ok(html.includes("販促一覧"), "販促セクションはある");
 });
 
-test("renderStore：販促トップは累計サマリー→来月のアクションで、詳細は折りたたみへ", () => {
+test("renderStore：販促トップは いまの状況→来月やること で、詳細は折りたたみへ", () => {
   const ctx = loadApp(base);
   const html = call(ctx, `renderStore("1006")`);
-  assert.ok(html.includes("累計サマリー"), "上部に累計サマリー（予算/実績・前年対比・客単価）");
-  assert.ok(html.includes("のアクション"), "来月のアクション");
+  assert.ok(html.includes("いまの状況"), "上部に いまの状況（目標対比・前年比・客単価）");
+  assert.ok(html.includes("やること"), "来月やること");
   assert.ok(html.includes("もっと見る"), "分析系・年間スケジュールは details（もっと見る）へ格納");
   // 並び順はセクションidで確認（ナビのラベルと混同しないように）。
   assert.ok(html.indexOf('id="hero"') < html.indexOf('id="actions"'), "サマリーがアクションより先");
@@ -1031,18 +1031,18 @@ test("来月のアクション：来月動く販促に準備の抜けと去年�
   const data = { ...base, campaigns: [prev, cur], proposals: { "p-2025": { next: "予告POPを早めに" } } };
   const ctx = loadApp(data, "2026-09-23");
   const html = call(ctx, `storeNextActions("1006")`);
-  assert.match(html, /のアクション/);
+  assert.match(html, /やること/);
   assert.match(html, /今年パフェ/, "来月動く販促を出す");
   assert.match(html, /去年「去年パフェ」/, "去年の同じ回を参照");
   assert.match(html, /去年は立ち上がり弱い/, "去年の要因メモを反映");
   assert.match(html, /予告POPを早めに/, "去年の次回提案を反映");
 });
 
-test("来月のアクション：終了して振り返り未記入は『やりっぱなし』として出す", () => {
+test("来月のアクション：終了して振り返り未記入は『結果を記録する』やることに出す", () => {
   const done = camp({ id: "d1", bucket: "パフェ", start: "2026-05-01", end: "2026-06-30", title: "春パフェ" });
   const ctx = loadApp({ ...base, campaigns: [done] }, "2026-09-23");
   const html = call(ctx, `storeNextActions("1006")`);
-  assert.match(html, /やりっぱなし/);
+  assert.match(html, /結果を記録する/);
   assert.match(html, /春パフェ/);
 });
 
@@ -1094,11 +1094,11 @@ test("renderStore：今月の共有カード（会議/LINE用・コピー用テ�
   assert.ok(html.includes('data-sharecopy="sharetext-1006"') && html.includes('id="sharetext-1006"'), "コピー用テキスト＋ボタン");
 });
 
-test("renderStore：終了して未記入の販促は『振り返り未記入』を強調する", () => {
+test("renderStore：終了して未記入の販促は『結果を記録する』やることに出す", () => {
   const c = camp({ id: "d1", bucket: "コース", title: "終わった企画", start: "2026-01-01", end: "2026-01-31" });
   const ctx = loadApp({ ...base, campaigns: [c] });   // today=2026-09-06 → done、memo/proposal 無し
   const html = call(ctx, `renderStore("1006")`);
-  assert.ok(html.includes("振り返り未記入"), "やりっぱなしを強調");
+  assert.ok(html.includes("結果を記録する"), "やりっぱなしを『やること』で解消に導く");
 });
 
 test("renderStore：縦長対策のジャンプナビ（各セクションへ飛べる）が出る", () => {
@@ -1133,12 +1133,12 @@ test("storeCampEffect：測り方未設定の販促は measured=false で理由�
   assert.equal(e.state, "測り方 未設定");
 });
 
-test("renderStore：効果スコア（◎効いた）と、販促一覧の判定バッジが出る", () => {
+test("renderStore：効果サマリー（効果あり）と、販促一覧の結果バッジが出る", () => {
   const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
   const ctx = loadApp({ ...base, campaigns: [c] });
   const html = call(ctx, `renderStore("1006")`);
-  assert.ok(html.includes("効いた"), "効果スコア（storeScoreStrip）");
-  assert.ok(html.includes("cvm good"), "販促一覧の◎判定バッジ");
+  assert.ok(html.includes("効果あり"), "やさしい言葉の効果サマリー");
+  assert.ok(html.includes("cvm good"), "販促一覧の結果バッジ（効果あり）");
 });
 
 test("storeAnnualChart：年サマリ＋月次の推移（一覧・1行=1ヶ月）が頭に出る", () => {

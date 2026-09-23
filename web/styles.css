@@ -500,6 +500,30 @@ tbody tr:last-child td{border-bottom:0;}
 .na-m{color:var(--ink-2);margin-top:3px;} .na-n{color:var(--ink);margin-top:3px;}
 .na-n b{color:var(--accent);}
 .psum-i.na-w{color:var(--critical-ink);font-weight:700;}
+/* 来月の「やること」チェックリスト（動詞・最初の一歩）。行を押すとその画面へ。 */
+.do-list{list-style:none;margin:0;padding:0;}
+.do-i{display:flex;align-items:center;gap:10px;padding:12px 6px;border-bottom:1px solid var(--line);
+  font-size:14.5px;color:var(--ink);}
+.do-i:last-child{border-bottom:0;}
+.do-i[data-goal],.do-i[data-upload],.do-i[data-camp],.do-i[data-memo]{cursor:pointer;}
+.do-i[data-goal]:hover,.do-i[data-upload]:hover,.do-i[data-camp]:hover,.do-i[data-memo]:hover{background:var(--surface-2);}
+.do-c{color:var(--ink-3);font-size:16px;flex:0 0 auto;}
+.do-t{flex:1 1 auto;font-weight:600;}
+.do-go{color:var(--accent);font-weight:700;flex:0 0 auto;}
+.do-ok{padding:14px 6px;color:var(--good-ink);font-weight:600;font-size:14px;}
+/* 参考（去年どうだったか）。既定は畳む＝行を増やさない。 */
+.na-ref{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;}
+.na-ref>summary{cursor:pointer;font-size:12.5px;color:var(--ink-2);padding:4px 2px;list-style:none;}
+.na-ref>summary::-webkit-details-marker{display:none;}
+.na-ref>summary::before{content:"▸ ";color:var(--ink-3);}
+.na-ref[open]>summary::before{content:"▾ ";}
+.na-learn-in{margin:4px 0 2px 18px;font-size:12.5px;line-height:1.6;color:var(--ink-2);}
+.na-learn-in>b{color:var(--ink);}
+/* いまの状況：ひと目判定の1行。 */
+.ph-verdict{font-size:15px;font-weight:700;margin:0 0 12px;padding:9px 13px;border-radius:9px;
+  background:var(--surface-2);border:1px solid var(--line);color:var(--ink);}
+.ph-verdict.up{color:var(--good-ink);background:var(--good-soft);border-color:transparent;}
+.ph-verdict.down{color:var(--critical-ink);background:color-mix(in srgb,var(--critical-ink) 12%,var(--surface));border-color:transparent;}
 
 /* 販促の効果サマリ＋並べ替え/タブ＋用語（この店の販促の頭）。 */
 .psum{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 10px;font-size:13px;color:var(--ink-2);}
