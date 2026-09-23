@@ -481,6 +481,41 @@ function campGoalRate(c) {
   return { rate: tg.cur / t * 100, cur: tg.cur, target: t, label: tg.label, monthly: false };
 }
 
+// 達成率の5段階評価（本部運用）。◎超優秀 / 〇優秀 / △改善 / ×要改善 / ××大幅未達。
+// 80%未満は「別表記（××）」で、要改善（×）とはっきり分ける。
+function achieveGrade(rate) {
+  if (rate == null || !isFinite(rate)) return null;
+  if (rate >= 110) return { mark: "◎", label: "超優秀", tone: "g-sup", k: 5 };
+  if (rate >= 100) return { mark: "〇", label: "優秀", tone: "g-good", k: 4 };
+  if (rate >= 90) return { mark: "△", label: "改善", tone: "g-warn", k: 3 };
+  if (rate >= 80) return { mark: "×", label: "要改善", tone: "g-bad", k: 2 };
+  return { mark: "××", label: "大幅未達", tone: "g-crit", k: 1 };
+}
+
+// 販促の達成状況（当面＝月次データ版）。確定分の達成率＝実績/目標。
+// 実施中は「日割りペース」で期末見込みを概算：確定ヶ月ぶんの実績を期間全体のヶ月数に引き伸ばす。
+// ※日別売上の取込は次段階。いまは確定“月”を最小単位とした概算（bnote に明記）。
+function campPace(c) {
+  const base = campGoalRate(c);   // {rate, cur, target, label, monthly, month} | null
+  if (!base) return null;
+  const st = campStatus(c).k;
+  const out = { ...base, status: st, nowRate: base.rate, projRate: null };
+  // 月次目標（終了日なし＝1ヶ月あたり評価）は期末見込みを出さない。
+  if (base.monthly) return out;
+  const sM = c.start.slice(0, 7), eM = campEndM(c);
+  const totalMonths = monthRange(sM, eM).length || 1;
+  const tg = campTargeted(c);
+  const doneMonths = tg ? tg.months : 0;
+  if (st === "live" && base.target && doneMonths > 0 && doneMonths < totalMonths) {
+    const projected = base.cur / doneMonths * totalMonths;
+    out.projected = projected;
+    out.projRate = projected / base.target * 100;
+    out.doneMonths = doneMonths;
+    out.totalMonths = totalMonths;
+  }
+  return out;
+}
+
 // その施策の期間内で、実績が出ている直近の月。
 function latestCampMonth(c) {
   const sM = c.start.slice(0, 7), eM = campEndM(c);
@@ -3216,6 +3251,38 @@ function campPeriodActual(c) {
       <ul class="fw-list">${rows}</ul>
     </div></section>`;
 }
+// この販促だけの部門別内訳。登録された販売期間の実データ（campaign_actuals）を
+// 品目区分（store_categories.yaml）で束ねる。年間の部門推移ではなく“この販促の中身”。
+function campDeptMix(c) {
+  const a = campActual(c);
+  if (!a || !a.items || !a.items.length) return "";
+  const code = (c.stores || [])[0];
+  const tot = a.sales || a.items.reduce((s, p) => s + (p.sales || 0), 0);
+  if (!tot) return "";
+  const other = (catRules(code) && catRules(code).other) || "その他";
+  const byCat = new Map();
+  for (const p of a.items) {
+    const cat = classifyCat(p.name, code) || other;
+    const e = byCat.get(cat) || { sales: 0, qty: 0 };
+    e.sales += p.sales || 0; e.qty += p.qty || 0;
+    byCat.set(cat, e);
+  }
+  if (byCat.size <= 1) return "";   // 1区分だけなら内訳の意味が薄い（販売時期の実績で足りる）
+  const rows = [...byCat.entries()].sort((x, y) => y[1].sales - x[1].sales).map(([cat, e]) => {
+    const pct = Math.round(e.sales / tot * 100);
+    const q = e.qty ? ` <span class="fw-pq">${ten(e.qty)}点</span>` : "";
+    return `<li><span class="fw-pn"><span class="ymxcdot" style="background:${catColor(cat)}"></span>${esc(cat)}</span>` +
+      `<span class="fw-pv"><b>${man(e.sales)}</b>${q}<span class="fw-pp">${pct}%</span></span></li>`;
+  }).join("");
+  return `<section class="block">
+    <div class="bhead"><h2>部門別の内訳（この販促）</h2>
+      <span class="bnote">${esc(c.start)}〜${esc(c.end)} の実データを品目区分で集計・税抜／構成比は販促内</span></div>
+    <div class="panel">
+      <div class="cactual-sum">売上 <b>${man(tot)}</b>・${byCat.size}区分</div>
+      <ul class="fw-list">${rows}</ul>
+    </div></section>`;
+}
+
 // TOジェラートは0円だが「出品数(点数)」で見る。総スクープ = シングル×1＋ダブル×2＋トリプル×3。
 // 各フレーバーの点数の構成比を出す（この回の販促2品は★で強調）。
 // 二重計上を避けるため、容器行(TOジェラート単/双/三)・サイズ内訳(TOシングル〜)・店内(ジェラート）〜)・
@@ -3279,7 +3346,45 @@ function renderCampaign(id) {
       ? `<button class="goalbtn" data-goal="${campKey(c)}" title="目標を編集">目標 ${man(tgt)}円 ✎</button>`
       : `<button class="goalbtn add" data-goal="${campKey(c)}">＋ 目標を入力</button>`;
 
-  // 全体結果（確定月・全店合算）
+  // ── 達成サマリー（この販促の主役）。5段階評価＋達成率＋実施中は日割りペース見込み。
+  const pace = !isRatio ? campPace(c) : null;
+  let achHtml;
+  if (isRatio) {
+    achHtml = `<div class="empty">原価率では販促の達成集計を出しません。売上に切り替えてご覧ください。</div>`;
+  } else if (!goalEligible(c)) {
+    achHtml = `<div class="cmemo muted">この販促は目標運用（2026年10月分〜）の対象外です。</div>`;
+  } else if (tgt == null) {
+    achHtml = `<div class="cmemo muted">＋目標を入力すると、達成率と5段階評価（◎〇△××）が出ます。<div style="margin-top:8px">${goalBtn}</div></div>`;
+  } else if (!pace) {
+    achHtml = `<div class="cmemo muted">目標 <b>${man(tgt)}円</b>。確定した月の実績が出たら達成率を表示します。<div style="margin-top:8px">${goalBtn}</div></div>`;
+  } else {
+    const g = achieveGrade(pace.nowRate);
+    const nowLbl = pace.monthly ? `${pace.month}の1ヶ月` : (pace.status === "done" ? "確定・最終" : `確定${pace.doneMonths != null ? pace.doneMonths : ""}ヶ月`);
+    // 実施中は日割りペース見込み（次段階で日別化。いまは確定“月”ペース概算）。
+    const pg = (pace.status === "live" && pace.projRate != null) ? achieveGrade(pace.projRate) : null;
+    const projRow = pg
+      ? `<div class="ach-proj ${pg.tone}">
+          <span class="ach-mark sm">${pg.mark}</span>
+          <div class="ach-proj-b"><div>見込み達成率 <b>${pace.projRate.toFixed(0)}%</b>・${pg.label}<span class="ach-pill">日割りペース概算</span></div>
+            <div class="sub">確定${pace.doneMonths}/${pace.totalMonths}ヶ月ぶんの実績を期末まで引き伸ばした概算（日別売上の取込は次段階）</div></div></div>`
+      : "";
+    achHtml = `<div class="ach">
+      <div class="ach-hero ${g.tone}">
+        <span class="ach-mark">${g.mark}</span>
+        <div class="ach-figs"><div class="ach-rate">${pace.nowRate.toFixed(0)}<span class="u">%</span></div>
+          <div class="ach-grade">${g.label}</div></div>
+      </div>
+      <div class="ach-meta">
+        <div class="ach-line">目標 <b>${man(tgt)}</b> → 実績 <b>${man(pace.cur)}</b>${pace.label ? `　<span class="sub">${esc(pace.label)}</span>` : ""}</div>
+        <div class="ach-line sub">${nowLbl}の達成率${pace.status === "live" ? "（現時点）" : ""}</div>
+        ${projRow}
+        <div class="ach-scale">◎110%↑ 〇100%↑ △90%↑ ×80%↑ ××80%未満</div>
+        <div class="cgoalbar">${goalBtn}</div>
+      </div>
+    </div>`;
+  }
+
+  // 結果（全体・確定月）。目標達成は上の達成サマリーが持つので、ここは前年比などの実績。
   let overall;
   if (isRatio) {
     overall = `<div class="empty">原価率では施策の効果集計を出しません。売上に切り替えてご覧ください。</div>`;
@@ -3289,12 +3394,6 @@ function renderCampaign(id) {
       : `<span class="muted">前年比 ―</span>`;
     const mom = sum.momPct != null
       ? `<span class="${sum.momPct >= 0 ? "up" : "down"}">前月比 ${signed(sum.momPct)}%</span>` : "";
-    // 目標は円（売上）で立てるので、達成率は必ず売上で割る。
-    const gr = campGoalRate(c);
-    const goalKpi = tgt != null
-      ? `<div class="kpi"><div class="lbl">目標達成${gr && gr.label ? `（${esc(gr.label)}${gr.monthly ? `・${gr.month}の1ヶ月` : ""}）` : ""}</div>
-          <div class="big ${gr && gr.rate >= 100 ? "up" : "down"}">${gr ? gr.rate.toFixed(0) + "%" : "―"}</div>
-          <div class="delta">目標 ${man(tgt)} → 実績 ${gr ? man(gr.cur) : "―"}</div></div>` : "";
     const covKpi = (METRIC === "sales" && sum.covers != null)
       ? `<div class="kpi"><div class="lbl">集客（確定分）</div><div class="big">${nin(sum.covers)}</div>
           <div class="delta">${sum.coversPct != null ? `<span class="${sum.coversPct >= 0 ? "up" : "down"}">前年比 ${signed(sum.coversPct)}%</span>` : "前年比 ―"}</div></div>` : "";
@@ -3318,7 +3417,7 @@ function renderCampaign(id) {
       <div class="kpi"><div class="lbl">店全体の${METRIC_LABELS[METRIC]}（参考・確定${sum.months}ヶ月・${sum.stores}/${sum.total}店）</div>
         <div class="big">${man(sum.cur)}<span class="unit">円</span></div>
         <div class="delta">${yoy}　${mom}<br><span class="sub">${esc(overlapNote(c))}</span></div></div>
-      ${goalKpi}${covKpi}
+      ${covKpi}
     </div>`;
   } else {
     overall = `<div class="empty">確定した月の売上が出たら、前年同月比などの結果を表示します（月単位で集計）。</div>`;
@@ -3350,12 +3449,6 @@ function renderCampaign(id) {
       <span class="cmeff">${effHtml}</span>${lunchLink}</li>`;
   }).join("");
 
-  // 要因メモ
-  const memo = memoOf(c);
-  const memoHtml = memo
-    ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${campKey(c)}" title="メモを編集">✎</button></div>`
-    : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`;
-
   // POP・制作物（この施策に紐づくもの）＋アップロード導線
   const crs = creativesForCampaign(id);
   const crAdd = CREATIVES_API_OK
@@ -3365,6 +3458,10 @@ function renderCampaign(id) {
         ${crs.length ? `<div class="cgrid">${crs.map(creativeCard).join("")}</div>`
           : `<p class="muted" style="margin:2px 0 10px">まだありません。PDF・写真・Excelを追加できます。</p>`}
         ${crAdd}</section>` : "";
+
+  // 進捗バー（達成サマリー内に置く。期間の経過％）
+  const progBar = `<div class="cprog"><span class="cprog-fill ${st.k}" style="width:${prog}%"></span></div>
+    <div class="cprog-lbl"><span>${c.start}</span><span class="cprog-now ${st.k}">${st.label}${st.k === "live" ? `・${prog}%経過` : ""}</span><span>${c.end}</span></div>`;
 
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button>
@@ -3380,13 +3477,14 @@ function renderCampaign(id) {
       ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
     </header>
 
+    ${crBlock}
+
     <section class="block">
-      <div class="bhead"><h2>進捗</h2>
-        <span class="bnote">${st.label}${st.k === "live" ? `・期間の ${prog}% 経過` : ""}</span></div>
+      <div class="bhead"><h2>達成サマリー</h2>
+        <span class="bnote">売上目標に対する達成率を5段階で・${st.label}${st.k === "live" ? `／期間の${prog}%経過` : ""}</span></div>
       <div class="panel">
-        <div class="cprog"><span class="cprog-fill ${st.k}" style="width:${prog}%"></span></div>
-        <div class="cprog-lbl"><span>${c.start}</span><span class="cprog-now ${st.k}">${st.label}</span><span>${c.end}</span></div>
-        <div class="cgoalbar">${goalBtn}</div>
+        ${progBar}
+        ${achHtml}
       </div>
     </section>
 
@@ -3396,19 +3494,18 @@ function renderCampaign(id) {
       <div class="panel">${overall}</div>
     </section>
 
-    ${renderTargetReview(c)}
-    ${renderReview(c)}
+    ${campDeptMix(c)}
     ${campPeriodActual(c)}
     ${campGelatoCompo(c)}
-    ${campDeptCard(c)}
+    ${renderTargetReview(c)}
+    ${renderReview(c)}
 
     <section class="block">
       <div class="bhead"><h2>対象店ごとの結果</h2>
         <span class="bnote">${c.stores.length}店　店をタップで詳細へ</span></div>
       <div class="panel"><ul class="cmlist">${rowsHtml}</ul></div>
     </section>
-    ${renderEnvEffect(id)}
-    ${crBlock}`;
+    ${renderEnvEffect(id)}`;
 }
 
 // ── 店舗管理（店舗ごとの施策一覧・進捗・結果）─────────────────────────────

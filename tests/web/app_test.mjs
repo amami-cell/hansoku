@@ -218,6 +218,119 @@ test("画面の指標を切り替えても、達成率は動かない", () => {
   assert.equal(call(ctx, `campGoalRate(${JSON.stringify(c)}).cur`), before);
 });
 
+console.log("達成率の5段階評価（achieveGrade）");
+
+test("◎超優秀110%↑ / 〇優秀100%↑ / △改善90%↑ / ×要改善80%↑ / ××大幅未達80%未満", () => {
+  const ctx = loadApp({ ...base });
+  const g = r => call(ctx, `achieveGrade(${r})`);
+  assert.deepEqual([g(130).mark, g(130).label], ["◎", "超優秀"]);
+  assert.deepEqual([g(110).mark, g(105).mark], ["◎", "〇"]);
+  assert.deepEqual([g(100).mark, g(100).label], ["〇", "優秀"]);
+  assert.deepEqual([g(99).mark, g(90).mark], ["△", "△"]);
+  assert.deepEqual([g(89).mark, g(80).mark], ["×", "×"]);
+  assert.deepEqual([g(79).mark, g(79).label], ["××", "大幅未達"]);
+  assert.equal(g(null), null);
+});
+
+console.log("販促の達成状況・日割りペース見込み（campPace）");
+
+// 6ヶ月の実施中販促。確定2ヶ月ぶんの実績を期末まで引き伸ばして見込みを出す。
+const paceData = () => ({
+  ...base,
+  departments_monthly: { 1006: {
+    "2026-07": bucket("コース", 600000, 5000000),
+    "2026-08": bucket("コース", 600000, 5000000),
+  } },
+});
+const paceCamp = () => {
+  const c = camp({ id: "cp", bucket: "コース", start: "2026-07-01", end: "2026-12-31" });
+  c.key = "cp@2026";
+  return c;
+};
+
+test("現時点は確定分の達成率、見込みは日割りペースで期末まで引き伸ばす", () => {
+  const c = paceCamp();
+  const ctx = loadApp({ ...paceData(), campaigns: [c] }, "2026-09-06");
+  call(ctx, `API_OK = true; SERVER_TARGETS = { "cp@2026": { value: 3000000 } };`);
+  const p = call(ctx, `campPace(${JSON.stringify(c)})`);
+  assert.equal(Math.round(p.nowRate), 40);           // 120万 / 300万
+  assert.equal(p.doneMonths, 2);
+  assert.equal(p.totalMonths, 6);
+  assert.equal(Math.round(p.projRate), 120);         // 120万/2*6=360万 → 300万比 120%
+  // 現時点は××（大幅未達）だが、ペース見込みは◎（超優秀）
+  assert.equal(call(ctx, `achieveGrade(${p.nowRate}).mark`), "××");
+  assert.equal(call(ctx, `achieveGrade(${p.projRate}).mark`), "◎");
+});
+
+test("終了した販促は最終の達成率のみ（見込みは出さない）", () => {
+  const c = camp({ id: "cd", bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
+  c.key = "cd@2026";
+  const ctx = loadApp({ ...base, campaigns: [c] });
+  call(ctx, `API_OK = true; SERVER_TARGETS = { "cd@2026": { value: 1000000 } };`);
+  const p = call(ctx, `campPace(${JSON.stringify(c)})`);
+  assert.equal(Math.round(p.nowRate), 100);
+  assert.equal(p.projRate, null);
+});
+
+console.log("販促ページの構成（renderCampaign）");
+
+// 目標運用は2026年10月分から。達成バッジが出るのは目標対象（＝10月以降まで続く）販促。
+// 実施中・確定2ヶ月の販促で、目標120万に対しコース計120万＝現時点100%。
+const eligCamp = () => {
+  const c = camp({ id: "cx", bucket: "コース", start: "2026-07-01", end: "2026-12-31" });
+  c.key = "cx@2026";
+  return c;
+};
+const renderElig = (extra = "") => {
+  const c = eligCamp();
+  const ctx = loadApp({ ...paceData(), campaigns: [c] }, "2026-09-06");
+  call(ctx, `API_OK = true; ${extra} SERVER_TARGETS = { "cx@2026": { value: 1200000 } };`);
+  return { ctx, html: call(ctx, `renderCampaign(${JSON.stringify("cx")})`) };
+};
+
+test("POP・制作物が達成サマリーより上（先頭）に出る", () => {
+  const { html } = renderElig("CREATIVES_API_OK = true;");
+  const iPop = html.indexOf("POP・制作物");
+  const iAch = html.indexOf("達成サマリー");
+  assert.ok(iPop >= 0 && iAch >= 0, "両セクションが出る");
+  assert.ok(iPop < iAch, "POPが達成サマリーより先");
+});
+
+test("5段階の達成バッジと達成率が達成サマリーに出る", () => {
+  const { html } = renderElig();
+  assert.match(html, /ach-rate/);
+  assert.match(html, /〇|◎|△|×/);
+  assert.match(html, /100<span class="u">%/);   // コース計120万/目標120万＝現時点100%
+});
+
+test("実施中は日割りペースの見込み達成率も出す", () => {
+  const { html } = renderElig();
+  assert.match(html, /見込み達成率/);
+  assert.match(html, /日割りペース概算/);
+});
+
+test("年間の部門推移（関連部門の実績・月次）は販促ページに出さない", () => {
+  const { html } = renderElig();
+  assert.ok(!/関連部門の実績/.test(html), "年間の部門推移カードは販促ページから外す");
+});
+
+test("この販促の部門別内訳（campDeptMix）は販売期間の実データを品目区分で束ねる", () => {
+  const c = camp({ id: "cm", start: "2026-03-01", end: "2026-03-31" });
+  const data = { ...base,
+    store_categories: { 1006: { name: "t", other: "その他",
+      categories: [{ name: "ケーキ", keywords: ["ケーキ"] }, { name: "ドリンク", keywords: ["ティー", "ラテ"] }] } },
+    campaign_actuals: { cm: { sales: 300000, qty: 30, items: [
+      { name: "いちごショートケーキ", sales: 200000, qty: 20 },
+      { name: "ダージリンティー", sales: 100000, qty: 10 },
+    ] } },
+  };
+  const ctx = loadApp({ ...data, campaigns: [c] });
+  const html = call(ctx, `campDeptMix(${JSON.stringify(c)})`);
+  assert.match(html, /部門別の内訳（この販促）/);
+  assert.match(html, /ケーキ/);
+  assert.match(html, /ドリンク/);
+});
+
 test("終了日を書かない施策は「実施中」で、効果は直近まで見る", () => {
   const c = camp({ id: "gm1", kind: "gm", start: "2026-01-01", end: "2026-01-01" });
   c.open_ended = true;
