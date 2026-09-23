@@ -1528,6 +1528,8 @@ textarea.pf-in{resize:vertical;line-height:1.5;}
   color:var(--accent);background:var(--surface);border:1px dashed var(--accent);border-radius:10px;
   padding:10px;cursor:pointer;min-height:44px;}
 .gg-upl:hover{background:var(--good-soft);}
+.gg-skip{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2);cursor:pointer;padding:6px 2px;}
+.gg-skip input{width:18px;height:18px;}
 .pf-tg-inherit{margin-left:8px;font-size:10.5px;font-weight:600;color:var(--gold,#a9722a);background:color-mix(in srgb,var(--gold,#a9722a) 14%,transparent);border-radius:5px;padding:1px 7px;}
 .pf-tg-grid{display:flex;flex-direction:column;gap:7px;}
 .pf-tg{display:grid;grid-template-columns:1fr auto 112px;grid-template-areas:"l fill in" "help help diff";gap:2px 8px;align-items:center;}

@@ -114,7 +114,8 @@ async function fetchServerTargets() {
 // 現システムで「振り返り数値」を出せるものだけ。人件費率/販管費/診断スコアはデータ源が
 // 無いので載せない。higherBetter=false（原価率）は達成色を反転（低いほど良い）。
 const TARGET_METRICS = [
-  { key: "sales", label: "売上目標", unit: "円", higher: true },
+  { key: "sales", label: "販促の売上（対象部門/商品）", unit: "円", higher: true },
+  { key: "store_sales", label: "店全体の売上", unit: "円", higher: true },
   { key: "covers", label: "客数", unit: "人", higher: true },
   { key: "avg_check", label: "客単価", unit: "円", higher: true },
   { key: "cost_rate", label: "原価率", unit: "%", higher: false },
@@ -192,7 +193,7 @@ function _metricOverMonths(metric, code, months) {
     if (typeof cv === "number") { covers += cv; cN++; }
     if (typeof sv === "number" && typeof cr === "number") { costNum += sv * cr; costDen += sv; }
   }
-  if (metric === "sales") return sN ? Math.round(sales) : null;
+  if (metric === "sales" || metric === "store_sales") return sN ? Math.round(sales) : null;
   if (metric === "covers") return cN ? Math.round(covers) : null;
   if (metric === "avg_check") return (covers > 0 && sN) ? Math.round(sales / covers) : null;
   // DATA.cost_rate は割合（0.30＝30%）で入っている。目標は％で入力するので％へ揃える。
@@ -332,6 +333,7 @@ const _mtByKey = () => Object.fromEntries(TARGET_METRICS.map(m => [m.key, m]));
 // 目標カテゴリの選択肢（売上＝この販促の対象部門/商品の売上）。
 const GOAL_CAT_OPTS = [
   { key: "sales", label: "販促の売上（対象部門/商品）" },
+  { key: "store_sales", label: "店全体の売上" },
   { key: "covers", label: "客数" },
   { key: "avg_check", label: "客単価" },
   { key: "cost_rate", label: "原価率" },
@@ -409,11 +411,12 @@ function openGoalGrid(c) {
         <div class="gg-rows" id="gg-rows"></div>
         <button type="button" class="gg-add" id="gg-add">＋ 目標を追加</button>
         ${CREATIVES_API_OK ? `
-        <div class="pf-tg-head" style="margin-top:16px">POP・画像（同じ画面でアップロード）</div>
+        <div class="pf-tg-head" style="margin-top:16px">POP・画像</div>
         <div class="gg-pop" id="gg-pop"></div>
         <div class="gg-pop-actions">
-          <label class="gg-upl">＋ 今アップロード<input type="file" id="gg-pop-file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,image/*,application/pdf" hidden></label>
-          <span class="gr-help">完成していれば今アップロード。まだなら、このまま保存でOK（「来月やること」に〈POPを用意する〉として残ります）。</span>
+          <label class="gg-upl" id="gg-upl-label">POP・画像をアップロード<input type="file" id="gg-pop-file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,image/*,application/pdf" hidden></label>
+          <label class="gg-skip"><input type="checkbox" id="gg-skip"> 完成後にアップロードする（今はスキップ）</label>
+          <div class="gr-help" id="gg-skip-note" hidden>スキップOK。「来月やること」に〈POPを用意する〉として残り、あとからアップロードできます。</div>
         </div>` : ""}
         <div class="pf-msg" id="pf-msg" hidden></div>
         <div class="pf-actions"><span></span><div>
@@ -439,6 +442,12 @@ function openGoalGrid(c) {
     await uploadCreative(f, c.id, "");
     popFile.value = ""; refreshPops();
     if (msg) { msg.textContent = "POPをアップロードしました。"; }
+  });
+  // 基本はアップロード。完成後アップロードならチェックでスキップ（アップロード欄を畳む）。
+  const skip = ov.querySelector("#gg-skip"), uplLabel = ov.querySelector("#gg-upl-label"), skipNote = ov.querySelector("#gg-skip-note");
+  if (skip) skip.addEventListener("change", () => {
+    if (uplLabel) uplLabel.style.display = skip.checked ? "none" : "";
+    if (skipNote) skipNote.hidden = !skip.checked;
   });
   const rowsEl = ov.querySelector("#gg-rows");
   let seq = 0;
@@ -474,7 +483,9 @@ function openGoalGrid(c) {
           : `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}%`;
       }
       help.textContent = base == null
-        ? "この指標の直近実績がありません。狙う値を入力してください。"
+        ? (sel.value === "sales"
+            ? "この販促は対象部門/商品が未設定のため実績が出せません。『店全体の売上』を選ぶか、狙う値を入力してください。"
+            : "この指標の直近実績がありません。狙う値を入力してください。")
         : `直近${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）`;
     };
     sel.addEventListener("change", refresh);

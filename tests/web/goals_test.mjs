@@ -204,7 +204,7 @@ await test("目標の範囲チェック：原価率は0〜100%、その他は0�
   getEl("pf-tg-cost_rate").value = "120";
   assert.match(call("validateTargetInputs()"), /原価率.*0〜100/, "原価率120%は弾く");
   getEl("pf-tg-cost_rate").value = "28"; getEl("pf-tg-sales").value = "-5";
-  assert.match(call("validateTargetInputs()"), /売上目標.*0以上/, "負の売上目標は弾く");
+  assert.match(call("validateTargetInputs()"), /販促の売上.*0以上/, "負の売上目標は弾く");
   getEl("pf-tg-sales").value = "16000000";
   assert.equal(call("validateTargetInputs()"), null, "妥当な値は通る");
 });
