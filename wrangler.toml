@@ -18,6 +18,10 @@ directory = "./web"
 binding = "ASSETS"
 # SPA。未知のパスは index.html を返す（今は単一ページだが将来のルーティングに備える）
 not_found_handling = "single-page-application"
+# 全リクエストをまず Worker に通し、入口チェック後にアセットを返す。これが無いと
+# 静的アセット（HTML・app.js・data/dashboard.js＝実データ）が入口を飛ばして直接配信され、
+# 合言葉ログインにしても中身が誰でも取れてしまう。前段の Cloudflare Access を外す前提で必須。
+run_worker_first = true
 
 # 制作物PDFの置き場（Cloudflare R2）。/creatives/* を Worker がここから返す。
 # バケットは deploy.yml が無ければ作る（冪等）。

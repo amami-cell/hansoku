@@ -12,6 +12,10 @@ compatibility_flags = ["nodejs_compat"]
 directory = "./web"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
+# 全リクエストをまず Worker に通す。これが無いと静的アセット（HTML・app.js・
+# data/dashboard.js＝実データ）が Worker の入口チェックを飛ばして直接配信され、
+# 合言葉ログインにしても中身が誰でも取れてしまう。Worker 先行＝データも合言葉で保護。
+run_worker_first = true
 
 # 制作物（POP）の実体は本番と同じ R2 バケットから返す。
 [[r2_buckets]]
