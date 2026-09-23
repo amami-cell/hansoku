@@ -34,6 +34,20 @@ DRINK_HINTS = ["ドリンク", "ラテ", "コーヒー", "珈琲", "カフェ", 
                "エスプレッソ", "カプチーノ", "アイスチョコ"]
 
 
+def _expected_cat(cid: str) -> str | None:
+    """施策id から期待される品目区分（ズレ検出の目安）。noel はケーキ寄りの例外扱いなし。"""
+    c = cid or ""
+    if "cake" in c:
+        return "ケーキ"
+    if "parfait" in c:
+        return "パフェ"
+    if "gelato" in c:
+        return "ジェラート"
+    if "collab" in c:
+        return "コラボ"
+    return None
+
+
 def _schedule_titles() -> dict[str, str]:
     """config/schedule.yaml から 施策id → タイトル。監査の見出し用（読み取りのみ）。"""
     path = Path(__file__).resolve().parent.parent / "config" / "schedule.yaml"
@@ -81,11 +95,18 @@ def audit_campaign_pages(rows, rules) -> None:
         title = titles.get(cid, "")
         cats = "／".join(f"{c} {v/tot*100:.0f}%" for c, v in sorted(by_cat.items(), key=lambda x: -x[1]))
         head = f"  ▸ {cid} {title}".rstrip()
-        print(f"{head}  [{round(tot):,}円]  {cats}")
+        # 施策名（id）から期待される区分と、実データの最多区分がズレたら中身を全部出す。
+        expected = _expected_cat(cid)
+        top_cat = max(by_cat.items(), key=lambda x: x[1])[0] if by_cat else None
+        mismatch = expected and top_cat and top_cat != expected
+        print(f"{head}  [{round(tot):,}円]  {cats}" + (f"  ⚠ 想定={expected} / 実態={top_cat}" if mismatch else ""))
         for name, cat, s in sorted(susp, key=lambda x: -x[2]):
             print(f"      ★誤分類の疑い [{cat}] {name}  {round(s):,}円")
             flagged += 1
-        if other_name in by_cat:
+        if mismatch:
+            for name, s in sorted(items.items(), key=lambda x: -x[1]):
+                print(f"      ・[{classify_category(name, rules)}] {name}  {round(s):,}円")
+        elif other_name in by_cat:
             for name, s in sorted(items.items(), key=lambda x: -x[1]):
                 if classify_category(name, rules) == other_name:
                     print(f"      ・未分類({other_name}) {name}  {round(s):,}円")
