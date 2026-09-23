@@ -125,6 +125,33 @@ const TARGET_METRICS = [
   { key: "hour_covers", label: "時間帯集客", unit: "人", higher: true, daily: true },
   { key: "hour_avg_check", label: "時間帯客単価", unit: "円", higher: true, daily: true },
 ];
+const HOUR_METRICS = new Set(["hour_sales", "hour_covers", "hour_avg_check"]);
+// 時間帯バンド（営業時間帯）。目標はバンド単位で持てる（例 hour_sales#dinner）。
+const TIME_BANDS = [
+  { key: "lunch",    label: "ランチ",   range: "10〜15", hours: [10, 11, 12, 13, 14], core: true },
+  { key: "idle",     label: "アイドル", range: "15〜17", hours: [15, 16],             core: true },
+  { key: "dinner",   label: "ディナー", range: "17〜23", hours: [17, 18, 19, 20, 21, 22], core: true },
+  { key: "midnight", label: "深夜",     range: "23〜5",  hours: [23, 0, 1, 2, 3, 4],  core: false },
+  { key: "morning",  label: "早朝",     range: "5〜10",  hours: [5, 6, 7, 8, 9],      core: false },
+];
+// 指標キーを「基本指標＋バンド」に分ける（hour_sales#dinner → base=hour_sales, band=ディナー）。
+function splitMetric(key) {
+  const i = String(key).indexOf("#");
+  if (i < 0) return { base: key, band: null };
+  return { base: key.slice(0, i), band: TIME_BANDS.find(b => b.key === key.slice(i + 1)) || null };
+}
+// その店が営業している（＝実績のある）時間帯バンド。深夜・早朝が無い店では選択肢に出さない。
+function storeBands(code) {
+  const per = (DATA.hourly || {})[code] || {};
+  return TIME_BANDS.filter(b => b.hours.some(h => ((per[String(h)] || {}).covers || 0) > 0));
+}
+// 指標キーの表示ラベル（バンド付きは「時間帯売上（ディナー）」）。
+function metricLabel(key) {
+  const { base, band } = splitMetric(key);
+  const mt = TARGET_METRICS.find(m => m.key === base);
+  const bl = mt ? mt.label : base;
+  return band ? `${bl.replace("時間帯", "時間帯")}（${band.label}）` : bl;
+}
 const shiftYear = (ym, d) => { if (!ym) return ""; const [y, m] = ym.split("-"); return `${+y + d}-${m}`; };
 // 期間の月一覧（既存 monthRange を使う。範囲不正なら空/単月）。
 const monthsBetween = (a, b) => (a && b && b >= a) ? monthRange(a, b) : (a ? [a] : []);
@@ -154,9 +181,10 @@ function _latestMonth(code) {
 // code は文字列（1店）でも配列（複数店を合算）でもよい。原価率・客単価は売上加重で合算。
 function _metricOverMonths(metric, code, months) {
   const codes = Array.isArray(code) ? code : [code];
-  if (metric === "hour_sales" || metric === "hour_covers" || metric === "hour_avg_check") {
-    // 時間帯は「1日平均（A/V）」。月別プロファイル（各月＝代表日1日ぶん）を、
-    // 対象月ぶん集めて日数で割る。前年同期なら前年の月群が渡る＝前年の1日平均になる。
+  const { base, band } = splitMetric(metric);
+  if (HOUR_METRICS.has(base)) {
+    // 時間帯は「1日平均（A/V）」。バンド指定があればその時間帯だけ合算する。
+    const inBand = h => !band || band.hours.includes(+h);
     const bm = DATA.hourly_by_month || {};
     let s = 0, c = 0, days = 0;
     const ms = (months && months.length) ? months : null;
@@ -165,24 +193,24 @@ function _metricOverMonths(metric, code, months) {
       const keys = ms ? ms.filter(m => per[m]) : Object.keys(per);
       for (const m of keys) {
         const prof = per[m]; let ms_ = 0, mc = 0;
-        for (const h of Object.keys(prof)) { ms_ += (prof[h] || {}).sales || 0; mc += (prof[h] || {}).covers || 0; }
+        for (const h of Object.keys(prof)) { if (!inBand(h)) continue; ms_ += (prof[h] || {}).sales || 0; mc += (prof[h] || {}).covers || 0; }
         s += ms_; c += mc; days += 1;
       }
     }
     if (days > 0) {
-      if (metric === "hour_sales") return Math.round(s / days) || null;
-      if (metric === "hour_covers") return Math.round(c / days) || null;
+      if (base === "hour_sales") return Math.round(s / days) || null;
+      if (base === "hour_covers") return Math.round(c / days) || null;
       return c ? Math.round(s / c) : null;   // 客単価は日数が相殺
     }
     // フォールバック：月別が無い（旧データ）なら、全月合算スナップショットを1件として使う。
     let fs = 0, fc = 0, any = false;
     for (const cd of codes) {
       const per = (DATA.hourly || {})[cd]; if (!per) continue; any = true;
-      for (const h of Object.keys(per)) { fs += (per[h] || {}).sales || 0; fc += (per[h] || {}).covers || 0; }
+      for (const h of Object.keys(per)) { if (!inBand(h)) continue; fs += (per[h] || {}).sales || 0; fc += (per[h] || {}).covers || 0; }
     }
     if (!any) return null;
-    if (metric === "hour_sales") return fs || null;
-    if (metric === "hour_covers") return fc || null;
+    if (base === "hour_sales") return fs || null;
+    if (base === "hour_covers") return fc || null;
     return fc ? Math.round(fs / fc) : null;
   }
   if (!months || !months.length) return null;
@@ -366,22 +394,25 @@ function goalRef(c, key) {
   return { base, prevPct, isRate };
 }
 const goalRefValue = (c, key) => goalRef(c, key).base;
-// 目標マップ（指標→値）をサーバ保存。渡した指標は upsert、渡っていない指標は削除（消した行の反映）。
+// 目標マップ（指標→値）をサーバ保存。既存キー∪新キー（時間帯バンド hour_sales#dinner
+// なども含む）を突き合わせ、渡した指標は upsert、渡っていない指標は削除（消した行の反映）。
 async function saveGoalMap(gkey, map) {
-  for (const mt of TARGET_METRICS) {
-    const has = Object.prototype.hasOwnProperty.call(map, mt.key);
-    const target = has ? map[mt.key] : null;
+  const existing = Object.keys(SERVER_TARGETS_M[gkey] || {});
+  const keys = [...new Set([...existing, ...Object.keys(map)])];
+  for (const k of keys) {
+    const has = Object.prototype.hasOwnProperty.call(map, k);
+    const target = has ? map[k] : null;
     try {
       const res = await fetch("/api/targets", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id: gkey, metric: mt.key, target }),
+        body: JSON.stringify({ id: gkey, metric: k, target }),
       });
       if (res.ok) {
         SERVER_TARGETS_M[gkey] = SERVER_TARGETS_M[gkey] || {};
-        if (target == null) { delete SERVER_TARGETS_M[gkey][mt.key]; if (mt.key === "sales") delete SERVER_TARGETS[gkey]; }
+        if (target == null) { delete SERVER_TARGETS_M[gkey][k]; if (k === "sales") delete SERVER_TARGETS[gkey]; }
         else {
-          SERVER_TARGETS_M[gkey][mt.key] = { value: target, by: "自分", at: new Date().toISOString() };
-          if (mt.key === "sales") SERVER_TARGETS[gkey] = { value: target, by: "自分", at: new Date().toISOString() };
+          SERVER_TARGETS_M[gkey][k] = { value: target, by: "自分", at: new Date().toISOString() };
+          if (k === "sales") SERVER_TARGETS[gkey] = { value: target, by: "自分", at: new Date().toISOString() };
         }
       }
     } catch (e) { /* 1指標の失敗で全体を止めない */ }
@@ -394,9 +425,14 @@ function openGoalGrid(c) {
     : mt.unit === "円" ? money(v)
     : mt.unit === "%" ? v + "%"
     : ten(v) + mt.unit;
-  // 既存の保存済み目標→初期行。無ければ「販促の売上」1行から。
+  // 既存の保存済み目標→初期行（時間帯バンド hour_sales#dinner 等も含めて全キーから）。
+  const savedMap = SERVER_TARGETS_M[gkey] || SERVER_TARGETS_M[c.id] || {};
   const saved = [];
-  for (const m of TARGET_METRICS) { const v = targetMetricOf(c, m.key); if (v != null) saved.push({ key: m.key, val: v }); }
+  for (const k of Object.keys(savedMap)) {
+    const v = savedMap[k] && savedMap[k].value;
+    if (typeof v === "number") saved.push({ key: k, val: v });
+  }
+  if (!saved.length) { const sv = targetMetricOf(c, "sales"); if (sv != null) saved.push({ key: "sales", val: sv }); }
   const initRows = saved.length ? saved : [{ key: "sales", val: "" }];
 
   let ov = document.getElementById("goalgrid"); if (ov) ov.remove();
@@ -409,6 +445,7 @@ function openGoalGrid(c) {
         <div class="gg-h"><b>${esc(c.title)}</b><span class="sub">${esc(campRange(c))}${(c.stores || [])[0] ? "・" + esc(storeName(c.stores[0])) : ""}</span></div>
         <div class="pf-tg-head">カテゴリを選んで目標を打ち込む。薄字＝直近実績＋2%の目安（原価率は−2%）。「＋目標を追加」で複数入れられます。</div>
         <div class="gg-rows" id="gg-rows"></div>
+        <label class="gg-force"><input type="checkbox" id="gg-force"> 営業時間外の時間帯（深夜・早朝など）も選べるようにする</label>
         <button type="button" class="gg-add" id="gg-add">＋ 目標を追加</button>
         ${CREATIVES_API_OK ? `
         <div class="pf-tg-head" style="margin-top:16px">POP・画像</div>
@@ -450,49 +487,74 @@ function openGoalGrid(c) {
     if (skipNote) skipNote.hidden = !skip.checked;
   });
   const rowsEl = ov.querySelector("#gg-rows");
-  let seq = 0;
+  const gcode = (c.stores || [])[0] || "";
+  const opBands = storeBands(gcode);
+  const forceOn = () => { const f = ov.querySelector("#gg-force"); return !!(f && f.checked); };
+  // バンドの選択肢。基本は営業している時間帯だけ。強制表示ONで全時間帯。選択中は必ず含める。
+  const bandOptsHtml = selBand => {
+    let list = forceOn() ? TIME_BANDS.slice() : opBands.slice();
+    if (!list.length) list = TIME_BANDS.slice();
+    if (selBand && !list.some(b => b.key === selBand)) { const b = TIME_BANDS.find(x => x.key === selBand); if (b) list.push(b); }
+    const def = selBand || (list.find(b => b.key === "dinner") || list[0] || {}).key;
+    return list.map(b => `<option value="${b.key}"${b.key === def ? " selected" : ""}>${esc(b.label)}（${esc(b.range)}）</option>`).join("");
+  };
   const renumber = () => [...rowsEl.querySelectorAll(".gr-n")].forEach((el, i) => el.textContent = `目標${i + 1}`);
+  const usedBases = () => [...rowsEl.querySelectorAll(".gr-cat")].map(s => s.value);
   const addRow = (selKey, val) => {
-    seq += 1;
-    const used = [...rowsEl.querySelectorAll(".gr-cat")].map(s => s.value);
-    const def = selKey || (GOAL_CAT_OPTS.find(o => !used.includes(o.key)) || GOAL_CAT_OPTS[0]).key;
+    const parsed = splitMetric(selKey || "");
+    const base0 = GOAL_CAT_OPTS.some(o => o.key === parsed.base) ? parsed.base : null;
+    const def = base0 || (GOAL_CAT_OPTS.find(o => !usedBases().includes(o.key)) || GOAL_CAT_OPTS[0]).key;
+    const selBand = parsed.band ? parsed.band.key : null;
     const row = document.createElement("div"); row.className = "gr";
     row.innerHTML = `<div class="gr-top">
         <span class="gr-n">目標</span>
         <select class="pf-in gr-cat">${GOAL_CAT_OPTS.map(o => `<option value="${o.key}"${o.key === def ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select>
+        <select class="pf-in gr-band"${HOUR_METRICS.has(def) ? "" : " hidden"}>${bandOptsHtml(selBand)}</select>
         <input class="pf-in gr-val" type="number" inputmode="decimal" step="any" value="${val != null && val !== "" ? val : ""}">
         <button type="button" class="gr-fill" title="目安（直近実績±2%）を入れる">目安</button>
         <button type="button" class="gr-del" title="この目標を削除" aria-label="削除">×</button>
       </div>
       <div class="gr-help"></div>`;
     rowsEl.appendChild(row);
-    const sel = row.querySelector(".gr-cat"), inp = row.querySelector(".gr-val"), help = row.querySelector(".gr-help");
+    const sel = row.querySelector(".gr-cat"), bandSel = row.querySelector(".gr-band");
+    const inp = row.querySelector(".gr-val"), help = row.querySelector(".gr-help");
+    const effKey = () => HOUR_METRICS.has(sel.value) ? `${sel.value}#${bandSel.value}` : sel.value;
+    row._effKey = effKey;
     const refresh = () => {
       const mt = mtByKey[sel.value]; if (!mt) return;
-      const ref = goalRef(c, sel.value);
+      const isHour = HOUR_METRICS.has(sel.value);
+      bandSel.hidden = !isHour;
+      const key = effKey();
+      const ref = goalRef(c, key);
       const base = ref.base;
       const f = mt.higher ? 1.02 : 0.98;
       const suggest = base == null ? null : (mt.unit === "%" ? Math.round(base * f * 10) / 10 : Math.round(base * f));
       inp.dataset.suggest = suggest == null ? "" : suggest;
       inp.placeholder = suggest == null ? "―（データなし）" : fmtVal(mt, suggest);
-      // 注釈：薄字の目安に加えて、該当する実績数値と前年比（率指標は差分ポイント）も出す。
       let ratio = "";
-      if (ref.prevPct != null) {
-        ratio = ref.isRate
-          ? `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}pt`
-          : `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}%`;
-      }
+      if (ref.prevPct != null) ratio = ref.isRate
+        ? `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}pt`
+        : `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}%`;
+      const bandName = isHour ? `${(TIME_BANDS.find(b => b.key === bandSel.value) || {}).label || ""}の` : "";
       help.textContent = base == null
         ? (sel.value === "sales"
             ? "この販促は対象部門/商品が未設定のため実績が出せません。『店全体の売上』を選ぶか、狙う値を入力してください。"
-            : "この指標の直近実績がありません。狙う値を入力してください。")
-        : `直近${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）`;
+            : isHour
+              ? `この時間帯の直近実績がありません（営業時間外かも）。狙う値を入力してください。`
+              : "この指標の直近実績がありません。狙う値を入力してください。")
+        : `直近${bandName}${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）`;
     };
-    sel.addEventListener("change", refresh);
+    sel.addEventListener("change", () => { if (HOUR_METRICS.has(sel.value)) bandSel.innerHTML = bandOptsHtml(null); refresh(); });
+    bandSel.addEventListener("change", refresh);
     row.querySelector(".gr-fill").addEventListener("click", () => { if (inp.dataset.suggest) inp.value = inp.dataset.suggest; });
     row.querySelector(".gr-del").addEventListener("click", () => { row.remove(); renumber(); });
     refresh();
   };
+  // 強制表示の切替でバンド選択肢を作り直す（選択は保つ）。
+  const forceEl = ov.querySelector("#gg-force");
+  if (forceEl) forceEl.addEventListener("change", () => {
+    rowsEl.querySelectorAll(".gr-band").forEach(bs => { const cur = bs.value; bs.innerHTML = bandOptsHtml(cur); });
+  });
   initRows.forEach(r => addRow(r.key, r.val));
   renumber();
   ov.querySelector("#gg-add").addEventListener("click", () => { addRow(null, ""); renumber(); });
@@ -500,15 +562,15 @@ function openGoalGrid(c) {
   ov.querySelector("#gg-save").addEventListener("click", async () => {
     const map = {}; let err = "";
     for (const row of rowsEl.querySelectorAll(".gr")) {
-      const key = row.querySelector(".gr-cat").value;
+      const key = row._effKey ? row._effKey() : row.querySelector(".gr-cat").value;
       const raw = (row.querySelector(".gr-val").value || "").replace(/[,，\s]/g, "");
       if (raw === "") continue;
-      const v = Number(raw), mt = mtByKey[key];
+      const v = Number(raw), lbl = metricLabel(key);
       const isRate = key.indexOf("cost_rate") >= 0;
-      if (!isFinite(v)) { err = `「${mt.label}」の目標が数値ではありません。`; break; }
-      if (isRate && (v <= 0 || v > 100)) { err = `「${mt.label}」は 0〜100% で入れてください。`; break; }
-      if (!isRate && v < 0) { err = `「${mt.label}」は0以上で入れてください。`; break; }
-      map[key] = v;   // 同じカテゴリが複数行あれば後の行で上書き
+      if (!isFinite(v)) { err = `「${lbl}」の目標が数値ではありません。`; break; }
+      if (isRate && (v <= 0 || v > 100)) { err = `「${lbl}」は 0〜100% で入れてください。`; break; }
+      if (!isRate && v < 0) { err = `「${lbl}」は0以上で入れてください。`; break; }
+      map[key] = v;   // 同じ指標＋時間帯が複数行あれば後の行で上書き
     }
     const msg = ov.querySelector("#pf-msg");
     if (err) { if (msg) { msg.textContent = err; msg.hidden = false; } return; }
@@ -4077,9 +4139,12 @@ function renderTargetReview(c) {
   // 売上目標の達成は「達成サマリー」が主指標（対象の部門・商品）で正しく割って表示する。
   // ここで売上を出すと店全体売上÷目標になり達成率が跳ねる（例 331%）ので、売上は載せない。
   // この表は 客数・客単価・原価率など“売上以外”の指標だけを並べる。
-  const set = TARGET_METRICS.filter(mt => mt.key !== "sales")
-    .map(mt => ({ mt, target: targetMetricOf(c, mt.key) }))
-    .filter(x => x.target != null);
+  // 保存済みの全キー（時間帯バンド hour_sales#dinner 等も含む）から、売上以外を並べる。
+  const savedKeys = Object.keys(SERVER_TARGETS_M[campKey(c)] || SERVER_TARGETS_M[c.id] || {}).filter(k => k !== "sales");
+  const set = savedKeys.map(k => {
+    const mt = TARGET_METRICS.find(m => m.key === splitMetric(k).base);
+    return mt ? { mt, key: k, target: targetMetricOf(c, k) } : null;
+  }).filter(x => x && x.target != null);
   if (!set.length) {
     // 売上目標だけ（＝達成サマリーで表示済み）・対象外なら、この表自体を出さない。
     if (!goalEligible(c) || targetMetricOf(c, "sales") != null) return "";
@@ -4100,8 +4165,8 @@ function renderTargetReview(c) {
   const periodNote = openEnded ? `${sm}〜${em}（継続中）` : (sm === em ? sm : `${sm}〜${em}`);
 
   const isCostMetric = k => k === "cost_rate" || k === "food_cost_rate" || k === "drink_cost_rate";
-  const rows = set.map(({ mt, target }) => {
-    const actual = actualTargetValue(mt.key, code, sm, em, openEnded);
+  const rows = set.map(({ mt, key, target }) => {
+    const actual = actualTargetValue(key, code, sm, em, openEnded);
     const ach = targetAchievement(mt, target, actual);
     const dir = mt.higher ? "" : `<span class="tr-dir" title="低いほど良い">↓が良い</span>`;
     // 原価率の実績が出ない店は「―」で終わらせず、理由（新レジ未接続など）を添える。
@@ -4113,12 +4178,12 @@ function renderTargetReview(c) {
       ? `<span class="tr-rate ${ach.good ? "good" : "bad"}">${ach.rate}%${ach.good ? " ✓" : ""}</span>`
       : `<span class="tr-rate muted">―</span>`;
     // 目標の変更ログ（誰がいつ）。あれば目標セルの下に控えめに出す。
-    const meta = targetMetaOf(c, mt.key);
+    const meta = targetMetaOf(c, key);
     const metaHtml = meta
       ? `<div class="tr-meta">${esc(meta.by || "—")}${meta.at ? "・" + shortYmd(meta.at) : ""}</div>`
       : "";
     return `<tr>
-      <td class="tr-l">${esc(mt.label)}${dir}</td>
+      <td class="tr-l">${esc(metricLabel(key))}${dir}</td>
       <td class="tr-v">${fmtMetricVal(mt, target)}${metaHtml}</td>
       <td class="tr-v">${actHtml}</td>
       <td class="tr-a">${rateHtml}</td></tr>`;
