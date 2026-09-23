@@ -19,7 +19,13 @@ import yaml
 
 from hansoku.db import get_warehouse
 from hansoku.db.warehouse import AggregateQuery
-from hansoku.model import GRAIN_DAY, GRAIN_MONTH, METRIC_PRODUCT_SALES
+from hansoku.model import (
+    GRAIN_DAY,
+    GRAIN_MONTH,
+    METRIC_DEPT_SALES,
+    METRIC_PRODUCT_SALES,
+    METRIC_SALES,
+)
 from hansoku.settings import load_settings
 from hansoku.web.export import classify_category, load_store_categories
 
@@ -32,6 +38,40 @@ NET_DIVISOR = 1.10  # 税込→税抜（export と同じ）
 DRINK_HINTS = ["ドリンク", "ラテ", "コーヒー", "珈琲", "カフェ", "ティー", "紅茶", "ソーダ",
                "ジュース", "スムージー", "フロート", "レモネード", "モカ", "コーラ",
                "エスプレッソ", "カプチーノ", "アイスチョコ"]
+
+
+def _months_with_data(wh, metric: str) -> list[str]:
+    """店 CODE で、その指標の月次データがある YYYY-MM の一覧。前年比が出せるかの確認用。"""
+    ms = set()
+    for r in wh.aggregate(
+        AggregateQuery(
+            date_from=FROM, date_to=TO, grain=GRAIN_MONTH,
+            metrics=[metric], store_codes=[CODE], group_by=("date",),
+        )
+    ):
+        d = r.get("date")
+        if d is not None and (r.get("value") or 0):
+            ms.add(d.strftime("%Y-%m"))
+    return sorted(ms)
+
+
+def audit_yoy_coverage(wh) -> None:
+    """前年実績（前年同月比）が出せるかを、月次データのカバレッジで確認する。
+    店全体の売上・部門(ABC)・商品(ABC)の各シリーズが、どの年月まで遡れるか。"""
+    print(f"\n== 前年実績カバレッジ（{CODE}・前年比が出せるか） ==")
+    for label, metric in (("店全体の売上", METRIC_SALES),
+                          ("部門ABC(dept)", METRIC_DEPT_SALES),
+                          ("商品ABC(product)", METRIC_PRODUCT_SALES)):
+        ms = _months_with_data(wh, metric)
+        if not ms:
+            print(f"  {label:16}: データなし")
+            continue
+        years = sorted({m[:4] for m in ms})
+        # 2025年・2024年が何ヶ月あるか（前年比の分母になる）。
+        y25 = [m for m in ms if m.startswith("2025")]
+        y24 = [m for m in ms if m.startswith("2024")]
+        print(f"  {label:16}: {ms[0]}〜{ms[-1]}（{len(ms)}ヶ月・年={','.join(years)}）"
+              f"  2025={len(y25)}ヶ月 2024={len(y24)}ヶ月")
 
 
 def _expected_cat(cid: str) -> str | None:
@@ -176,6 +216,9 @@ def main() -> int:
 
     # 販促ページ（この販促だけの部門別内訳）の割り振りを施策ごとに監査。
     audit_campaign_pages(camp_rows, rules)
+    # 前年実績（前年同月比）が出せるかのカバレッジ確認。
+    with get_warehouse(settings) as wh2:
+        audit_yoy_coverage(wh2)
     return 0
 
 
