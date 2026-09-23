@@ -3232,7 +3232,8 @@ function campDeptCardSnapshot(c) {
 
 // 施策の“販売時期”実績（abc-campaign 由来）。丸ごとの月ではなく登録期間レンジで取った実データ。
 const campActual = c => (DATA.campaign_actuals || {})[c.id] || null;
-function campPeriodActual(c) {
+// collapse=true のとき、上に「部門別の内訳（要約）」があるので商品一覧は折りたたむ。
+function campPeriodActual(c, collapse = false) {
   const a = campActual(c);
   if (!a || !a.items || !a.items.length) return "";
   const tot = a.sales || 0;
@@ -3243,13 +3244,15 @@ function campPeriodActual(c) {
       const q = (p.qty != null) ? ` <span class="fw-pq">${ten(p.qty)}点</span>` : "";
       return `<li><span class="fw-pn">${esc(p.name)}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${pct}%</span></span></li>`;
     }).join("");
+  const sum = `<div class="cactual-sum">売上 <b>${man(tot)}</b>・${a.items.length}品・計${ten(a.qty || 0)}点</div>`;
+  const body = collapse
+    ? `${sum}<details class="cddet"><summary>商品ごとの内訳を見る（${a.items.length}品）</summary>
+        <ul class="fw-list">${rows}</ul></details>`
+    : `${sum}<ul class="fw-list">${rows}</ul>`;
   return `<section class="block">
     <div class="bhead"><h2>販売時期の実績</h2>
-      <span class="bnote">${esc(c.start)}〜${esc(c.end)} の実データ（丸ごとの月ではなく販売期間ぶん）・税抜／構成比は施策内</span></div>
-    <div class="panel">
-      <div class="cactual-sum">売上 <b>${man(tot)}</b>・${a.items.length}品・計${ten(a.qty || 0)}点</div>
-      <ul class="fw-list">${rows}</ul>
-    </div></section>`;
+      <span class="bnote">${esc(c.start)}〜${esc(c.end)} の実データ（販売期間ぶん）・税抜／構成比は施策内</span></div>
+    <div class="panel">${body}</div></section>`;
 }
 // この販促だけの部門別内訳。登録された販売期間の実データ（campaign_actuals）を
 // 品目区分（store_categories.yaml）で束ねる。年間の部門推移ではなく“この販促の中身”。
@@ -3465,6 +3468,9 @@ function renderCampaign(id) {
           : `<p class="muted" style="margin:2px 0 10px">まだありません。PDF・写真・Excelを追加できます。</p>`}
         ${crAdd}</section>` : "";
 
+  // 部門別の内訳（この販促）。あれば要約として上に置き、商品一覧は下で折りたたむ。
+  const deptMixHtml = campDeptMix(c);
+
   // 進捗バー（達成サマリー内に置く。期間の経過％）
   const progBar = `<div class="cprog"><span class="cprog-fill ${st.k}" style="width:${prog}%"></span></div>
     <div class="cprog-lbl"><span>${c.start}</span><span class="cprog-now ${st.k}">${st.label}${st.k === "live" ? `・${prog}%経過` : ""}</span><span>${c.end}</span></div>`;
@@ -3500,8 +3506,8 @@ function renderCampaign(id) {
       <div class="panel">${overall}</div>
     </section>
 
-    ${campDeptMix(c)}
-    ${campPeriodActual(c)}
+    ${deptMixHtml}
+    ${campPeriodActual(c, !!deptMixHtml)}
     ${campGelatoCompo(c)}
     ${renderTargetReview(c)}
     ${renderReview(c)}

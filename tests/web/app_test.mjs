@@ -354,6 +354,40 @@ test("この販促の部門別内訳（campDeptMix）は販売期間の実デー
   assert.match(html, /ドリンク/);
 });
 
+test("部門別の内訳があるとき、販売時期の実績（商品一覧）は折りたたむ", () => {
+  const c = camp({ id: "cm", start: "2026-03-01", end: "2026-03-31" });
+  const data = { ...base,
+    store_categories: { 1006: { name: "t", other: "その他",
+      categories: [{ name: "ケーキ", keywords: ["ケーキ"] }, { name: "ドリンク", keywords: ["ティー"] }] } },
+    campaign_actuals: { cm: { sales: 300000, qty: 30, items: [
+      { name: "いちごショートケーキ", sales: 200000, qty: 20 },
+      { name: "ダージリンティー", sales: 100000, qty: 10 },
+    ] } },
+  };
+  const ctx = loadApp({ ...data, campaigns: [c] });
+  const html = call(ctx, `renderCampaign("cm")`);
+  assert.match(html, /部門別の内訳（この販促）/);   // 要約は常時表示
+  assert.match(html, /販売時期の実績/);
+  assert.match(html, /<details[^>]*><summary>商品ごとの内訳を見る/);  // 商品一覧は折りたたみ
+});
+
+test("部門別の内訳が無い（1区分）ときは、商品一覧は折りたたまず開いて出す", () => {
+  const c = camp({ id: "ck", start: "2026-03-01", end: "2026-03-31" });
+  const data = { ...base,
+    store_categories: { 1006: { name: "t", other: "その他",
+      categories: [{ name: "ケーキ", keywords: ["ケーキ"] }] } },
+    campaign_actuals: { ck: { sales: 300000, qty: 30, items: [
+      { name: "いちごショートケーキ", sales: 200000, qty: 20 },
+      { name: "モンブランケーキ", sales: 100000, qty: 10 },
+    ] } },
+  };
+  const ctx = loadApp({ ...data, campaigns: [c] });
+  const html = call(ctx, `renderCampaign("ck")`);
+  assert.ok(!/部門別の内訳/.test(html), "1区分なら部門内訳は出さない");
+  assert.match(html, /販売時期の実績/);
+  assert.ok(!/商品ごとの内訳を見る/.test(html), "要約が無いので商品一覧は開いたまま");
+});
+
 test("終了日を書かない施策は「実施中」で、効果は直近まで見る", () => {
   const c = camp({ id: "gm1", kind: "gm", start: "2026-01-01", end: "2026-01-01" });
   c.open_ended = true;
