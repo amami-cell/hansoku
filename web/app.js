@@ -3417,13 +3417,14 @@ function renderCampaign(id) {
               ? "対象の部門・商品がまだABCに出ていません"
               : "何で測るかが未設定です。対象の部門（例: コース）か商品名を決めてください"
           }</div></div>`;
+    // 店全体は「参考」なので、主指標（tgtKpi）や集客と同格の大カードにしない。
+    // 1行の控えめな注記に畳んで、この施策の効果を主役にする。
     overall = `<div class="kpis">
       ${tgtKpi}
-      <div class="kpi"><div class="lbl">店全体の${METRIC_LABELS[METRIC]}（参考・確定${sum.months}ヶ月・${sum.stores}/${sum.total}店）</div>
-        <div class="big">${man(sum.cur)}<span class="unit">円</span></div>
-        <div class="delta">${yoy}　${mom}<br><span class="sub">${esc(overlapNote(c))}</span></div></div>
       ${covKpi}
-    </div>`;
+    </div>
+    <div class="cdnote camp-storewide">店全体の${METRIC_LABELS[METRIC]}（参考・確定${sum.months}ヶ月・${sum.stores}/${sum.total}店）
+      <b>${man(sum.cur)}円</b>　${yoy}${mom ? "　" + mom : ""}・${esc(overlapNote(c))}</div>`;
   } else {
     overall = `<div class="empty">確定した月の売上が出たら、前年同月比などの結果を表示します（月単位で集計）。</div>`;
   }
