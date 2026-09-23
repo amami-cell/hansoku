@@ -183,15 +183,18 @@ await test("時間帯売上/集客は対象月の1日平均（A/V）、前年同
 
 console.log("目標の変更ログ（誰がいつ）");
 
-await test("設定者・日付が振り返り表の目標欄に出る", () => {
+await test("設定者・日付が達成サマリーの目標欄に出る", () => {
   const { call } = loadForm(base);
-  call(`SERVER_TARGETS_M = {"c1@2026":{sales:{value:16000000, by:"店長A", at:"2026-09-20T10:00:00Z"}}};
-        DATA.campaigns=[{id:"c1",stores:["1160"],title:"ログ確認",kind:"osusume",start:"2026-11-01",end:"2026-12-31"}];`);
+  // 売上目標は達成サマリーが持つ（振り返り表からは外した）。変更ログもそこに出す。
+  call(`API_OK = true;
+        SERVER_TARGETS = {"c1@2026":{value:16000000}};
+        SERVER_TARGETS_M = {"c1@2026":{sales:{value:16000000, by:"店長A", at:"2026-09-20T10:00:00Z"}}};
+        DATA.campaigns=[{id:"c1",stores:["1160"],scope_all:false,title:"ログ確認",kind:"osusume",start:"2026-11-01",end:"2026-12-31",note:"",bucket:null,items:[]}];`);
   const meta = JSON.parse(call(`JSON.stringify(targetMetaOf(DATA.campaigns[0],"sales"))`));
   assert.equal(meta.by, "店長A", "設定者を引ける");
   assert.equal(call(`shortYmd("2026-09-20T10:00:00Z")`), "2026/9/20", "ISO→年/月/日");
-  const html = call(`renderTargetReview(DATA.campaigns[0])`);
-  assert.ok(html.includes("店長A") && html.includes("tr-meta"), "設定者名と変更ログ行が表に出る");
+  const html = call(`renderCampaign("c1")`);
+  assert.ok(html.includes("店長A") && html.includes("tr-meta"), "設定者名と変更ログ行が達成サマリーに出る");
 });
 
 console.log("目標フォームの詰め（妥当性チェック・現状比）");

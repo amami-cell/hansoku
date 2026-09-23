@@ -3348,6 +3348,11 @@ function renderCampaign(id) {
 
   // ── 達成サマリー（この販促の主役）。5段階評価＋達成率＋実施中は日割りペース見込み。
   const pace = !isRatio ? campPace(c) : null;
+  // 売上目標の変更ログ（誰がいつ）。振り返り表から売上を外したのでここに出す。
+  const goalMeta = targetMetaOf(c, "sales");
+  const goalMetaHtml = goalMeta
+    ? `<div class="tr-meta">目標設定 ${esc(goalMeta.by || "—")}${goalMeta.at ? "・" + shortYmd(goalMeta.at) : ""}</div>`
+    : "";
   let achHtml;
   if (isRatio) {
     achHtml = `<div class="empty">原価率では販促の達成集計を出しません。売上に切り替えてご覧ください。</div>`;
@@ -3356,7 +3361,7 @@ function renderCampaign(id) {
   } else if (tgt == null) {
     achHtml = `<div class="cmemo muted">＋目標を入力すると、達成率と5段階評価（◎〇△××）が出ます。<div style="margin-top:8px">${goalBtn}</div></div>`;
   } else if (!pace) {
-    achHtml = `<div class="cmemo muted">目標 <b>${man(tgt)}円</b>。確定した月の実績が出たら達成率を表示します。<div style="margin-top:8px">${goalBtn}</div></div>`;
+    achHtml = `<div class="cmemo muted">目標 <b>${man(tgt)}円</b>。確定した月の実績が出たら達成率を表示します。<div style="margin-top:8px">${goalBtn}${goalMetaHtml}</div></div>`;
   } else {
     const g = achieveGrade(pace.nowRate);
     const nowLbl = pace.monthly ? `${pace.month}の1ヶ月` : (pace.status === "done" ? "確定・最終" : `確定${pace.doneMonths != null ? pace.doneMonths : ""}ヶ月`);
@@ -3379,7 +3384,7 @@ function renderCampaign(id) {
         <div class="ach-line sub">${nowLbl}の達成率${pace.status === "live" ? "（現時点）" : ""}</div>
         ${projRow}
         <div class="ach-scale">◎110%↑ 〇100%↑ △90%↑ ×80%↑ ××80%未満</div>
-        <div class="cgoalbar">${goalBtn}</div>
+        <div class="cgoalbar">${goalBtn}${goalMetaHtml}</div>
       </div>
     </div>`;
   }
