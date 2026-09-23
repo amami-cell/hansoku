@@ -2416,10 +2416,20 @@ function refreshTargetPlaceholders() {
     : mt.unit === "円" ? (Math.abs(v) >= 100000 ? man(v) : yen(v))
     : mt.unit === "%" ? v + "%"
     : ten(v) + mt.unit;
+  const bucket = g("pf-bucket") ? g("pf-bucket").value : "";
+  // 販促の売上（sales）は「対象区分」の直近実績で見る（店全体ではなく）。区分未設定は出せない。
+  const recentBucketSales = () => {
+    if (!bucket || !code) return null;
+    const latest = addMonth(CURRENT_MONTH, -1);
+    const len = openEnded ? 1 : Math.max(1, monthsBetween(sm, em || sm).length);
+    let sum = 0, any = false;
+    for (let i = 0; i < len; i++) { const b = bucketOrCatAtM(code, addMonth(latest, -i), bucket); if (b) { sum += b.sales; any = true; } }
+    return any ? sum : null;
+  };
   for (const mt of TARGET_METRICS) {
     const inp = g("pf-tg-" + mt.key); if (!inp) continue;
     // 直近確定の実績（＝現状）と、その ±2% の目安（薄字）。原価率など↓良は −2%。
-    const cur = recentTargetValue(mt.key, code, sm, em, openEnded);
+    const cur = mt.key === "sales" ? recentBucketSales() : recentTargetValue(mt.key, code, sm, em, openEnded);
     const factor = mt.higher ? 1.02 : 0.98;
     const suggest = cur == null ? null
       : (mt.unit === "%" ? Math.round(cur * factor * 10) / 10 : Math.round(cur * factor));
@@ -2432,7 +2442,8 @@ function refreshTargetPlaceholders() {
     const help = g("pf-tghelp-" + mt.key);
     if (help) {
       const avn = mt.daily ? "1日平均（A/V）" : "実績";
-      help.textContent = cur == null ? "（直近の実績なし）"
+      help.textContent = cur == null
+        ? (mt.key === "sales" ? "（対象区分を選ぶと、その部門/商品の直近実績が出ます）" : "（直近の実績なし）")
         : `薄字＝直近${avn} ${fmtVal(mt, cur)} の ${mt.higher ? "+2%" : "−2%"}`;
     }
     updateTargetDiff(mt.key);
@@ -2507,8 +2518,11 @@ function openPlanEditor(seed) {
           <label class="pf-l">終了月<span class="pf-hint">空欄＝常設</span><input class="pf-in" id="pf-end" type="month" value="${esc(s.open_ended ? "" : ym(s.end))}"></label>
         </div>
         <label class="pf-l">販促物（PDF・画像）<input class="pf-in" id="pf-pdf" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*,application/pdf"></label>
-        <div class="pf-tg-head">目標数値（入れた項目だけ保存。薄字＝直近実績＋2%の目安／原価率は−2%。「目安」ボタンで入る）${inherited ? `<span class="pf-tg-inherit">複製元から${inherited}件引き継ぎ（要確認）</span>` : ""}</div>
-        <div class="pf-tg-grid">${tgRows}</div>
+        <div id="pf-goalhint" class="pf-goalhint">↑「販促名」と「開始月」を入れると、その期間の目安つきで目標欄が出ます。</div>
+        <div id="pf-goalsec" class="pf-goalsec" hidden>
+          <div class="pf-tg-head">目標数値（入れた項目だけ保存。薄字＝直近実績＋2%の目安／原価率は−2%。「目安」ボタンで入る）${inherited ? `<span class="pf-tg-inherit">複製元から${inherited}件引き継ぎ（要確認）</span>` : ""}</div>
+          <div class="pf-tg-grid">${tgRows}</div>
+        </div>
         <label class="pf-l">メモ（任意）<textarea class="pf-in" id="pf-note" rows="2" placeholder="狙い・段取りなど">${esc(s.note || "")}</textarea></label>
         <div class="pf-msg" id="pf-msg" hidden></div>
         <div class="pf-actions">
@@ -2525,9 +2539,17 @@ function openPlanEditor(seed) {
   ov.querySelector("#pf-save").addEventListener("click", () => savePlanFromForm(s));
   const del = ov.querySelector("[data-plandelete]");
   if (del) del.addEventListener("click", () => deletePlan(del.dataset.plandelete));
-  // 店舗・期間を変えたら薄字（現状値）を計算し直す。
-  ["pf-store", "pf-start", "pf-end"].forEach(id => {
-    const el = ov.querySelector("#" + id); if (el) el.addEventListener("change", refreshTargetPlaceholders);
+  // 期間（開始月）を入れたら目標欄を出す（算出は一瞬なのでそのまま表示）。
+  const updateGoalSection = () => {
+    const start = ov.querySelector("#pf-start"), sec = ov.querySelector("#pf-goalsec"), hint = ov.querySelector("#pf-goalhint");
+    const has = !!(start && start.value);
+    if (sec) sec.hidden = !has;
+    if (hint) hint.hidden = has;
+    if (has) refreshTargetPlaceholders();
+  };
+  // 店舗・期間・対象区分を変えたら薄字（現状値）を計算し直す＋目標欄の表示を更新。
+  ["pf-store", "pf-start", "pf-end", "pf-bucket"].forEach(id => {
+    const el = ov.querySelector("#" + id); if (el) el.addEventListener("change", updateGoalSection);
   });
   // 「現状を入れる」チップ：薄字の値を目標欄にコピー。
   ov.querySelectorAll("[data-fillcur]").forEach(btn => btn.addEventListener("click", () => {
@@ -2539,7 +2561,7 @@ function openPlanEditor(seed) {
     const inp = ov.querySelector("#pf-tg-" + mt.key);
     if (inp) inp.addEventListener("input", () => updateTargetDiff(mt.key));
   });
-  refreshTargetPlaceholders();
+  updateGoalSection();
   const t = ov.querySelector("#pf-title"); if (t) t.focus();
 }
 function lastDayOfMonth(ym) { const [y, m] = ym.split("-").map(Number); return new Date(y, m, 0).getDate(); }
