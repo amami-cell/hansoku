@@ -1595,6 +1595,17 @@ def probe_abc_dom(artifacts: Path, *, store: str) -> int:
     return 0
 
 
+def coverage_in_scope(*, cannot: str | None, has_any: bool) -> bool:
+    """この店をカバレッジの分母に数えるか。
+
+    FWから取れない店（1766 のような別POS連動）でも、**別の口から実績が
+    入っていればふつうに数える**。ここを「FWから取れないなら外す」だけで
+    決めると、店別の行は ✓ なのに月別の分母からは外れ、
+    『完備 23店』と『22/22』が食い違う（2026-09 で実際そうなった）。
+    """
+    return cannot is None or has_any
+
+
 def report_monthly_coverage(
     warehouse,
     master,
@@ -1690,7 +1701,7 @@ def report_monthly_coverage(
         note = f"（開店前{pre}ヶ月は対象外）" if pre else ""
         head = f"  {st.store_code} {st.store_name[:16]:<16} {len(exp) - len(miss):>2}/{len(exp)}"
         cannot = _cannot(st)
-        if cannot and not got:
+        if not coverage_in_scope(cannot=cannot, has_any=bool(got)):
             other_pos.append(st.store_code)
             print(f"― {head}  {cannot}")
         elif not miss:
@@ -1710,7 +1721,10 @@ def report_monthly_coverage(
     for m in want:
         open_here = [
             st for st in master.active
-            if (_open_month(st) is None or m >= _open_month(st)) and _cannot(st) is None
+            if (_open_month(st) is None or m >= _open_month(st))
+            # 分母の決め方は店別の行と**必ず同じ**にする。片方だけ
+            # 「FWから取れない店は外す」にすると数が合わなくなる。
+            and coverage_in_scope(cannot=_cannot(st), has_any=bool(have.get(st.store_code)))
         ]
         denom = len(open_here)
         n = sum(1 for st in open_here if m in have.get(st.store_code, set()))
