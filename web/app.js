@@ -5673,9 +5673,8 @@ function renderStore(code) {
   const navItems = [
     ["hero", "サマリー"],
     ["actions", "来月のアクション"],
-    annualHtml ? ["annual", "スケジュール"] : null,
     myCamps.length ? ["promos", "販促一覧"] : null,
-    ["basics", "詳細データ"],
+    ["basics", "もっと見る"],
   ].filter(Boolean);
   const storeNav = `<nav class="snav" aria-label="店内ジャンプ">
     ${navItems.map(([id, label]) => `<button class="snavb" data-jump="${id}">${label}</button>`).join("")}
@@ -5691,7 +5690,6 @@ function renderStore(code) {
     ${storeNav}
     ${summaryHtml}
     ${actionsHtml}
-    ${annualHtml}
     <section class="block" id="promos">
       <div class="bhead"><h2>販促一覧</h2>
         <span class="bnote">${myCamps.length}件・実施中→予定→終了。◎効いた/△要改善。押すと詳細（PDCA）へ。</span>
@@ -5700,7 +5698,8 @@ function renderStore(code) {
     </section>
     ${myCreativesBlock}
     <details class="moredet" id="basics">
-      <summary>詳細データを見る（売上推移・部門・商品・時間帯・近隣・販促エンジン）</summary>
+      <summary>もっと見る（年間スケジュール・売上推移・部門・商品・時間帯・近隣）</summary>
+      ${annualHtml}
       ${heroHtml}
       ${enginesHtml}
       ${shareHtml}

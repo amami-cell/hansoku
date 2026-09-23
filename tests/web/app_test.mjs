@@ -1019,7 +1019,7 @@ test("renderStore：販促トップは累計サマリー→来月のアクショ
   const html = call(ctx, `renderStore("1006")`);
   assert.ok(html.includes("累計サマリー"), "上部に累計サマリー（予算/実績・前年対比・客単価）");
   assert.ok(html.includes("のアクション"), "来月のアクション");
-  assert.ok(html.includes("詳細データを見る"), "分析系は details（詳細データ）へ格納");
+  assert.ok(html.includes("もっと見る"), "分析系・年間スケジュールは details（もっと見る）へ格納");
   // 並び順はセクションidで確認（ナビのラベルと混同しないように）。
   assert.ok(html.indexOf('id="hero"') < html.indexOf('id="actions"'), "サマリーがアクションより先");
   assert.ok(html.indexOf('id="actions"') < html.indexOf('id="basics"'), "詳細は下（折りたたみ）");
