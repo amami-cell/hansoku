@@ -1025,6 +1025,27 @@ test("renderStore：販促トップは累計サマリー→販促タイムライ
   assert.ok(html.indexOf('id="timeline"') < html.indexOf('id="basics"'), "詳細は下（折りたたみ）");
 });
 
+test("来月のアクション：来月動く販促に準備の抜けと去年の学び（メモ・次回提案）を出す", () => {
+  const prev = camp({ id: "p-2025", bucket: "パフェ", start: "2025-09-16", end: "2025-10-31", title: "去年パフェ", memo: "去年は立ち上がり弱い" });
+  const cur = camp({ id: "p-2026", bucket: "パフェ", start: "2026-09-16", end: "2026-10-31", title: "今年パフェ" });
+  const data = { ...base, campaigns: [prev, cur], proposals: { "p-2025": { next: "予告POPを早めに" } } };
+  const ctx = loadApp(data, "2026-09-23");
+  const html = call(ctx, `storeNextActions("1006")`);
+  assert.match(html, /のアクション/);
+  assert.match(html, /今年パフェ/, "来月動く販促を出す");
+  assert.match(html, /去年「去年パフェ」/, "去年の同じ回を参照");
+  assert.match(html, /去年は立ち上がり弱い/, "去年の要因メモを反映");
+  assert.match(html, /予告POPを早めに/, "去年の次回提案を反映");
+});
+
+test("来月のアクション：終了して振り返り未記入は『やりっぱなし』として出す", () => {
+  const done = camp({ id: "d1", bucket: "パフェ", start: "2026-05-01", end: "2026-06-30", title: "春パフェ" });
+  const ctx = loadApp({ ...base, campaigns: [done] }, "2026-09-23");
+  const html = call(ctx, `storeNextActions("1006")`);
+  assert.match(html, /やりっぱなし/);
+  assert.match(html, /春パフェ/);
+});
+
 test("storeProductSearch：商品横断検索（商品名→月・区分・売上）が出る", () => {
   const ctx = loadApp(luqa);
   const html = call(ctx, `storeProductSearch("1160")`);

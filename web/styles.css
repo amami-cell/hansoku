@@ -481,6 +481,26 @@ tbody tr:last-child td{border-bottom:0;}
 .tl-nm{font-weight:600;color:var(--ink);flex:1 1 auto;min-width:120px;}
 .tl-rg{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
 
+/* 来月のアクション（準備の抜け・去年の学び）。 */
+.na-grp{margin-bottom:14px;} .na-grp:last-child{margin-bottom:0;}
+.na-wh{color:var(--critical-ink);}
+.na-list{list-style:none;margin:0;padding:0;}
+.na-list>li{padding:11px 4px;border-bottom:1px solid var(--line);cursor:pointer;}
+.na-list>li:last-child{border-bottom:0;}
+.na-list>li:hover{background:var(--surface-2);}
+.na-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:13.5px;}
+.na-nm{font-weight:700;color:var(--ink);flex:1 1 auto;min-width:120px;}
+.na-todos{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0 0 18px;}
+.na-todo{font-size:12px;color:var(--warning-ink);background:var(--warn-soft);border-radius:999px;padding:2px 9px;font-weight:600;}
+.na-todo.na-w,.na-w{color:var(--critical-ink);}
+.na-ok{font-size:12px;color:var(--good-ink);margin:6px 0 0 18px;font-weight:600;}
+.na-learn{margin:8px 0 0 18px;padding:8px 11px;border-radius:9px;background:var(--surface-2);
+  border:1px solid var(--line);font-size:12.5px;line-height:1.6;}
+.na-learn-l{font-weight:700;color:var(--ink-2);}
+.na-m{color:var(--ink-2);margin-top:3px;} .na-n{color:var(--ink);margin-top:3px;}
+.na-n b{color:var(--accent);}
+.psum-i.na-w{color:var(--critical-ink);font-weight:700;}
+
 /* 販促の効果サマリ＋並べ替え/タブ＋用語（この店の販促の頭）。 */
 .psum{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 10px;font-size:13px;color:var(--ink-2);}
 .psum-i{display:inline-flex;align-items:baseline;gap:5px;font-variant-numeric:tabular-nums;}

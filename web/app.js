@@ -5416,8 +5416,95 @@ function storePromoTimeline(code) {
   return `<section class="block" id="timeline">
     <div class="bhead"><h2>販促タイムライン</h2>
       <span class="bnote">今月の実施中・今後の予定・直近の結果。押すと詳細へ。</span>${addBtn}</div>
-    <div class="panel">${body}</div>
+    <div class="panel">${storeScoreStrip(code)}${body}</div>
   </section>`;
+}
+
+// この店の今年の販促スコア（◎効いた/△要改善/未振り返り）。誰が見ても効果が一発で分かる用。
+function storeEffectScore(code) {
+  const year = CURRENT_MONTH.slice(0, 4);
+  const camps = (DATA.campaigns || []).filter(c => c.stores.includes(code) && (c.start || "").slice(0, 4) === year);
+  let good = 0, warn = 0, wait = 0, noReview = 0;
+  for (const c of camps) {
+    const e = storeCampEffect(c, code);
+    if (e.measured) { if (e.pct >= 0) good++; else warn++; }
+    else if (campStatus(c).k !== "soon") wait++;
+    if (needsReview(c)) noReview++;
+  }
+  return { good, warn, wait, noReview, total: camps.length };
+}
+function storeScoreStrip(code) {
+  const sc = storeEffectScore(code);
+  if (!sc.total) return "";
+  return `<div class="psum">
+    <span class="psum-i"><b class="up">◎ ${sc.good}</b> 効いた</span>
+    <span class="psum-i"><b class="down">△ ${sc.warn}</b> 要改善</span>
+    ${sc.wait ? `<span class="psum-i muted">確定待ち ${sc.wait}</span>` : ""}
+    ${sc.noReview ? `<span class="psum-i na-w">⚠ 未振り返り ${sc.noReview}</span>` : ""}
+  </div>`;
+}
+
+// 来月のアクション：来月動く販促の準備（目標・POP）＋去年の同じ回の学びを反映。
+// 終了して振り返り未記入の「やりっぱなし」も、ここで解消を促す（去年を活かす仕組み）。
+function storeNextActions(code) {
+  const nextM = addMonth(CURRENT_MONTH, 1);
+  const monthLbl = `${+nextM.slice(5)}月`;
+  const camps = (DATA.campaigns || []).filter(c => c.stores.includes(code));
+  const startM = c => (c.start || "").slice(0, 7);
+  const endM = c => c.open_ended ? "9999-12" : (c.end || c.start || "").slice(0, 7);
+  const nextCamps = camps.filter(c => startM(c) <= nextM && endM(c) >= nextM)
+    .sort((a, b) => a.start < b.start ? -1 : 1);
+  const review = camps.filter(c => needsReview(c))
+    .sort((a, b) => (a.end || a.start) < (b.end || b.start) ? 1 : -1).slice(0, 5);
+  const canWrite = WRITE_OK;
+
+  const todos = c => {
+    const chips = [];
+    if (goalEligible(c) && targetOf(c) == null)
+      chips.push(canWrite ? `<button class="goalbtn add" data-goal="${campKey(c)}">＋目標を入れる</button>` : `<span class="na-todo">目標未設定</span>`);
+    if (!creativesForCampaign(c.id).length)
+      chips.push((canWrite && CREATIVES_API_OK) ? `<button class="upbtn sm" data-upload="campaign:${c.id}">＋POPを追加</button>` : `<span class="na-todo">POP未登録</span>`);
+    return chips.length ? `<div class="na-todos">${chips.join("")}</div>` : `<div class="na-ok">✓ 準備OK</div>`;
+  };
+  const learn = c => {
+    const prev = campPrevOccurrence(c);
+    if (!prev) return "";
+    const e = storeCampEffect(prev, code);
+    const res = e.mark ? `<span class="cvm ${e.tone}">${e.mark}${e.pct != null ? " " + signed(e.pct) + "%" : ""}</span>` : "";
+    const memo = memoOf(prev);
+    const prop = proposalFor(prev.id);
+    const nx = prop && prop.next ? prop.next : "";
+    if (!res && !memo && !nx) return "";
+    return `<div class="na-learn"><span class="na-learn-l">去年「${esc(prev.title)}」 ${res}</span>${
+      memo ? `<div class="na-m">${escBr(memo)}</div>` : ""}${
+      nx ? `<div class="na-n"><b>次回提案</b> ${escBr(nx)}</div>` : ""}</div>`;
+  };
+  const nextList = nextCamps.length
+    ? `<ul class="na-list">${nextCamps.map(c => {
+        const k = kindOf(c.kind), st = campStatus(c);
+        return `<li data-camp="${c.id}"><div class="na-row">
+          <span class="tl-dot" style="background:${k.color}"></span>
+          <span class="na-nm">${c.title}${c.planned ? '<span class="plbadge">計画</span>' : ""}</span>
+          <span class="tl-rg">${campRange(c)}</span>
+          <span class="cstat ${st.k}">${st.k === "soon" ? "来月開始" : st.label}</span></div>
+          ${todos(c)}${learn(c)}</li>`;
+      }).join("")}</ul>`
+    : `<div class="empty">${monthLbl}に動く販促はまだありません。${(PLANS_API_OK && WRITE_OK) ? "右上の「＋起票」から追加できます。" : ""}</div>`;
+  const reviewBlock = review.length
+    ? `<div class="na-grp"><div class="tl-h na-wh">やりっぱなし（振り返り未記入）<span class="tl-n">${review.length}</span></div>
+        <ul class="na-list">${review.map(c => `<li data-camp="${c.id}"><div class="na-row">
+          <span class="tl-dot" style="background:${kindOf(c.kind).color}"></span>
+          <span class="na-nm">${c.title}</span><span class="tl-rg">${campRange(c)}</span></div>
+          ${canWrite ? `<div class="na-todos"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 振り返りを書く</button></div>` : `<span class="na-todo na-w">要振り返り</span>`}</li>`).join("")}</ul></div>`
+    : "";
+  return `<section class="block" id="actions">
+    <div class="bhead"><h2>来月（${monthLbl}）のアクション</h2>
+      <span class="bnote">来月動く販促の準備（目標・POP）＋去年の同じ回の学びを反映。やりっぱなしも解消。</span>
+      ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋ 販促を起票</button>` : ""}</div>
+    <div class="panel">
+      <div class="na-grp"><div class="tl-h">来月の販促・準備<span class="tl-n">${nextCamps.length}</span></div>${nextList}</div>
+      ${reviewBlock}
+    </div></section>`;
 }
 
 function renderStore(code) {
@@ -5682,6 +5769,7 @@ function renderStore(code) {
   // 販促アプリの店舗トップ：累計サマリー → 販促タイムライン → スケジュール → 販促リスト。
   // 分析系（売上推移・部門・商品・時間帯・近隣・販促エンジン等）は下の折りたたみへ。
   const summaryHtml = storePromoHero(code);
+  const actionsHtml = storeNextActions(code);
   const timelineHtml = storePromoTimeline(code);
   const annualHtml = storeAnnual(code);
   const enginesHtml = storeEngines(code);
@@ -5690,6 +5778,7 @@ function renderStore(code) {
   const prodSearchHtml = storeProductSearch(code);
   const navItems = [
     ["hero", "サマリー"],
+    ["actions", "来月のアクション"],
     ["timeline", "販促タイムライン"],
     annualHtml ? ["annual", "スケジュール"] : null,
     myCamps.length ? ["promos", "販促リスト"] : null,
@@ -5708,6 +5797,7 @@ function renderStore(code) {
     </section>
     ${storeNav}
     ${summaryHtml}
+    ${actionsHtml}
     ${timelineHtml}
     ${annualHtml}
     <section class="block" id="promos">
