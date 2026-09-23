@@ -3371,26 +3371,29 @@ function renderCampaign(id) {
   } else if (!pace) {
     achHtml = `<div class="cmemo muted">目標 <b>${man(tgt)}円</b>。確定した月の実績が出たら達成率を表示します。<div style="margin-top:8px">${goalBtn}${goalMetaHtml}</div></div>`;
   } else {
-    const g = achieveGrade(pace.nowRate);
-    const nowLbl = pace.monthly ? `${pace.month}の1ヶ月` : (pace.status === "done" ? "確定・最終" : `確定${pace.doneMonths != null ? pace.doneMonths : ""}ヶ月`);
-    // 実施中は日割りペース見込み（次段階で日別化。いまは確定“月”ペース概算）。
-    const pg = (pace.status === "live" && pace.projRate != null) ? achieveGrade(pace.projRate) : null;
-    const projRow = pg
-      ? `<div class="ach-proj ${pg.tone}">
-          <span class="ach-mark sm">${pg.mark}</span>
-          <div class="ach-proj-b"><div>見込み達成率 <b>${pace.projRate.toFixed(0)}%</b>・${pg.label}<span class="ach-pill">日割りペース概算</span></div>
-            <div class="sub">確定${pace.doneMonths}/${pace.totalMonths}ヶ月ぶんの実績を期末まで引き伸ばした概算（日別売上の取込は次段階）</div></div></div>`
+    // 実施中は「今のペースでの見込み達成率」を主役に。確定分の累計÷全期間目標（＝nowRate）は
+    // 期間途中では必ず低く出て（例：1/3消化なら82%でも“×”に見える）誤解を生むため副次に回す。
+    const isLive = pace.status === "live" && pace.projRate != null;
+    const heroRate = isLive ? pace.projRate : pace.nowRate;
+    const g = achieveGrade(heroRate);
+    const nowLbl = pace.monthly ? `${pace.month}の1ヶ月の達成率`
+      : (pace.status === "done" ? "確定・最終の達成率" : `確定${pace.doneMonths != null ? pace.doneMonths : ""}ヶ月の達成率`);
+    const subLine = isLive
+      ? `今のペースでの見込み達成率（確定${pace.doneMonths}/${pace.totalMonths}ヶ月・期間${prog}%経過）`
+      : nowLbl;
+    const ctxLine = isLive
+      ? `<div class="ach-line sub">確定分：実績 <b>${man(pace.cur)}</b>（全期間目標 ${man(tgt)} の ${pace.nowRate.toFixed(0)}%）</div>`
       : "";
     achHtml = `<div class="ach">
       <div class="ach-hero ${g.tone}">
         <span class="ach-mark">${g.mark}</span>
-        <div class="ach-figs"><div class="ach-rate">${pace.nowRate.toFixed(0)}<span class="u">%</span></div>
+        <div class="ach-figs"><div class="ach-rate">${heroRate.toFixed(0)}<span class="u">%</span></div>
           <div class="ach-grade">${g.label}</div></div>
       </div>
       <div class="ach-meta">
         <div class="ach-line">目標 <b>${man(tgt)}</b> → 実績 <b>${man(pace.cur)}</b>${pace.label ? `　<span class="sub">${esc(pace.label)}</span>` : ""}</div>
-        <div class="ach-line sub">${nowLbl}の達成率${pace.status === "live" ? "（現時点）" : ""}</div>
-        ${projRow}
+        <div class="ach-line sub">${subLine}</div>
+        ${ctxLine}
         <div class="ach-scale">◎110%↑ 〇100%↑ △90%↑ ×80%↑ ××80%未満</div>
         <div class="cgoalbar">${goalBtn}${goalMetaHtml}</div>
       </div>
@@ -3497,6 +3500,22 @@ function renderCampaign(id) {
   const progBar = `<div class="cprog"><span class="cprog-fill ${st.k}" style="width:${prog}%"></span></div>
     <div class="cprog-lbl"><span>${c.start}</span><span class="cprog-now ${st.k}">${st.label}${st.k === "live" ? `・${prog}%経過` : ""}</span><span>${c.end}</span></div>`;
 
+  // 詳細（部門内訳・期間の実績・ジェラート構成・目標の振り返り・店別・環境施策）は
+  // 「必要な情報だけ」を上に出すため、まとめて もっと見る に畳む。中身が無ければ出さない。
+  const storeRows = (c.stores.length > 1 || c.kind === "lunch")
+    ? `<section class="block">
+        <div class="bhead"><h2>対象店ごとの結果</h2>
+          <span class="bnote">${c.stores.length}店　店をタップで詳細へ</span></div>
+        <div class="panel"><ul class="cmlist">${rowsHtml}</ul></div>
+      </section>` : "";
+  const moreInner = `${deptMixHtml}${campPeriodActual(c, !!deptMixHtml)}${campGelatoCompo(c)}${renderTargetReview(c)}${storeRows}${renderEnvEffect(id)}`;
+  const moreBlock = moreInner.trim()
+    ? `<details class="opendet" id="campmore">
+        <summary class="openbtn"><span class="openbtn-t">もっと見る（部門内訳・期間の実績・目標の振り返り・店別など）</span></summary>
+        ${moreInner}
+      </details>`
+    : "";
+
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button>
       <span class="sep">／</span><button class="linkbtn" data-view="campaigns">施策の効果</button></div>
@@ -3523,23 +3542,14 @@ function renderCampaign(id) {
     </section>
 
     <section class="block">
-      <div class="bhead"><h2>結果（全体）</h2>
-        <span class="bnote">${METRIC_LABELS[METRIC]}・確定月の全店合算／前年同月比（当月の暫定は除く）</span></div>
+      <div class="bhead"><h2>結果（前年比）</h2>
+        <span class="bnote">${METRIC_LABELS[METRIC]}・確定月／前年同月比（当月の暫定は除く）</span></div>
       <div class="panel">${overall}</div>
     </section>
 
-    ${deptMixHtml}
-    ${campPeriodActual(c, !!deptMixHtml)}
-    ${campGelatoCompo(c)}
-    ${renderTargetReview(c)}
     ${renderReview(c)}
 
-    ${(c.stores.length > 1 || c.kind === "lunch") ? `<section class="block">
-      <div class="bhead"><h2>対象店ごとの結果</h2>
-        <span class="bnote">${c.stores.length}店　店をタップで詳細へ</span></div>
-      <div class="panel"><ul class="cmlist">${rowsHtml}</ul></div>
-    </section>` : ""}
-    ${renderEnvEffect(id)}`;
+    ${moreBlock}`;
 }
 
 // ── 店舗管理（店舗ごとの施策一覧・進捗・結果）─────────────────────────────
@@ -3746,9 +3756,20 @@ function campVerdict(c) {
         : { tone: "warn", label: "要改善", signals: sig };
     }
     if (t) {
+      // 商品単位で前年が取れない（新商品）ときは、部門（バケット）の前年比を代理指標に。
+      // 結果（前年比）欄と同じ物差しにして「出せる/出せない」の食い違いを無くす。
+      const bk = c.bucket || campKindBucket(c.kind);
+      const hasItems = (c.items || []).filter(Boolean).length;
+      const tb = (hasItems && bk) ? campTargeted({ ...c, items: [] }) : null;
+      if (tb && tb.pct != null) {
+        const sig = [`${esc(bk)}部門 前年比 ${signed(tb.pct)}%（新商品のため部門で判定）`, `${t.label} ${man(t.cur)}円・確定${t.months}ヶ月`];
+        return tb.pct >= 0
+          ? { tone: "good", label: "効果あり", signals: sig }
+          : { tone: "warn", label: "要改善", signals: sig };
+      }
       return {
         tone: "flat", label: "前年比なし",
-        signals: [`${t.label} ${man(t.cur)}円`, "前年同月のABCが無いため前年比は出せません"],
+        signals: [`${t.label} ${man(t.cur)}円`, "前年同月の実績が無いため前年比は出せません"],
       };
     }
   }
@@ -3883,7 +3904,7 @@ function renderReview(c) {
     : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`;
   const nextHtml = prop && prop.next
     ? `<div class="rvnext">${escBr(prop.next)}<div class="rvby">— ${esc(prop.by || "AI")}${prop.at ? "・" + esc(prop.at) : ""}</div></div>`
-    : `<div class="rvnext muted">次回提案は未記入です。config/proposals.json に追記（AIに依頼も可）。</div>`;
+    : `<div class="rvnext muted">次回の一手はまだ未記入です。上の要因メモを書いて、次にどうするか一言残しましょう。</div>`;
   return `<section class="block">
     <div class="bhead"><h2>振り返り＆次回提案（PDCA）</h2>
       <span class="bnote">やりっぱなしにしない：実績→判定→次の一手${needsReview(c) ? "　⚠ 要振り返り" : ""}</span></div>
