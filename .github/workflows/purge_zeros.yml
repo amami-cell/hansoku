@@ -62,6 +62,11 @@ jobs:
         env:
           HANSOKU_ENV: cloud
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          # load_settings() は R2 まで必須にしている。この処理では使わないが、
+          # 渡さないと設定の読み込みで落ちる（他のワークフローと同じ顔ぶれ）。
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           args="--source '${{ inputs.source }}'"
           for s in $(echo "${{ inputs.store }}" | tr ',' ' '); do
@@ -75,13 +80,22 @@ jobs:
           if [ "${{ inputs.apply }}" = "true" ]; then
             args="$args --apply"
           fi
+          # ⚠️ **`{ … } | tee` の中で走らせない。** それだと最後の echo の結果が
+          # ジョブの成否になり、**中のコマンドが落ちてもジョブは緑**になる。
+          # 消す操作でこれをやると「消えたつもり」が起きる。先に実行して
+          # 終了コードを取り、そのあとでサマリに流す。
+          set +e
+          out="$(eval python -m hansoku.cli purge-zeros $args 2>&1)"
+          rc=$?
+          set -e
           # 結果はジョブのサマリにも残す（ログを掘らなくても読める）
           {
             echo '## 0の実績'
             echo ''
-            echo "apply: \`${{ inputs.apply }}\`"
+            echo "apply: \`${{ inputs.apply }}\` / 終了コード: \`$rc\`"
             echo ''
             echo '```'
-            eval python -m hansoku.cli purge-zeros $args
+            echo "$out"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit $rc
