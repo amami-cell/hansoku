@@ -18,8 +18,10 @@ not_found_handling = "single-page-application"
 binding = "CREATIVES"
 bucket_name = "hansoku-creatives"
 
-# 開放モード（閲覧は誰でも）。編集は個人ログイン（/join＝名前＋参加コード8888＋自分の
-# パスワード）でテストできる。OWNER_NAME はオーナー（管理権限）の表示名。
+# 入口＝合言葉ログイン（お名前＋合言葉）。前段に Cloudflare Access が無いので、
+# 店長はこの URL に お名前＋合言葉 だけで入れる（編集も可）。データ・POPは本番Neon/R2。
+#   "0" = 合言葉ログイン必須（いまはこれ）／ "1" = 誰でも閲覧の開放モード。
+# OWNER_NAME はオーナー（管理権限）の表示名。
 [vars]
-OPEN_ACCESS = "1"
+OPEN_ACCESS = "0"
 OWNER_NAME = "天見 真悟"
