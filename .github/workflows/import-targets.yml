@@ -1,0 +1,44 @@
+name: 販促目標を取り込む（largo 2026）
+
+# スプレッドシート「日別スケジュールlargo」の KPI を、施策ごとの売上目標として
+# promo_targets（Neon）へ取り込む手動ワークフロー。既定は DRY-RUN（表示のみ）。
+# apply=true のときだけ実際に書き込む（冪等・同値は再書き込みしない）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: '実際に書き込む（false=表示だけ）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+      - name: 目標を取り込む
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -o pipefail
+          args=""
+          [ "${{ inputs.apply }}" = "true" ] && args="--apply"
+          python scripts/import_largo_targets.py $args | tee -a "$GITHUB_STEP_SUMMARY"

@@ -1034,6 +1034,36 @@ html{overflow-anchor:none;}
 .ghelp{font-size:11.5px;color:var(--ink-3);line-height:1.55;margin-top:6px;padding:8px 10px;
   background:var(--surface-2);border:1px solid var(--line);border-radius:8px;}
 .glg i{width:10px;height:10px;border-radius:3px;display:inline-block;font-style:normal;font-size:11px;line-height:1;}
+/* 販促 年間チャート＝月カルーセル。横スクロールで月移動、前後の月が両端にチラ見え。
+   上＝その月のPOP・制作物サムネ、下＝その月の販促チップ。 */
+.pcar{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;
+  padding:4px 2px 12px;overscroll-behavior-x:contain;}
+.pcar-mo{flex:0 0 78%;max-width:320px;scroll-snap-align:center;background:var(--surface);
+  border:1px solid var(--line);border-radius:12px;padding:10px 10px 12px;display:flex;flex-direction:column;gap:8px;}
+.pcar-mo.now{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft);}
+.pcar-mo.prov{background:var(--surface-2);}
+.pcar-h{align-self:flex-start;font-size:15px;font-weight:800;color:var(--ink);background:none;border:0;cursor:pointer;padding:2px 0;}
+.pcar-h:hover{color:var(--accent);text-decoration:underline;}
+.pcar-yr{font-size:11px;color:var(--ink-3);font-weight:600;margin-left:6px;}
+.pcar-pops{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch;}
+.pcar-pops.empty{padding:8px 0;}
+.poth{flex:0 0 auto;width:100px;height:100px;border:1px solid var(--line);border-radius:10px;overflow:hidden;
+  background:var(--surface-2);cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;}
+.poth:hover{border-color:var(--accent);}
+.poth img{width:100%;height:100%;object-fit:cover;display:block;}
+.poth-x .cext{font-size:14px;font-weight:800;color:var(--ink-2);}
+/* 販促チャートの表示切替（月ごと／年間チャート） */
+.pvtabs{margin-bottom:10px;}
+.pcar-none{font-size:11.5px;color:var(--ink-3);}
+.pcar-camps{display:flex;flex-direction:column;gap:6px;}
+.pcar-camp{display:flex;align-items:center;gap:6px;text-align:left;background:var(--surface-2);
+  border:1px solid var(--line);border-left:4px solid var(--kc);border-radius:8px;padding:6px 8px;cursor:pointer;width:100%;}
+.pcar-camp:hover{background:var(--accent-soft);}
+.pcar-camp.done{opacity:.72;}
+.pcc-dot{width:8px;height:8px;border-radius:2px;background:var(--kc);flex:0 0 auto;}
+.pcc-t{flex:1 1 auto;min-width:0;font-size:12.5px;color:var(--ink);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pcc-r{font-size:10.5px;color:var(--ink-3);flex:0 0 auto;}
+.pcar-camp .gvm{flex:0 0 auto;margin:0;}
 /* チャート頭の年サマリ */
 .ysum{display:flex;flex-wrap:wrap;gap:8px 20px;margin:2px 0 12px;font-variant-numeric:tabular-nums;}
 .ysum-i{display:inline-flex;align-items:baseline;gap:7px;font-size:14px;}
@@ -1073,10 +1103,11 @@ html{overflow-anchor:none;}
 .ymxt td.ymxcompo-click:hover{background:var(--accent-soft);color:var(--accent);}
 /* 商品内訳の小ウインドウ（複数・ドラッグ移動可） */
 #fwins{position:fixed;inset:0;pointer-events:none;z-index:1000;}
-.fwin{position:absolute;pointer-events:auto;width:340px;height:min(52vh,380px);max-width:96vw;max-height:92vh;
+/* 既定サイズは「大きめ（＝以前の“大きくした”状態）」。開いた時点で読みやすい大きさにする。 */
+.fwin{position:absolute;pointer-events:auto;width:min(560px,94vw);height:min(70vh,620px);max-width:96vw;max-height:92vh;
   min-width:240px;min-height:150px;background:var(--surface);
   border:1px solid var(--line-strong);border-radius:12px;box-shadow:0 10px 34px rgba(0,0,0,.30);
-  font-size:12.5px;overflow:hidden;display:flex;flex-direction:column;resize:both;}
+  font-size:13.5px;overflow:hidden;display:flex;flex-direction:column;resize:both;}
 .fw-head{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--surface-2);
   cursor:move;border-bottom:1px solid var(--line);user-select:none;}
 .fw-dot{width:9px;height:9px;border-radius:2px;flex:0 0 auto;}
@@ -1085,6 +1116,8 @@ html{overflow-anchor:none;}
 .fw-sz{margin-left:auto;background:none;border:0;font-size:15px;line-height:1;color:var(--ink-3);
   cursor:pointer;padding:0 4px;}
 .fw-sz:hover{color:var(--accent);}
+.fw-full{background:none;border:0;font-size:14px;line-height:1;color:var(--ink-3);cursor:pointer;padding:0 4px;}
+.fw-full:hover{color:var(--accent);}
 .fw-x{background:none;border:0;font-size:17px;line-height:1;color:var(--ink-3);cursor:pointer;padding:0 2px;}
 .fw-x:hover{color:var(--ink);}
 /* パネル頭のトグル（並び替え・％基準）。ptab を小さめにして頭に収める。 */
@@ -1093,10 +1126,14 @@ html{overflow-anchor:none;}
 .fw-ctl-l{font-size:10.5px;color:var(--ink-3);}
 .fw-ctl .ptabs{padding:2px;}
 .fw-ctl .ptab{font-size:11px;padding:3px 9px;}
-/* ⤢ の既定サイズ（標準→大→特大）。角ドラッグでさらに自由リサイズできる。 */
-.fwin.fw-lg{width:min(520px,94vw);height:min(66vh,560px);font-size:13.5px;}
-.fwin.fw-xl{width:min(760px,96vw);height:min(82vh,760px);font-size:15px;}
-.fwin.fw-xl .fw-list li{padding:9px 12px;}
+/* ⤢＝縦を画面いっぱいまで伸ばす（横幅はそのまま。長い一覧は中でスクロール＝ドラッグ）。
+   角ドラッグでさらに自由リサイズもできる。 */
+.fwin.fw-tall{height:calc(100vh - 16px);max-height:calc(100vh - 16px);}
+/* ⛶＝全画面。対応ブラウザは Fullscreen API（:fullscreen）、非対応は擬似全画面(.fw-full-fb)。 */
+.fwin:fullscreen,.fwin:-webkit-full-screen,.fwin.fw-full-fb{
+  position:fixed;inset:0;width:100vw;height:100vh;max-width:none;max-height:none;
+  border-radius:0;border:0;resize:none;font-size:15px;z-index:2000;}
+.fwin:fullscreen .fw-list li,.fwin:-webkit-full-screen .fw-list li,.fwin.fw-full-fb .fw-list li{padding:9px 12px;}
 .fw-list{list-style:none;margin:0;padding:4px 4px;flex:1 1 auto;overflow:auto;
   overflow-anchor:none;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
   font-variant-numeric:tabular-nums;}

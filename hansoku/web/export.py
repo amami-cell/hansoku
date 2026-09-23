@@ -470,6 +470,18 @@ def _parse_items(value) -> list[str]:
     return out
 
 
+def _mime_for_key(key: str) -> str:
+    """R2キー（ファイル名）の拡張子から MIME を推定する。画面のサムネ/PDF判定に使う。"""
+    ext = key.rsplit(".", 1)[-1].lower() if "." in key else ""
+    return {
+        "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+        "webp": "image/webp", "gif": "image/gif",
+        "pdf": "application/pdf",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "xls": "application/vnd.ms-excel", "csv": "text/csv",
+    }.get(ext, "")
+
+
 def load_creatives(
     master: StoreMaster,
     campaigns: list[dict] | None = None,
@@ -523,6 +535,10 @@ def load_creatives(
                 "date": str(item.get("date") or ""),
                 # 同一ドメイン配信（Worker が R2 から返す）。先頭スラッシュ必須。
                 "url": "/" + key.lstrip("/"),
+                # 画面でサムネ画像/PDF判定に使う。省略時は拡張子から補う。
+                "mime": str(item.get("mime") or _mime_for_key(key)),
+                # PDFの1ページ目サムネ（画像キー）。あれば画面はこれを画像表示する。
+                **({"thumb": "/" + str(item["thumb"]).lstrip("/")} if item.get("thumb") else {}),
             }
         )
     # 新しい掲出日から先に並べる（日付なしは末尾）

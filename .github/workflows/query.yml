@@ -89,6 +89,14 @@ on:
         description: 'probe_sheet: 有無を確認する月（カンマ区切り YYYY-MM）'
         required: false
         default: '2025-09,2025-10,2025-11,2025-12'
+      audit_categories:
+        description: '集計の代わりに、品目区分の分類監査（誤分類・その他落ち）を出す'
+        type: boolean
+        default: false
+      audit_store:
+        description: 'audit_categories の対象店（既定 1160）'
+        required: false
+        default: '1160'
 
 # トークンは読み取りだけでよい（どのワークフローも push もコメントもしない）。
 permissions:
@@ -126,6 +134,19 @@ jobs:
         run: |
           set -o pipefail
           python scripts/audit_cost.py | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: 品目区分の分類監査
+        if: ${{ inputs.audit_categories }}
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          STORE: ${{ inputs.audit_store }}
+        run: |
+          set -o pipefail
+          python scripts/audit_categories.py | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: FW共有シート 損益タブの年月カバレッジ
         if: ${{ inputs.probe_sheet }}
@@ -189,7 +210,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: 集計
-        if: ${{ !inputs.inspect_sheet && !inputs.audit_cost && !inputs.probe_sheet && !inputs.actual_cost }}
+        if: ${{ !inputs.inspect_sheet && !inputs.audit_cost && !inputs.probe_sheet && !inputs.actual_cost && !inputs.audit_categories }}
         env:
           HANSOKU_ENV: cloud
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}

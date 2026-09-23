@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#F6F7F9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1116" media="(prefers-color-scheme: dark)">
+<title>品目構成</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Zen+Old+Mincho:wght@600;700&display=swap">
+<link rel="stylesheet" href="styles.css?v=__BUILD__">
+<style>
+  /* ⛶で開く品目構成の単独ページ。小窓の中身を1ページに広げ、フル機能で操作できる。 */
+  body{margin:0;background:var(--surface);}
+  #panelpage{max-width:860px;margin:0 auto;padding:16px 16px 48px;}
+  #panelpage .fwtab-h{display:flex;align-items:center;gap:8px;margin:2px 0 12px;font-size:17px;}
+  #panelpage .fwtab-h .fw-dot{width:12px;height:12px;border-radius:3px;flex:0 0 auto;}
+  #panelpage .fwtab-h .fw-sub{font-size:12px;color:var(--ink-3);font-weight:400;}
+  #panelpage .fw-ctl{position:sticky;top:0;background:var(--surface);z-index:2;margin-bottom:4px;}
+  #panelpage .fw-list{list-style:none;margin:0;padding:0;}
+</style>
+</head>
+<body>
+<!-- loadDashboard の #app 参照（データ失敗時の案内先）だけ用意。通常は非表示。 -->
+<div id="app" hidden></div>
+<main id="panelpage"></main>
+<!-- データは index と同じ <script> 先読み経路（Access越しでも確実）。 -->
+<script src="data/dashboard.js?v=__BUILD__"></script>
+<script src="app.js?v=__BUILD__"></script>
+</body>
+</html>

@@ -66,6 +66,7 @@ let CAL_MONTH = null;              // カレンダー表示中の月（"YYYY-MM"
 let YEAR = null;                   // 年間販促ビューで表示中の年（数値）
 let STORE_YEAR = null;             // 店ページの年間スケジュールで見ている年（文字列 "YYYY"）
 let STORE_ANNUAL_VIEW = "chart"; // 店ページ年間スケジュールの表示（chart=既定・月次一覧＋帯 / calendar=開いて詳しく）
+let PROMO_CHART_VIEW = "carousel"; // 販促チャートの表示：carousel=月ごと（カード・既定） / gantt=年間チャート（帯・一覧）
 let PANEL_SORT = "share";          // 品目構成比パネルの並び：share=売上構成比順（既定） / qty=出品数(点数)順
 let PANEL_PCT = "dept";            // 品目構成比パネルの％基準：dept=部門別構成比（既定） / total=売上構成比（その月の全体比）
 let ANNUAL_OPEN = {};              // カレンダー一覧の開閉状態（"code:month" と "code:month:区分" を鍵に）
@@ -876,13 +877,6 @@ async function boot() {
   GOALS = loadGoals();
   NOTES = loadNotes();
   LOCAL_STATUS = loadStatus();
-  await fetchServerTargets();   // 本番は Neon の共有目標を読む。無ければ端末内保存で動く
-  await fetchServerNotes();     // 要因メモも同様（本番=共有、無ければ端末内）
-  await fetchServerStatus();    // 手動ステータス（本番=共有、無ければ端末内）
-  await fetchServerCreatives(); // アップロード制作物（本番のみ・無ければ台帳ぶんだけ）
-  await fetchServerPlans();     // アプリ内で起票した販促プラン（本番のみ・台帳と統合）
-  await fetchServerMe();        // 誰でログイン中か・書き込めるか（WRITE_OK を確定）
-  paintAccount();
   // URL が指定されていればそれに従う。無ければ「うちの店」。それも無ければ全店。
   if (location.hash && location.hash !== "#") {
     VIEW = hashToView(location.hash);
@@ -894,9 +888,22 @@ async function boot() {
   buildStoreJump();
   wireNav();
   wireSearch();
+  // ① まず先読みDATA＋端末内保存だけで即描画する（サーバ往復＝/api/* を待たない）。
+  //    以前は目標/メモ/ステータス/制作物/プラン/ログインの6往復を直列awaitしてから
+  //    描画していたため、Neon の起き上がり待ち等で初期表示が大きく遅れていた。
   render();
   syncHash(true);
   fillNotice();
+  // ② 共有データ（目標・メモ・ステータス・制作物・プラン・ログイン）は並列で取得し、
+  //    揃った時点で1回だけ描き直す。1本が遅くても初期表示は止めない（allSettled）。
+  Promise.allSettled([
+    fetchServerTargets(),   // Neon の共有目標（無ければ端末内保存）
+    fetchServerNotes(),     // 要因メモ
+    fetchServerStatus(),    // 手動ステータス
+    fetchServerCreatives(), // アップロード制作物
+    fetchServerPlans(),     // アプリ内で起票した販促プラン
+    fetchServerMe(),        // 誰でログイン中か・書き込めるか（WRITE_OK）
+  ]).then(() => { paintAccount(); render(); });
   // 戻る/進むで画面が動くようにする。
   window.addEventListener("popstate", () => {
     if (SUPPRESS_HASH) return;
@@ -1131,6 +1138,8 @@ function render() {
     }));
   app.querySelectorAll("[data-savw]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); STORE_ANNUAL_VIEW = el.dataset.savw; render(); }));
+  app.querySelectorAll("[data-pcview]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); PROMO_CHART_VIEW = el.dataset.pcview; render(); }));
   app.querySelectorAll("[data-syear]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); STORE_YEAR = el.dataset.syear; render(); }));
   app.querySelectorAll("[data-psort]").forEach(el =>
@@ -1184,6 +1193,13 @@ function render() {
     }));
   app.querySelectorAll("[data-crurl]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); openCreativePreview(el.dataset.crurl, el.dataset.crmime, el.dataset.crtitle, el.dataset.cropen); }));
+  // 販促カルーセルは、開いたとき現在月のカードを中央に寄せる（前後の月が両端にチラ見え）。
+  app.querySelectorAll(".pcar").forEach(car => {
+    const now = car.querySelector(".pcar-mo.now") || car.querySelector(".pcar-mo");
+    if (!now) return;
+    const cr = car.getBoundingClientRect(), nr = now.getBoundingClientRect();
+    car.scrollLeft += (nr.left - cr.left) - (car.clientWidth - now.clientWidth) / 2;
+  });
   app.querySelectorAll("[data-cfilter]").forEach(el =>
     el.addEventListener("click", () => {
       const [dim, val] = el.dataset.cfilter.split(":");
@@ -1924,8 +1940,42 @@ async function fetchServerCreatives() {
   } catch (e) { /* API 無し → 台帳ぶんだけ表示 */ }
 }
 const allCreatives = () => (DATA.creatives || []).concat(UPLOADED_CREATIVES);
-// 施策に紐づく制作物（台帳＋アップロード両方）
-const creativesForCampaign = id => allCreatives().filter(cr => cr.campaign_id === id);
+// 同じ資料の重複を畳む。URLが違っても（例：台帳の画像POPとアップロードのPDFが同じデザイン）、
+// 「同じ施策 × ほぼ同じ名前」なら1枚に集約する。名前は POP/PDF/資料 等の飾り語と空白を無視。
+const creativeSig = cr => (cr.campaign_id || "") + "|" +
+  String(cr.title || "").replace(/\s+/g, "").replace(/POP|ＰＯＰ|PDF|ＰＤＦ|資料|チラシ|告知|画像/gi, "");
+function dedupeCreatives(list) {
+  const seenUrl = new Set(), seenSig = new Set(); const out = [];
+  for (const cr of list) {
+    const u = cr.url || cr.thumb, sig = creativeSig(cr);
+    if ((u && seenUrl.has(u)) || seenSig.has(sig)) continue;
+    if (u) seenUrl.add(u); seenSig.add(sig); out.push(cr);
+  }
+  return out;
+}
+// 施策に紐づく制作物（台帳＋アップロード両方）。同じ資料は1枚に畳む。
+const creativesForCampaign = id => dedupeCreatives(allCreatives().filter(cr => cr.campaign_id === id));
+// その店・その月（YYYY-MM）に出す制作物。＝その月に販売している（実施中の）施策のPOP。
+// ルール：
+//   ・未来の月（当月より先）にはPOPを出さない。まだ販売していない予定販促にPOPが
+//     並ぶのはおかしいので、当月までに実施中の販促だけPOPを出す（先の月は「予定」）。
+//   ・その月に実施中の施策ごとに1枚だけ。同じ資料（同一URL/同名）は月内で被らせない。
+function creativesForMonth(code, m) {
+  if (m > CURRENT_MONTH) return [];   // 未来の月はPOPを出さない（予定扱い）
+  const camps = (DATA.campaigns || []).filter(c =>
+    (c.stores || []).includes(code) && c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m);
+  const seenUrl = new Set(), seenSig = new Set(); const out = [];
+  for (const c of camps) {
+    for (const cr of allCreatives()) {
+      if (cr.campaign_id !== c.id) continue;
+      const u = cr.url || cr.thumb, sig = creativeSig(cr);
+      if ((u && seenUrl.has(u)) || seenSig.has(sig)) continue;  // 既出の資料は飛ばす
+      if (u) seenUrl.add(u); seenSig.add(sig); out.push(cr);
+      break;                          // この施策のPOPは1枚だけ
+    }
+  }
+  return out;
+}
 
 // ── 販促プラン（アプリ内で起票・複製する計画。/api/plans）───────────────────
 // 台帳(schedule.yaml)由来の「確定した販促」に、アプリで起票した「計画」を足して
@@ -2445,7 +2495,12 @@ function fwinDrag(win, handle) {
 // ── 商品内訳／部門別の小パネル（PC=浮く小窓・複数/自由リサイズ／携帯=下シート＋タブ）──
 // kind:"cat"=区分の商品内訳（点数・構成比）／"month"=その月の部門別一覧（区分ごと）。
 // 販促に関わる区分・商品は色付け（promo クラス）。desc={kind,code,m,cat}
-const isMobile = () => !!(window.matchMedia && window.matchMedia("(max-width: 640px)").matches);
+// 「携帯として下シートで開く」判定。幅だけで見ると、PCの画面を半分にしただけでも
+// 携帯扱いになってしまう。実機の携帯（細い幅 かつ 指タッチ＝ホバー無し）だけを携帯とし、
+// PCはウインドウを細くしても常にPC用の浮く小窓で統一する。
+const isMobile = () => !!(window.matchMedia
+  && window.matchMedia("(max-width: 640px)").matches
+  && window.matchMedia("(hover: none) and (pointer: coarse)").matches);
 const panelKey = d => d.kind === "month" ? `M:${d.code}:${d.m}` : `${d.code}:${d.m}:${d.cat}`;
 // ── 0円サブ（選択メニュー内訳）の畳み表示 ────────────────────────────────────
 // 親メイン商品の行に付ける開閉ボタン（既定＝畳む）と、開いたときの内訳（サブ）行。
@@ -2692,25 +2747,83 @@ function rerenderPanels() {
   if (SHEET_TABS.length) renderSheet();
 }
 
+// ⛶：品目構成の中身を、実ブラウザの新規タブに「フル機能の単独ページ(panel.html)」で開く。
+// panel.html は同じ app.js を読み込み、並び替え・構成比基準・内訳の開閉まで小窓と同じに動く。
+function openPanelInNewTab(desc) {
+  const p = new URLSearchParams();
+  p.set("kind", desc.kind);
+  p.set("code", desc.code);
+  p.set("m", desc.m);
+  if (desc.kind === "cat" && desc.cat != null) p.set("cat", desc.cat);
+  const w = window.open("panel.html?" + p.toString(), "_blank");
+  if (!w) alert("ブラウザにポップアップを止められました。ポップアップを許可すると別タブで開けます。");
+}
+// panel.html 専用の起動。品目構成パネルだけを1ページに、フル機能（並び替え・構成比基準・
+// 内訳の開閉・区分ドリル）で描く。DATA は index と同じ <script> 先読み経路で読む。
+async function bootPanel() {
+  DATA = await loadDashboard();
+  if (!DATA) return;   // 失敗時は loadDashboard が理由を出す
+  const q = new URLSearchParams(location.search);
+  const kind = q.get("kind") === "month" ? "month" : "cat";
+  const desc = kind === "month"
+    ? { kind: "month", code: q.get("code"), m: q.get("m") }
+    : { kind: "cat", code: q.get("code"), m: q.get("m"), cat: q.get("cat") || "" };
+  renderPanelPage(desc);
+}
+function renderPanelPage(desc) {
+  const c = panelContent(desc);
+  document.title = `${c.title}｜品目構成`;
+  const el = document.getElementById("panelpage");
+  el.innerHTML =
+    `<div class="fwtab-h"><span class="fw-dot" style="background:${c.color}"></span>` +
+    `<b>${esc(c.title)}</b><span class="fw-sub">${c.sub}</span></div>` +
+    panelCtrl() +
+    `<ul class="fw-list">${c.list}</ul>`;
+  // 並び替え・構成比基準：変更したらこのページを描き直す（小窓の rerenderPanels と同じ役割）。
+  el.querySelectorAll("[data-panelsort]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); PANEL_SORT = b.dataset.panelsort; renderPanelPage(desc);
+  }));
+  el.querySelectorAll("[data-panelpct]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); PANEL_PCT = b.dataset.panelpct; renderPanelPage(desc);
+  }));
+  // 区分（部門別）の行を押すと、その区分の商品内訳へ同ページ内でドリルする。
+  el.querySelectorAll("[data-compocell]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation(); const p = b.dataset.compocell.split(":");
+    renderPanelPage({ kind: "cat", code: p[0], m: p[1], cat: decodeURIComponent(p.slice(2).join(":")) });
+  }));
+  // 内訳（詳細表示）の開閉（本体と同じ wireSubToggle）。
+  wireSubToggle(el);
+}
+
 // ── PC：浮く小ウインドウ（複数・ドラッグ移動・角で自由リサイズ・⤢で既定サイズ）──────
 // 小窓の中身（頭・トグル・一覧）を描画して配線。トグル操作の再描画でも使い回す。
 function renderWindowBody(win) {
   const c = panelContent(win._desc);
   win.innerHTML = `<div class="fw-head"><span class="fw-dot" style="background:${c.color}"></span>` +
     `<span class="fw-ti">${esc(c.title)}</span><span class="fw-sub">${c.sub}</span>` +
-    `<button class="fw-sz" aria-label="大きさを切替">⤢</button>` +
+    `<button class="fw-sz" aria-label="縦を画面いっぱいに広げる／戻す">⤢</button>` +
+    `<button class="fw-full" aria-label="全画面表示">⛶</button>` +
     `<button class="fw-x" aria-label="閉じる">×</button></div>` +
     panelCtrl() +
     `<ul class="fw-list">${c.list}</ul>`;
-  win.querySelector(".fw-x").addEventListener("click", () => win.remove());
-  const SIZES = ["", "fw-lg", "fw-xl"];
+  win.querySelector(".fw-x").addEventListener("click", () => {
+    if (document.fullscreenElement === win && document.exitFullscreen) document.exitFullscreen();
+    win.remove();
+  });
+  // ⤢＝縦を画面いっぱいまで伸ばす／既定サイズに戻す。横幅はそのまま（どのカテゴリでも
+  // 縦は画面ぶん使い切る）。一覧がそれより長ければ中でスクロールする。
   win.querySelector(".fw-sz").addEventListener("click", e => {
     e.stopPropagation();
-    const cur = SIZES.findIndex(s => s && win.classList.contains(s));
-    win.style.width = ""; win.style.height = "";
-    win.classList.remove("fw-lg", "fw-xl");
-    const next = SIZES[(cur + 1 + 1) % SIZES.length]; if (next) win.classList.add(next);
+    const tall = win.classList.toggle("fw-tall");
+    win.style.height = "";                       // クラス側の高さを使う（手動リサイズをリセット）
+    win.style.top = tall ? "8px" : win.style.top; // 上端に寄せて縦を使い切る
     fwinFront(win);
+  });
+  // ⛶＝この中身を「別のブラウザタブ」で開く（アプリ内の全画面ではなく、実ブラウザの新規タブ）。
+  // 端末の既定ブラウザ／新規タブで大きく見たい・印刷したい向け。ポップアップ阻止時は案内する。
+  win.querySelector(".fw-full").addEventListener("click", e => {
+    e.stopPropagation();
+    openPanelInNewTab(win._desc);
   });
   fwinDrag(win, win.querySelector(".fw-head"));
   wirePanelRows(win);
@@ -4443,8 +4556,6 @@ function storeAnnualChart(code, year) {
   const camps = (DATA.campaigns || [])
     .filter(c => (c.stores || []).includes(code) && c.start.slice(0, 10) <= ye && (c.end || c.start).slice(0, 10) >= ys)
     .sort((a, b) => a.start < b.start ? -1 : 1);
-  const head = Array.from({ length: 12 }, (_, i) =>
-    `<button class="gmh" data-smonth="${code}:${year}-${String(i + 1).padStart(2, "0")}">${i + 1}</button>`).join("");
 
   // 販促を「対象区分」（パフェ/ケーキ/コラボ…）でまとめ、区分ごとに1レーン＝1行にする。
   // 帯の色も区分色でそろえる。同じ区分で“日付”が重なる販促があるときだけ、その区分に
@@ -4465,10 +4576,63 @@ function storeAnnualChart(code, year) {
     }
     return c;
   };
+  // 区分ごとにまとめて色を割り当てる（凡例とカルーセルの販促チップで同じ色を使う）。
+  // 並びは販促件数が多い区分を上に（同数は開始が早い順）。
+  const byCat = new Map();
+  for (const c of camps) { const k = catOf(c); (byCat.get(k) || byCat.set(k, []).get(k)).push(c); }
+  const catOrder = [...byCat.keys()].sort((a, b) =>
+    (byCat.get(b).length - byCat.get(a).length) || (byCat.get(a)[0].start < byCat.get(b)[0].start ? -1 : 1));
+  catOrder.forEach((cat, i) => { laneColor[cat] = assignColor(cat, i); });
+
+  // POP・制作物のサムネ（画像／PDF1ページ目は画像、その他は種別バッジ）。押すと小窓プレビュー。
+  const popThumb = cr => {
+    const mime = cr.mime || "", isImg = mime.startsWith("image/"), isPdf = mime.includes("pdf");
+    const hasThumb = isPdf && cr.thumb, showImg = isImg || hasThumb;
+    const pvUrl = hasThumb ? cr.thumb : cr.url, pvMime = hasThumb ? "image/png" : mime;
+    const label = isPdf ? "PDF" : isImg ? "IMG" : ((cr.url || "").split(".").pop() || "資料").toUpperCase().slice(0, 4);
+    const view = `data-crurl="${pvUrl}" data-crmime="${esc(pvMime)}" data-crtitle="${esc(cr.title)}" data-cropen="${cr.url}"`;
+    return showImg
+      ? `<button type="button" class="poth" ${view} title="${esc(cr.title)}"><img src="${pvUrl}" alt="${esc(cr.title)}" loading="lazy"></button>`
+      : `<button type="button" class="poth poth-x" ${view} title="${esc(cr.title)}"><span class="cext">${label}</span></button>`;
+  };
+  // その月に実施中の販促チップ（色＝区分色・◎/△つき）。押すと施策詳細へ。
+  const campChip = c => {
+    const col = laneColor[catOf(c)] || "var(--ink-3)";
+    const st = campStatus(c);
+    const ef = storeCampEffect(c, code);
+    const mark = ef.mark || (VERDICT_MARK[campVerdict(c).tone] || "");
+    const tone = ef.mark ? ef.tone : campVerdict(c).tone;
+    return `<button type="button" class="pcar-camp ${st.k}" data-camp="${c.id}" style="--kc:${col}">` +
+      `<span class="pcc-dot"></span><span class="pcc-t">${esc(c.title)}</span>` +
+      `${mark ? `<span class="gvm ${tone}">${mark}</span>` : ""}<span class="pcc-r">${esc(campRange(c))}</span></button>`;
+  };
+  // 12ヶ月ぶんのカード。上＝その月のPOP、下＝その月の販促。横スクロールで前後の月が両端にチラ見え。
+  const months12 = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`);
+  const carCards = months12.map((m, i) => {
+    const inMonth = camps.filter(c => c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m)
+      .sort((a, b) => a.start < b.start ? -1 : 1);
+    const crs = creativesForMonth(code, m);
+    const cls = (m === CURRENT_MONTH ? " now" : "") + (m > CURRENT_MONTH ? " prov" : "");
+    // POP欄の空表示。これからの月（当月以降）の販促はPOP未作成＝「予定」、
+    // 過ぎた月で無いものは「なし」。販促自体が無い月はプレースホルダを出さない。
+    const pops = crs.length
+      ? `<div class="pcar-pops">${crs.map(popThumb).join("")}</div>`
+      : inMonth.length
+        ? `<div class="pcar-pops empty"><span class="pcar-none">${m > CURRENT_MONTH ? "予定" : "POP・制作物なし"}</span></div>`
+        : "";
+    const chips = inMonth.length
+      ? `<div class="pcar-camps">${inMonth.map(campChip).join("")}</div>`
+      : `<div class="pcar-camps empty"><span class="pcar-none">この月の販促なし</span></div>`;
+    return `<div class="pcar-mo${cls}" role="listitem">` +
+      `<button type="button" class="pcar-h" data-smonth="${code}:${m}">${i + 1}月<span class="pcar-yr">${year}</span></button>` +
+      `${pops}${chips}</div>`;
+  }).join("");
+
+  // 年間チャート（帯・一覧）＝1年を一望。区分ごとに1レーン、帯＝実施期間（横軸＝月）。
+  // 月がたまたま同じでも“日付”が重ならなければ同じ行、重なるときだけ「パフェ2」と行を分ける。
   const makeBar = (c, col) => {
     const st = campStatus(c);
     const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
-    // 帯の位置は「分数月」（月内の日付も反映）。同じ月に接する2件が重なって見えない。
     const monthFrac = (ds, end = false) => {
       let dd = ds < ys ? ys : (ds > ye ? ye : ds);
       const mo = +dd.slice(5, 7), day = +dd.slice(8, 10);
@@ -4480,7 +4644,6 @@ function storeAnnualChart(code, year) {
     const ef = storeCampEffect(c, code);
     const mark = ef.mark || (VERDICT_MARK[campVerdict(c).tone] || "");
     const tone = ef.mark ? ef.tone : campVerdict(c).tone;
-    // ホバー用（マウスを合わせると売上・昨対・前回比が出る）。
     let tip = `${c.title}｜${campRange(c)}`;
     if (ef.measured) {
       tip += `｜${ef.label} ${man(ef.cur)}円・昨対${signed(ef.pct)}%`;
@@ -4490,20 +4653,16 @@ function storeAnnualChart(code, year) {
     return `<button class="gbar ${st.k}" data-camp="${c.id}" style="left:${left}%;width:${w}%;--kc:${col}"
       data-tip="${esc(tip)}">${mark ? `<span class="gvm ${tone}">${mark}</span>` : ""}<span class="gbt">${esc(c.title)}</span></button>`;
   };
-  // 区分ごとにまとめる。並びは販促件数が多い区分を上に（同数は開始が早い順）。
-  const byCat = new Map();
-  for (const c of camps) { const k = catOf(c); (byCat.get(k) || byCat.set(k, []).get(k)).push(c); }
-  const catOrder = [...byCat.keys()].sort((a, b) =>
-    (byCat.get(b).length - byCat.get(a).length) || (byCat.get(a)[0].start < byCat.get(b)[0].start ? -1 : 1));
-  catOrder.forEach((cat, i) => { laneColor[cat] = assignColor(cat, i); });
+  const ganttHead = Array.from({ length: 12 }, (_, i) =>
+    `<button class="gmh" data-smonth="${code}:${year}-${String(i + 1).padStart(2, "0")}">${i + 1}</button>`).join("");
   const laneHtml = [];
   for (const cat of catOrder) {
     const col = laneColor[cat];
     const list = byCat.get(cat).slice().sort((a, b) => a.start < b.start ? -1 : 1);
-    const sub = []; // この区分の中のサブレーン（“日付”が重なったときだけ増える）
+    const sub = [];
     for (const c of list) {
       const s = c.start.slice(0, 10), e = (c.end || c.start).slice(0, 10);
-      let lane = sub.find(L => L.lastEnd < s);   // 前の帯の終了日より後に始まれば同じ行
+      let lane = sub.find(L => L.lastEnd < s);
       if (!lane) { lane = { lastEnd: "", bars: [] }; sub.push(lane); }
       lane.bars.push(makeBar(c, col)); if (e > lane.lastEnd) lane.lastEnd = e;
     }
@@ -4512,13 +4671,25 @@ function storeAnnualChart(code, year) {
       laneHtml.push(`<div class="grow"><div class="glabel gcat"><span class="kdot" style="background:${col}"></span>${esc(label)}</div><div class="gtrack">${L.bars.join("")}</div></div>`);
     });
   }
-  const rows = laneHtml.join("");
+  const ganttHtml = `<div class="panel gantt">
+    <div class="grow ghead"><div class="glabel gh">区分</div><div class="gmonths">${ganttHead}</div></div>
+    ${camps.length ? laneHtml.join("") : `<div class="empty">${year}年に走った販促はありません。</div>`}
+  </div>`;
+
+  // 表示切替：月ごと（カード・既定）／年間チャート（帯・一覧）。
+  const pv = PROMO_CHART_VIEW === "gantt" ? "gantt" : "carousel";
+  const pvTabs = `<div class="viewtabs pvtabs">
+    <button class="vtab${pv === "carousel" ? " on" : ""}" data-pcview="carousel">月ごと（カード）</button>
+    <button class="vtab${pv === "gantt" ? " on" : ""}" data-pcview="gantt">年間チャート（帯・一覧）</button></div>`;
+  const promoBody = pv === "gantt" ? ganttHtml : `<div class="pcar" role="list">${carCards}</div>`;
 
   // 凡例（その年に出ている種類）＋見方（誰が見ても操作が分かるように）
   const legend = catOrder.length
     ? `<div class="glegend">${catOrder.map(cc => `<span class="glg"><i style="background:${laneColor[cc]}"></i>${esc(cc)}</span>`).join("")}
         <span class="glg"><i class="gvm good">◎</i>効果あり</span><span class="glg"><i class="gvm warn">△</i>要改善</span></div>
-       <div class="ghelp">区分ごとに帯をまとめています（色＝品目区分）。同じ区分で期間が重なる販促は「パフェ2」のように行を分けます。<b>帯や販促名</b>を押すと詳細、<b>上の月番号</b>を押すとその月の詳細（構成比・POP）へ。◎/△は対象区分の前年比で自動判定。</div>`
+       <div class="ghelp">色＝品目区分。${pv === "gantt"
+         ? "帯＝実施期間（横軸＝月）。同じ区分で期間が重なる販促は「パフェ2」のように行を分けます。<b>帯や販促名</b>を押すと詳細、<b>上の月番号</b>を押すとその月の詳細（構成比・POP）へ。"
+         : "カードを<b>左右にスクロール</b>すると前後の月が両端にチラ見えします。上＝その月のPOP・制作物（押すと拡大）、下＝その月の販促（押すと詳細）。<b>◯月</b>を押すとその月の詳細（構成比・POP）へ。"}◎/△は対象区分の前年比で自動判定。</div>`
     : "";
 
   // 年サマリ（確定分の売上合計・前年比・予算達成の平均・販促◎/△）。チャートの頭に置いて、
@@ -4543,11 +4714,9 @@ function storeAnnualChart(code, year) {
   </div>`;
 
   return `${yearSummary}${storeYearMatrix(code, year)}
-    <div class="mmhd" style="margin-top:16px">販促 年間チャート<span class="mmhint">帯＝実施期間（横軸＝月）。◎効いた/△要改善。帯や販促名を押すと詳細、月番号を押すと月の詳細へ</span></div>
-    <div class="panel gantt">
-    <div class="grow ghead"><div class="glabel gh">区分</div><div class="gmonths">${head}</div></div>
-    ${camps.length ? rows : `<div class="empty">${year}年に走った販促はありません。</div>`}
-  </div>${legend}`;
+    <div class="mmhd" style="margin-top:16px">販促 年間チャート<span class="mmhint">${pv === "gantt" ? "帯＝実施期間（横軸＝月）。帯や販促名を押すと詳細へ。" : "横スクロールで月移動（前後の月がチラ見え）。上＝POP、下＝販促。"}◎効いた/△要改善</span></div>
+    ${pvTabs}
+    ${promoBody}${legend}`;
 }
 
 // 月次の推移を「1行＝1ヶ月」の一覧にする。年間まとめではなく、月ごとの結果（売上・前年比・
@@ -6270,4 +6439,8 @@ function fillNotice() {
      <p class="fine">最終更新 ${gen}</p>`;
 }
 
-document.addEventListener("DOMContentLoaded", boot);
+document.addEventListener("DOMContentLoaded", () => {
+  // panel.html（⛶で開く単独ページ）は品目構成パネルだけを描く。それ以外は通常のアプリ。
+  if (document.getElementById("panelpage")) bootPanel();
+  else boot();
+});

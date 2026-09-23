@@ -104,7 +104,7 @@ jobs:
             echo "（バケットは既存か、権限が無ければ deploy で検出されます）"
 
           echo "── 静的アセットのキャッシュ破棄（毎デプロイ一意化）──"
-          sed -i "s/__BUILD__/$(date +%s)/g" web/index.html
+          sed -i "s/__BUILD__/$(date +%s)/g" web/index.html web/panel.html
 
           echo "── 公開 ──"
           npx wrangler deploy 2>&1 | tee /tmp/wr.log

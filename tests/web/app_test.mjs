@@ -983,14 +983,80 @@ test("storeYearMatrix：品目構成比を『区分×月』の行で一覧に出
   assert.ok(html.includes("data-compocell"), "構成比の金額セルは押せる（商品内訳の小窓）");
 });
 
-test("storeAnnualChart：販促は年間チャート（帯）として見出し付きで出す", () => {
+test("storeAnnualChart：販促は月カルーセル（上POP・下販促）として見出し付きで出す", () => {
   const ctx = loadApp(annualData);
   const html = call(ctx, `storeAnnualChart("1160","2025")`);
   assert.ok(html.includes("販促 年間チャート"), "販促の年間チャート見出し");
+  assert.ok(html.includes('class="pcar"'), "月カルーセルで表示（横スクロール）");
+  assert.ok(/class="pcar-mo[^"]*"/.test(html), "月ごとのカード");
+  assert.ok(html.includes('data-camp="snow"'), "その月に実施中の販促チップ");
+  assert.ok(/data-smonth="1160:2025-09"/.test(html), "月見出しはその月の詳細へ飛べる");
+  // 制作物が無い月は「POP・制作物なし」のプレースホルダ（サムネ枠は上に置く設計）
+  assert.ok(html.includes("POP・制作物なし"), "POPが無い月はプレースホルダ");
+  // 表示切替（月ごと／年間チャート）がある
+  assert.ok(/data-pcview="carousel"/.test(html) && /data-pcview="gantt"/.test(html), "販促チャートの表示切替タブ");
+});
+
+test("storeAnnualChart：年間チャート（帯・一覧）に切り替えると帯で出る", () => {
+  const ctx = loadApp(annualData);
+  const html = call(ctx, `PROMO_CHART_VIEW="gantt"; storeAnnualChart("1160","2025")`);
   assert.ok(html.includes('class="panel gantt"'), "帯（ガント）で表示");
   assert.ok(html.includes('data-camp="snow"'), "販促の帯");
-  // 帯はネイティブ title ではなく、暗色ツールチップ用の data-tip（｜区切り）を持つ
   assert.ok(/class="gbar[^"]*"[^>]*data-tip="[^"]*｜/.test(html), "帯に構造化ツールチップ(data-tip)");
+});
+
+test("creativesForMonth：実施中の各施策1枚だけ＋同じ資料は月内で被らせない", () => {
+  // snow=2025-06〜09、cake9=2025-09〜11（annualData）。snowにPOP2枚（同月でも1枚に絞る）。
+  const dup = {
+    ...annualData,
+    creatives: [
+      { id: "a1", campaign_id: "snow", mime: "image/png", url: "/creatives/snow1.png", thumb: "/creatives/snow1.png", title: "snowPOP1" },
+      { id: "a2", campaign_id: "snow", mime: "image/png", url: "/creatives/snow2.png", thumb: "/creatives/snow2.png", title: "snowPOP2" },
+      { id: "c1", campaign_id: "cake9", mime: "image/png", url: "/creatives/cake.png", thumb: "/creatives/cake.png", title: "cakePOP" },
+    ],
+  };
+  const ctx = loadApp(dup);
+  // 実施中の月（snowのみ）は、snowのPOPが何枚あっても1枚だけ。
+  assert.equal(call(ctx, `creativesForMonth("1160","2025-07").length`), 1, "実施中でも各施策1枚だけ");
+  // 実施中でない月は出さない。
+  assert.equal(call(ctx, `creativesForMonth("1160","2025-05").length`), 0, "実施していない月は出さない");
+  // snow+cake9 の両方が実施中の月は各1枚＝2枚（施策ごと）。
+  assert.equal(call(ctx, `creativesForMonth("1160","2025-09").length`), 2, "実施中の施策ごとに1枚");
+
+  // 同じ資料(URL)が別施策にまたがっても、月内では1枚だけ（被らせない）。
+  const shared = {
+    ...annualData,
+    creatives: [
+      { id: "s1", campaign_id: "snow", mime: "image/png", url: "/creatives/same.png", thumb: "/creatives/same.png", title: "共通POP" },
+      { id: "s2", campaign_id: "cake9", mime: "image/png", url: "/creatives/same.png", thumb: "/creatives/same.png", title: "共通POP(別施策)" },
+    ],
+  };
+  const ctx2 = loadApp(shared);
+  assert.equal(call(ctx2, `creativesForMonth("1160","2025-09").length`), 1, "同一URLは月内で1枚に畳む");
+
+  // 未来の月（当月より先）はPOPを出さない＝まだ販売していない予定販促にPOPが並ばない。
+  const future = {
+    ...annualData,
+    campaigns: [{ id: "xmas", stores: ["1160"], scope_all: false, title: "クリスマス", kind: "dev", bucket: "ケーキ", start: "2099-12-01", end: "2099-12-25" }],
+    creatives: [{ id: "x1", campaign_id: "xmas", mime: "image/png", url: "/creatives/xmas.png", thumb: "/creatives/xmas.png", title: "クリスマスPOP" }],
+  };
+  const cf = loadApp(future);
+  assert.equal(call(cf, `creativesForMonth("1160","2099-12").length`), 0, "未来の月はPOPを出さない（予定扱い）");
+});
+
+test("creativesForCampaign：同じ資料（画像POPとPDFが同名）はURLが違っても1枚に畳む", () => {
+  // 同じ施策の同じデザインが、台帳の画像POPとアップロードPDFで二重登録されるケース。
+  const dup = {
+    ...annualData,
+    creatives: [
+      { id: "img", campaign_id: "cake9", mime: "image/png", url: "/creatives/a.png", thumb: "/creatives/a.png", title: "5月ケーキ POP" },
+      { id: "pdf", campaign_id: "cake9", mime: "application/pdf", url: "/creatives/a.pdf", title: "5月ケーキ" },
+      { id: "other", campaign_id: "cake9", mime: "image/png", url: "/creatives/b.png", thumb: "/creatives/b.png", title: "9月ケーキ 裏面" },
+    ],
+  };
+  const ctx = loadApp(dup);
+  // 「5月ケーキ POP」と「5月ケーキ」は同施策×同名(飾り語無視)→1枚。別デザイン(9月ケーキ)は残る＝計2。
+  assert.equal(call(ctx, `creativesForCampaign("cake9").length`), 2, "同名の重複は畳み、別資料は残す");
 });
 
 test("renderStoreMonth：予算があれば売上カードに予算比ピル＋予算サブが出る（Steppy風）", () => {
