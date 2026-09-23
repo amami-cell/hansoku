@@ -62,6 +62,13 @@ class PostgresWarehouse(Warehouse):
             columns = [d[0] for d in cur.description]
             return [dict(zip(columns, row)) for row in cur.fetchall()]
 
+    def execute(self, sql: str, params: dict[str, Any] | None = None) -> None:
+        """書き換えを流してコミットする。**コミットを忘れると消えない。**"""
+        rendered = render_params(sql, self.dialect)
+        with self.conn.cursor() as cur:
+            cur.execute(rendered, params or {})
+        self.conn.commit()
+
     # ── 取り込み ──────────────────────────────────────────────────────────
     def replace_actuals(
         self,

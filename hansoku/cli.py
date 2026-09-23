@@ -219,6 +219,52 @@ def cmd_ingest_pos(args: argparse.Namespace) -> int:
     return 1 if pos_looks_broken(report) else 0
 
 
+def cmd_purge_zeros(args: argparse.Namespace) -> int:
+    """0以下の実績を消す。**既定は素振り。消すには --apply が要る。**
+
+    開店前の月に入ってしまった 0 を片付けるためのもの。再取込では消えない
+    （0を作らなくなると、その月は削除範囲にも入らない）。
+    """
+    from .purge import purge_zeros
+
+    settings = load_settings()
+    with get_warehouse(settings) as warehouse:
+        found = purge_zeros(
+            warehouse,
+            apply=args.apply,
+            source=args.source,
+            store_codes=args.store or None,
+            metrics=args.metric or None,
+            date_from=args.date_from,
+            date_to=args.date_to,
+        )
+        head = "消しました" if args.apply else "素振り（消していません）"
+        print(f"=== 0以下の実績 {head} / source={args.source} ===")
+        if not found:
+            print("該当なし。")
+            return 0
+        for r in found:
+            print(f"  {r['store_code']}  {r['date']}  {r['metric']:<8} "
+                  f"{r['value']:>12,.0f}  kind={r['kind']}")
+        print(f"\n{len(found)}件")
+        if not args.apply:
+            # **消す前に必ず見る。** 同じ条件でそのまま --apply すれば、
+            # いま見た一覧がそのまま消える。
+            print("消すには同じ指定に --apply を付けて流してください。")
+        else:
+            # 「消えたつもり」を防ぐ。消したあとに同じ条件で数え直す。
+            left = purge_zeros(
+                warehouse, apply=False, source=args.source,
+                store_codes=args.store or None, metrics=args.metric or None,
+                date_from=args.date_from, date_to=args.date_to,
+            )
+            print(f"消したあとの残り: {len(left)}件")
+            if left:
+                print("⚠ 残っています。消えていません（コミットされていない疑い）")
+                return 1
+    return 0
+
+
 def cmd_sheet_tabs(args: argparse.Namespace) -> int:
     """
     取り込み元シートのタブ一覧を出す。
@@ -902,6 +948,19 @@ def build_parser() -> argparse.ArgumentParser:
     ip.add_argument("--spreadsheet", help="書込先スプレッドシートID（既定 POS_SPREADSHEET_ID）")
     ip.add_argument("--lenient", action="store_true", help="取りこぼしがあっても中断しない")
     ip.set_defaults(func=cmd_ingest_pos)
+
+    pz = sub.add_parser(
+        "purge-zeros",
+        help="0以下の実績を消す（開店前の月に入った0の片付け。既定は素振り）",
+    )
+    pz.add_argument("--source", required=True, help="取り込み口（例 pos_sheet）。必須")
+    pz.add_argument("--store", action="append", help="店舗コード（複数指定可）")
+    pz.add_argument("--metric", action="append", help="指標（複数指定可）")
+    pz.add_argument("--date-from", dest="date_from", help="開始日 YYYY-MM-DD")
+    pz.add_argument("--date-to", dest="date_to", help="終了日 YYYY-MM-DD")
+    pz.add_argument("--apply", action="store_true",
+                    help="**本当に消す。** 付けなければ素振りで一覧を出すだけ")
+    pz.set_defaults(func=cmd_purge_zeros)
 
     tabs = sub.add_parser("sheet-tabs", help="取り込み元シートのタブ一覧を出す（診断用）")
     tabs.add_argument("--spreadsheet", help="スプレッドシートID（既定はFW共有シート）")

@@ -57,6 +57,10 @@ class DuckDBWarehouse(Warehouse):
         columns = [d[0] for d in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
+    def execute(self, sql: str, params: dict[str, Any] | None = None) -> None:
+        rendered = render_params(sql, self.dialect)
+        self._conn.execute(rendered, params or {})
+
     def replace_actuals(
         self,
         rows: Iterable[ActualRow],
