@@ -337,6 +337,30 @@ test("1店だけの販促は『対象店ごとの結果』を出さない（結�
   assert.ok(!/対象店ごとの結果/.test(html), "単店は重複するので出さない");
 });
 
+test("新商品で商品単位の前年比が無いとき、部門の前年比にフォールバックして見せる", () => {
+  const bkt = (name, sales, total) => ({ total_sales: total,
+    buckets: [{ name, sales, qty: 100, share: sales / total, cost_rate: 30 }], raw: [] });
+  const c = { id: "sp", key: "sp@2026", stores: ["1160"], scope_all: false, title: "スノー",
+    kind: "parfait", start: "2026-07-01", end: "2026-12-31", note: "", bucket: "パフェ", items: ["スノー"] };
+  const data = { ...base,
+    months: ["2025-07", "2025-08", "2026-07", "2026-08"],
+    stores: [{ code: "1160", name: "ルクアLargo", region: "大阪", neighbors: [] }],
+    monthly: { 1160: { "2025-07": { sales: 9000000 }, "2025-08": { sales: 11000000 },
+      "2026-07": { sales: 10000000 }, "2026-08": { sales: 13000000 } } },
+    departments_monthly: { 1160: {
+      "2025-07": bkt("パフェ", 1600000, 9000000), "2025-08": bkt("パフェ", 3200000, 11000000),
+      "2026-07": bkt("パフェ", 2000000, 10000000), "2026-08": bkt("パフェ", 3800000, 13000000) } },
+    products_monthly: { 1160: {
+      "2026-07": [{ name: "スノーパフェ", sales: 2000000, qty: 1300 }],
+      "2026-08": [{ name: "スノーパフェ", sales: 3800000, qty: 2400 }] } },
+  };
+  const ctx = loadApp({ ...data, campaigns: [c] }, "2026-09-06");
+  call(ctx, `API_OK = true; SERVER_TARGETS = { "sp@2026": { value: 7100000 } };`);
+  const html = call(ctx, `renderCampaign("sp")`);
+  assert.match(html, /部門は前年比/);
+  assert.ok(!/前年のABCなし/.test(html), "部門フォールバックが出れば『前年のABCなし』にはしない");
+});
+
 test("この販促の部門別内訳（campDeptMix）は販売期間の実データを品目区分で束ねる", () => {
   const c = camp({ id: "cm", start: "2026-03-01", end: "2026-03-31" });
   const data = { ...base,

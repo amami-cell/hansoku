@@ -3407,19 +3407,36 @@ function renderCampaign(id) {
           <div class="delta">${sum.coversPct != null ? `<span class="${sum.coversPct >= 0 ? "up" : "down"}">前年比 ${signed(sum.coversPct)}%</span>` : "前年比 ―"}</div></div>` : "";
     // 主指標＝この施策が効くはずの部門・商品。先頭に置く。
     const t = campTargeted(c);
-    const tgtKpi = t
-      ? `<div class="kpi"><div class="lbl">${esc(t.label)}（確定${t.months}ヶ月・${t.stores}店）</div>
+    let tgtKpi;
+    if (t) {
+      // 前年比。商品単位で前年が取れない（新商品で去年に同名が無い等）ときは、
+      // 見出し％は「―」のまま、部門単位（パフェ等）の前年比を注記で必ず添えて
+      // “去年との比較”を見せる。
+      let prevLbl;
+      if (t.pct != null) {
+        prevLbl = `（前年 ${man(t.prev)}）`;
+      } else {
+        const bk = c.bucket || campKindBucket(c.kind);
+        const hasItems = (c.items || []).filter(Boolean).length;
+        const tb = (hasItems && bk) ? campTargeted({ ...c, items: [] }) : null;
+        prevLbl = (tb && tb.pct != null)
+          ? `<br><span class="sub">${esc(bk)}部門は前年比 <span class="${tb.pct >= 0 ? "up" : "down"}">${signed(tb.pct)}%</span>（新商品のため商品単位の前年比なし）</span>`
+          : "・前年のABCなし";
+      }
+      tgtKpi = `<div class="kpi"><div class="lbl">${esc(t.label)}（確定${t.months}ヶ月・${t.stores}店）</div>
           <div class="big ${t.pct != null ? (t.pct >= 0 ? "up" : "down") : ""}">${
             t.pct != null ? signed(t.pct) + "%" : "―"
           }</div>
-          <div class="delta">${man(t.cur)}${t.prev != null ? `（前年 ${man(t.prev)}）` : "・前年のABCなし"}</div></div>`
-      : `<div class="kpi"><div class="lbl">この施策の効果</div>
+          <div class="delta">${man(t.cur)}${prevLbl}</div></div>`;
+    } else {
+      tgtKpi = `<div class="kpi"><div class="lbl">この施策の効果</div>
           <div class="big">―</div>
           <div class="delta">${
             campBasis(c)
               ? "対象の部門・商品がまだABCに出ていません"
               : "何で測るかが未設定です。対象の部門（例: コース）か商品名を決めてください"
           }</div></div>`;
+    }
     // 店全体は「参考」なので、主指標（tgtKpi）や集客と同格の大カードにしない。
     // 1行の控えめな注記に畳んで、この施策の効果を主役にする。
     overall = `<div class="kpis">
