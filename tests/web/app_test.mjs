@@ -1014,11 +1014,15 @@ test("renderStore：目標対象外の実施中販促でも literal 'undefined' 
   assert.ok(html.includes("この店の販促"), "販促セクションはある");
 });
 
-test("renderStore：先頭サマリはヒーローに統合され、基礎データは折りたたみに入る", () => {
+test("renderStore：販促トップは累計サマリー→販促タイムラインで、詳細は折りたたみへ", () => {
   const ctx = loadApp(base);
   const html = call(ctx, `renderStore("1006")`);
-  assert.ok(html.includes("店の基礎データを見る"), "基礎データは details に格納");
-  assert.ok(html.includes("class=\"hnote\""), "ヒーローにデータ鮮度の一言");
+  assert.ok(html.includes("累計サマリー"), "上部に累計サマリー（予算/実績・前年対比・客単価）");
+  assert.ok(html.includes("販促タイムライン"), "販促タイムライン");
+  assert.ok(html.includes("詳細データを見る"), "分析系は details（詳細データ）へ格納");
+  // 並び順はセクションidで確認（ナビのラベルと混同しないように）。
+  assert.ok(html.indexOf('id="hero"') < html.indexOf('id="timeline"'), "サマリーがタイムラインより先");
+  assert.ok(html.indexOf('id="timeline"') < html.indexOf('id="basics"'), "詳細は下（折りたたみ）");
 });
 
 test("storeProductSearch：商品横断検索（商品名→月・区分・売上）が出る", () => {

@@ -5315,6 +5315,111 @@ function storeProductSearch(code) {
   </section>`;
 }
 
+// 今年の累計（予算・実績・同期間の前年対比）＋客単価（前年・昨対）。販促アプリの店舗トップ用。
+// 確定月（当月・未来・空月は除く）だけを足す。前年比は前年の同じ月ぶんと比べる（1〜8月なら1〜8月）。
+function storeYearCumulative(code, year) {
+  const pre = String(year) + "-";
+  const ms = DATA.months.filter(m => m.startsWith(pre) && m < CURRENT_MONTH
+    && typeof salesAtC(code, m) === "number");
+  if (!ms.length) return null;
+  const prevM = m => { const [y, mo] = m.split("-"); return `${+y - 1}-${mo}`; };
+  let actual = 0, prev = 0, prevOk = true, budget = 0, bMonths = 0;
+  let curSC = 0, curCov = 0, prvSC = 0, prvCov = 0;   // 客単価用（客数のある月だけ）
+  for (const m of ms) {
+    const sVal = salesAtC(code, m) || 0; actual += sVal;
+    const b = budgetAt(code, m); if (typeof b === "number" && b) { budget += b; bMonths++; }
+    const pv = salesAtC(code, prevM(m)); if (typeof pv === "number") prev += pv; else prevOk = false;
+    const c = coversAt(code, m);
+    if (typeof c === "number" && c) {
+      curSC += sVal; curCov += c;
+      const pc = coversAt(code, prevM(m)), ps = salesAtC(code, prevM(m));
+      if (typeof pc === "number" && pc && typeof ps === "number") { prvSC += ps; prvCov += pc; }
+    }
+  }
+  const avg = curCov ? Math.round(curSC / curCov) : null;
+  const pAvg = prvCov ? Math.round(prvSC / prvCov) : null;
+  return {
+    first: ms[0], last: ms[ms.length - 1], n: ms.length,
+    actual, prev: prevOk ? prev : null,
+    pct: (prevOk && prev) ? (actual / prev - 1) * 100 : null,
+    budget: bMonths ? budget : null, bMonths,
+    budgetRate: (bMonths && budget) ? (actual / budget * 100) : null,
+    avg, prevAvg: pAvg, avgPct: (avg && pAvg) ? (avg / pAvg - 1) * 100 : null,
+  };
+}
+
+// 店舗トップの業績サマリー（累計 予算/実績/前年対比・客単価）。販促アプリなので数字は要点だけ。
+function storePromoHero(code) {
+  const year = +CURRENT_MONTH.slice(0, 4);
+  const cum = storeYearCumulative(code, year);
+  if (!cum) {
+    return `<section class="block" id="hero"><div class="bhead"><h2>${year}年 累計サマリー</h2></div>
+      <div class="panel"><div class="empty">${year}年の確定した売上がまだありません。</div></div></section>`;
+  }
+  const mlab = cum.first === cum.last ? `${+cum.first.slice(5)}月` : `${+cum.first.slice(5)}〜${+cum.last.slice(5)}月`;
+  const budTile = cum.budget != null
+    ? `<div class="ph-tile"><div class="ph-l">予算対比</div>
+        <div class="ph-big ${cum.budgetRate >= 100 ? "up" : "down"}">${cum.budgetRate.toFixed(0)}<span class="u">%</span></div>
+        <div class="ph-sub">予算 ${man(cum.budget)} → 実績 ${man(cum.actual)}</div></div>`
+    : `<div class="ph-tile"><div class="ph-l">実績（累計）</div>
+        <div class="ph-big">${man(cum.actual)}<span class="u">円</span></div>
+        <div class="ph-sub muted">予算未入力</div></div>`;
+  const yoyTile = `<div class="ph-tile"><div class="ph-l">前年対比（同期間）</div>
+    <div class="ph-big ${cum.pct != null ? (cum.pct >= 0 ? "up" : "down") : ""}">${cum.pct != null ? signed(cum.pct) + "%" : "―"}</div>
+    <div class="ph-sub">${cum.prev != null ? `前年 ${man(cum.prev)} → 今年 ${man(cum.actual)}` : "前年データなし"}</div></div>`;
+  const ktTile = `<div class="ph-tile"><div class="ph-l">客単価</div>
+    <div class="ph-big">${cum.avg != null ? yen(cum.avg) : "―"}</div>
+    <div class="ph-sub">${cum.prevAvg != null ? `前年 ${yen(cum.prevAvg)}` : "前年 ―"}${
+      cum.avgPct != null ? ` ・<span class="${cum.avgPct >= 0 ? "up" : "down"}">${signed(cum.avgPct)}%</span>` : ""}</div></div>`;
+  return `<section class="block" id="hero">
+    <div class="bhead"><h2>${year}年 累計サマリー</h2>
+      <span class="bnote">${mlab}（確定${cum.n}ヶ月）・予算/実績・前年対比・客単価</span></div>
+    <div class="panel"><div class="ph-grid">${budTile}${yoyTile}${ktTile}</div></div>
+  </section>`;
+}
+
+// 販促タイムライン：直近の結果 → 実施中 → 今後の予定 を、それぞれ開始日順に。＋起票も。
+function storePromoTimeline(code) {
+  const camps = (DATA.campaigns || []).filter(c => c.stores.includes(code));
+  const byStart = (a, b) => a.start < b.start ? -1 : 1;
+  const live = [], soon = [], done = [];
+  for (const c of camps) {
+    const k = campStatus(c).k;
+    (k === "live" ? live : k === "soon" ? soon : done).push(c);
+  }
+  live.sort(byStart);
+  soon.sort(byStart);
+  done.sort((a, b) => (a.end || a.start) < (b.end || b.start) ? 1 : -1);   // 終了が新しい順
+  const recent = done.slice(0, 4);
+  const upcoming = soon.slice(0, 6);
+  const row = (c, showResult) => {
+    const k = kindOf(c.kind), st = campStatus(c);
+    let badge = `<span class="cstat ${st.k}">${st.label}</span>`;
+    if (showResult) {
+      const e = storeCampEffect(c, code);
+      badge = e.mark
+        ? `<span class="cvm ${e.tone}" title="対象区分の前年比">${e.mark}${e.pct != null ? " " + signed(e.pct) + "%" : ""}</span>`
+        : `<span class="cvm wait">${e.state}</span>`;
+    }
+    return `<li data-camp="${c.id}"><span class="tl-dot" style="background:${k.color}"></span>
+      <span class="tl-nm">${c.title}${c.planned ? '<span class="plbadge">計画</span>' : ""}</span>
+      <span class="tl-rg">${campRange(c)}</span>${badge}</li>`;
+  };
+  const grp = (label, arr, showResult) => arr.length
+    ? `<div class="tl-grp"><div class="tl-h">${label}<span class="tl-n">${arr.length}</span></div>
+        <ul class="tl-list">${arr.map(c => row(c, showResult)).join("")}</ul></div>` : "";
+  const addBtn = (PLANS_API_OK && WRITE_OK)
+    ? `<button class="plannew" data-plannew="${esc(code)}">＋ 販促を起票</button>` : "";
+  const body = (live.length || upcoming.length || recent.length)
+    ? grp("実施中", live, true) + grp("今後の予定（開始日順）", upcoming, false) + grp("直近の結果", recent, true)
+    : `<div class="empty">この店の販促はまだありません。${addBtn ? "右上の「＋販促を起票」から追加できます。" : "config/schedule.yaml に追記すると出ます。"}</div>`;
+  return `<section class="block" id="timeline">
+    <div class="bhead"><h2>販促タイムライン</h2>
+      <span class="bnote">今月の実施中・今後の予定・直近の結果。押すと詳細へ。</span>${addBtn}</div>
+    <div class="panel">${body}</div>
+  </section>`;
+}
+
 function renderStore(code) {
   const s = store(code);
   const months = DATA.months;
@@ -5574,22 +5679,21 @@ function renderStore(code) {
         </li>`;
       }).join("")}</ul>`;
 
-  // 各セクションを先に組んでおき、実在するものだけをジャンプナビに載せる。
-  const heroHtml = storeHero(code);
+  // 販促アプリの店舗トップ：累計サマリー → 販促タイムライン → スケジュール → 販促リスト。
+  // 分析系（売上推移・部門・商品・時間帯・近隣・販促エンジン等）は下の折りたたみへ。
+  const summaryHtml = storePromoHero(code);
+  const timelineHtml = storePromoTimeline(code);
   const annualHtml = storeAnnual(code);
   const enginesHtml = storeEngines(code);
-  // ページが縦に長いので、上部に「どこへでも飛べる」固定ナビを置く（誰が触っても迷わない）。
+  const heroHtml = storeHero(code);
   const shareHtml = storeShareCard(code);
   const prodSearchHtml = storeProductSearch(code);
   const navItems = [
-    ["hero", "今の状況"],
-    shareHtml ? ["share", "共有"] : null,
-    annualHtml ? ["annual", "年間"] : null,
-    enginesHtml ? ["engines", "販促エンジン"] : null,
+    ["hero", "サマリー"],
+    ["timeline", "販促タイムライン"],
+    annualHtml ? ["annual", "スケジュール"] : null,
     myCamps.length ? ["promos", "販促リスト"] : null,
-    myCreativesBlock ? ["creatives", "制作物"] : null,
-    prodSearchHtml ? ["prodsearch", "商品検索"] : null,
-    ["basics", "基礎データ"],
+    ["basics", "詳細データ"],
   ].filter(Boolean);
   const storeNav = `<nav class="snav" aria-label="店内ジャンプ">
     ${navItems.map(([id, label]) => `<button class="snavb" data-jump="${id}">${label}</button>`).join("")}
@@ -5603,21 +5707,23 @@ function renderStore(code) {
       ${homeBtnRow}
     </section>
     ${storeNav}
-    ${heroHtml}
-    ${shareHtml}
+    ${summaryHtml}
+    ${timelineHtml}
     ${annualHtml}
-    ${enginesHtml}
     <section class="block" id="promos">
       <div class="bhead"><h2>この店の販促（個別のPDCA）</h2>
-        <span class="bnote">${myCamps.length}件・各販促の効果◎/△・前回比・目標・POP・メモ。効いた/要改善で並べ替え。通年トレンドは上の「販促エンジン」で。</span>
+        <span class="bnote">${myCamps.length}件・各販促の効果◎/△・前回比・目標・POP・メモ。効いた/要改善で並べ替え。</span>
         ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋ 販促を起票</button>` : ""}</div>
       ${myCamps.length ? promoSummary + promoControls : ""}
       ${promoBlock}
     </section>
     ${myCreativesBlock}
-    ${prodSearchHtml}
     <details class="moredet" id="basics">
-      <summary>店の基礎データを見る（売上推移・部門・商品・時間帯・近隣）</summary>
+      <summary>詳細データを見る（売上推移・部門・商品・時間帯・近隣・販促エンジン）</summary>
+      ${heroHtml}
+      ${enginesHtml}
+      ${shareHtml}
+      ${prodSearchHtml}
       <section class="block">${kpis}${storeTargetChip(code)}</section>
       ${renderProfitability(code)}
       <section class="block">

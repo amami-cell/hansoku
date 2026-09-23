@@ -456,6 +456,31 @@ tbody tr:last-child td{border-bottom:0;}
 .sgrp-n{color:var(--ink-3);font-weight:400;font-size:11px;}
 
 /* ── 店舗詳細：この店の販促 ─────────────────────────────── */
+/* 店舗トップの累計サマリー（予算/実績・前年対比・客単価）。 */
+.ph-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;}
+.ph-tile{background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;}
+.ph-l{font-size:12px;color:var(--ink-2);font-weight:600;}
+.ph-big{font-size:26px;font-weight:800;line-height:1.15;font-variant-numeric:tabular-nums;letter-spacing:-.01em;margin-top:2px;color:var(--ink);}
+.ph-big.up{color:var(--good-ink);} .ph-big.down{color:var(--critical-ink);}
+.ph-big .u{font-size:14px;font-weight:700;color:var(--ink-2);margin-left:1px;}
+.ph-sub{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;margin-top:3px;}
+.ph-sub .up{color:var(--good-ink);font-weight:700;} .ph-sub .down{color:var(--critical-ink);font-weight:700;}
+
+/* 販促タイムライン（直近結果／実施中／今後予定）。 */
+.tl-grp{margin-bottom:14px;}
+.tl-grp:last-child{margin-bottom:0;}
+.tl-h{font-size:12px;font-weight:700;color:var(--ink-2);letter-spacing:.02em;margin:0 0 6px;
+  display:flex;align-items:center;gap:7px;}
+.tl-n{font-size:11px;color:var(--ink-3);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:0 7px;}
+.tl-list{list-style:none;margin:0;padding:0;}
+.tl-list li{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:9px 4px;
+  border-bottom:1px solid var(--line);cursor:pointer;font-size:13.5px;}
+.tl-list li:last-child{border-bottom:0;}
+.tl-list li:hover{background:var(--surface-2);}
+.tl-dot{width:9px;height:9px;border-radius:3px;flex:0 0 auto;}
+.tl-nm{font-weight:600;color:var(--ink);flex:1 1 auto;min-width:120px;}
+.tl-rg{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+
 /* 販促の効果サマリ＋並べ替え/タブ＋用語（この店の販促の頭）。 */
 .psum{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 10px;font-size:13px;color:var(--ink-2);}
 .psum-i{display:inline-flex;align-items:baseline;gap:5px;font-variant-numeric:tabular-nums;}
