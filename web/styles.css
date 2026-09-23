@@ -1148,6 +1148,20 @@ html{overflow-anchor:none;}
 /* 販促一覧の色ドット凡例（＝販促の種類）。ドットの色が何かを、一覧の頭で示す。 */
 .klegend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0 0 10px;font-size:12px;color:var(--ink-2);}
 .kleg{display:inline-flex;align-items:center;gap:6px;}
+/* いまの状況の「今の販促（実施中）」チップ。押すとその販促の詳細へ。 */
+.nowpromo{margin-top:14px;border-top:1px solid var(--line);padding-top:12px;}
+.nowpromo.muted{color:var(--ink-3);font-size:13px;}
+.nowpromo-h{font-size:12px;font-weight:700;color:var(--ink-2);margin:2px 0 6px;}
+.nowpromo-h.next{margin-top:10px;color:var(--ink-3);}
+.nowc{display:flex;align-items:center;gap:9px;width:100%;text-align:left;font:inherit;cursor:pointer;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:7px;min-height:44px;}
+.nowc:last-child{margin-bottom:0;}
+.nowc:hover{border-color:var(--accent);}
+.nowc-t{flex:1 1 auto;font-weight:700;color:var(--ink);min-width:0;}
+.nowc-e{font-size:11px;font-weight:700;border-radius:5px;padding:1px 7px;white-space:nowrap;}
+.nowc-e.good{color:var(--good-ink);background:var(--good-soft);}
+.nowc-e.warn{color:var(--critical-ink);background:color-mix(in srgb,var(--critical-ink) 15%,var(--surface));}
+.nowc-r{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap;}
 /* 年間チャートの折りたたみ（既定は畳む）。月次一覧の下に置く開くボタン。 */
 .chartfold>summary{cursor:pointer;list-style:none;font-size:13px;color:var(--accent);font-weight:600;
   padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);

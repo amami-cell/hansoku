@@ -255,14 +255,31 @@ async function editGoal(id) {
   const c = (DATA.campaigns || []).find(x => campKey(x) === id || x.id === bareId(id));
   const basis = c ? goalBasisLabel(c) : null;
   const per = c && goalIsMonthly(c) ? "1ヶ月あたりの" : "期間ぜんぶの";
+  // 目安（規定）：前年同期の実績があれば「前年並み／＋5％／＋10％」を提示し、
+  // 未入力なら既定値に「前年＋5％」を入れる。フリーワードのままにせず、判断の物差しを添える。
+  let guide = "", suggested = cur;
+  if (c) {
+    const fmt = n => Math.round(n).toLocaleString("ja-JP");
+    const t = campTargeted(c);
+    const prevA = (t && t.prev != null && t.prev > 0) ? t.prev : null;
+    if (prevA) {
+      const p5 = Math.round(prevA * 1.05), p10 = Math.round(prevA * 1.10);
+      guide = `\n\n【目安】前年同期の${basis || "実績"}：${fmt(prevA)}円\n`
+        + `　・前年並み ${fmt(prevA)}円\n　・＋5%（おすすめ）${fmt(p5)}円\n　・＋10%（強気）${fmt(p10)}円\n`
+        + `迷ったら「前年＋5%」。金額は円で自由に上書きできます。`;
+      if (cur == null) suggested = p5;
+    } else if (!goalIsMonthly(c)) {
+      guide = `\n\n【目安】前年同期の実績がまだ無いため、狙いたい売上を円で入力してください。`;
+    }
+  }
   const v = window.prompt(
-    basis
+    (basis
       ? `${per}目標を入力してください（円・空欄で削除）\n\n`
         + `この施策の実績は「${basis}」で見ています。同じものへの目標を入れてください。`
         + (c && goalIsMonthly(c)
             ? "\n終了日を決めていない施策なので、直近の確定月と比べます。" : "")
-      : "この販促の目標売上（円）を入力してください（空欄で削除）",
-    cur == null ? "" : String(cur));
+      : "この販促の目標売上（円）を入力してください（空欄で削除）") + guide,
+    suggested == null ? "" : String(suggested));
   if (v === null) return;
   const cleaned = String(v).replace(/[,，円\s]/g, "");
   let value = null;
@@ -5394,12 +5411,32 @@ function storePromoHero(code) {
     <div class="ph-big">${cum.avg != null ? yen(cum.avg) : "―"}</div>
     <div class="ph-sub">${cum.prevAvg != null ? `前年 ${yen(cum.prevAvg)}` : "前年 ―"}${
       cum.avgPct != null ? ` ・<span class="${cum.avgPct >= 0 ? "up" : "down"}">${signed(cum.avgPct)}%</span>` : ""}</div></div>`;
+  // 今の販促（実施中）を「いまの状況」に添える。押すとその販促の詳細（PDCA）へ。
+  const liveCamps = (DATA.campaigns || []).filter(c => c.stores.includes(code) && campStatus(c).k === "live")
+    .sort((a, b) => a.start < b.start ? -1 : 1);
+  const soonCamps = (DATA.campaigns || []).filter(c => c.stores.includes(code) && campStatus(c).k === "soon")
+    .sort((a, b) => a.start < b.start ? -1 : 1);
+  const nowChip = c => {
+    const k = kindOf(c.kind), e = storeCampEffect(c, code);
+    const eff = e.measured
+      ? `<span class="nowc-e ${e.tone}">${e.pct >= 0 ? "効果あり" : "見直し"}${e.pct != null ? " " + signed(e.pct) + "%" : ""}</span>` : "";
+    return `<button type="button" class="nowc" data-camp="${c.id}"><span class="tl-dot" style="background:${k.color}"></span>` +
+      `<span class="nowc-t">${esc(c.title)}</span>${eff}<span class="nowc-r">${shortRange(c)}</span></button>`;
+  };
+  const nowHtml = liveCamps.length
+    ? `<div class="nowpromo"><div class="nowpromo-h">今の販促（実施中 ${liveCamps.length}）</div>
+        ${liveCamps.map(nowChip).join("")}
+        ${soonCamps.length ? `<div class="nowpromo-h next">まもなく開始（${soonCamps.length}）</div>${soonCamps.slice(0, 2).map(nowChip).join("")}` : ""}</div>`
+    : soonCamps.length
+      ? `<div class="nowpromo"><div class="nowpromo-h">実施中の販促はありません。次はこちら</div>${soonCamps.slice(0, 2).map(nowChip).join("")}</div>`
+      : `<div class="nowpromo muted">いま実施中の販促はありません。</div>`;
   return `<section class="block" id="hero">
     <div class="bhead"><h2>${year}年 いまの状況</h2>
       <span class="bnote">${mlab}まで（確定${cum.n}ヶ月分）</span></div>
     <div class="panel">
       ${verdict ? `<div class="ph-verdict ${verdict.cls}">${verdict.t}</div>` : ""}
-      <div class="ph-grid">${budTile}${yoyTile}${ktTile}</div></div>
+      <div class="ph-grid">${budTile}${yoyTile}${ktTile}</div>
+      ${nowHtml}</div>
   </section>`;
 }
 
@@ -5637,14 +5674,18 @@ function renderStore(code) {
     ? `<div class="klegend">${kindsPresent.map(k =>
         `<span class="kleg"><span class="tl-dot" style="background:${kindOf(k).color}"></span>${esc(kindOf(k).label)}</span>`).join("")}</div>`
     : "";
-  const promoList = `<section class="block" id="promos">
-    <div class="bhead"><h2>販促一覧</h2>
-      <span class="bnote">${myCamps.length}件・実施中→予定→終了の順。行を押すと、その販促の詳細（PDCA）へ。</span>
-      ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋販促を追加</button>` : ""}</div>
-    ${effSummary}
-    ${kindLegend}
-    ${promoBlock}
-  </section>`;
+  // 「今の販促」は上の いまの状況 に出すので、全件の一覧は畳んでボタンで開く（縮小表示）。
+  const promoList = `<details class="opendet" id="promos">
+    <summary class="openbtn"><span class="openbtn-t">販促一覧（${myCamps.length}件）を見る</span></summary>
+    <section class="block">
+      <div class="bhead"><h2>販促一覧</h2>
+        <span class="bnote">実施中→予定→終了の順。行を押すと、その販促の詳細（PDCA）へ。</span>
+        ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋販促を追加</button>` : ""}</div>
+      ${effSummary}
+      ${kindLegend}
+      ${promoBlock}
+    </section>
+  </details>`;
 
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
