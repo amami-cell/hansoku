@@ -314,6 +314,29 @@ test("年間の部門推移（関連部門の実績・月次）は販促ペー�
   assert.ok(!/関連部門の実績/.test(html), "年間の部門推移カードは販促ページから外す");
 });
 
+test("売上目標だけのときは『目標の振り返り』表を出さない（達成サマリーが持つ）", () => {
+  // 目標の振り返りに売上を出すと店全体売上÷目標で達成率が跳ねる（例331%）。売上は載せない。
+  const { html } = renderElig();
+  assert.ok(!/目標の振り返り/.test(html), "売上目標のみなら振り返り表は出さない");
+});
+
+test("客数など売上以外の目標があれば『目標の振り返り』を出す（売上行は無し）", () => {
+  const c = eligCamp();
+  const ctx = loadApp({ ...paceData(), campaigns: [c] }, "2026-09-06");
+  call(ctx, `API_OK = true; SERVER_TARGETS = { "cx@2026": { value: 1200000 } };`);
+  call(ctx, `SERVER_TARGETS_M = { "cx@2026": { covers: { value: 3000 } } };`);
+  const html = call(ctx, `renderCampaign(${JSON.stringify("cx")})`);
+  assert.match(html, /目標の振り返り/);
+  assert.match(html, /客数/);
+  const tbl = html.split("目標の振り返り")[1] || "";
+  assert.ok(!/売上目標/.test(tbl), "振り返り表に売上行は出さない");
+});
+
+test("1店だけの販促は『対象店ごとの結果』を出さない（結果（全体）と重複）", () => {
+  const { html } = renderElig();
+  assert.ok(!/対象店ごとの結果/.test(html), "単店は重複するので出さない");
+});
+
 test("この販促の部門別内訳（campDeptMix）は販売期間の実データを品目区分で束ねる", () => {
   const c = camp({ id: "cm", start: "2026-03-01", end: "2026-03-31" });
   const data = { ...base,

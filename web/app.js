@@ -3500,11 +3500,11 @@ function renderCampaign(id) {
     ${renderTargetReview(c)}
     ${renderReview(c)}
 
-    <section class="block">
+    ${(c.stores.length > 1 || c.kind === "lunch") ? `<section class="block">
       <div class="bhead"><h2>対象店ごとの結果</h2>
         <span class="bnote">${c.stores.length}店　店をタップで詳細へ</span></div>
       <div class="panel"><ul class="cmlist">${rowsHtml}</ul></div>
-    </section>
+    </section>` : ""}
     ${renderEnvEffect(id)}`;
 }
 
@@ -3773,16 +3773,21 @@ function fmtMetricVal(mt, v) {
   return ten(v) + "円"; // 客単価・時間帯客単価
 }
 function renderTargetReview(c) {
-  // 目標が1つでも入っている指標だけを対象に。
-  const set = TARGET_METRICS.map(mt => ({ mt, target: targetMetricOf(c, mt.key) }))
+  // 売上目標の達成は「達成サマリー」が主指標（対象の部門・商品）で正しく割って表示する。
+  // ここで売上を出すと店全体売上÷目標になり達成率が跳ねる（例 331%）ので、売上は載せない。
+  // この表は 客数・客単価・原価率など“売上以外”の指標だけを並べる。
+  const set = TARGET_METRICS.filter(mt => mt.key !== "sales")
+    .map(mt => ({ mt, target: targetMetricOf(c, mt.key) }))
     .filter(x => x.target != null);
   if (!set.length) {
-    if (!goalEligible(c)) return "";
+    // 売上目標だけ（＝達成サマリーで表示済み）・対象外なら、この表自体を出さない。
+    if (!goalEligible(c) || targetMetricOf(c, "sales") != null) return "";
     return `<section class="block">
       <div class="bhead"><h2>目標の振り返り</h2><span class="bnote">目標を入れると実績と並べて達成率が出ます</span></div>
       <div class="panel"><div class="cmemo muted">
         まだ目標が未設定です。スケジュールの「＋販促を登録／編集」から
-        売上・客数・客単価・原価率などの目標を入力すると、ここに実績と達成率が並びます。
+        客数・客単価・原価率などの目標を入力すると、ここに実績と達成率が並びます。
+        （売上目標は上の「達成サマリー」で達成率を表示します）
       </div></div></section>`;
   }
   const codes = (c.stores || []).filter(hasData);
