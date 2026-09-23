@@ -394,6 +394,12 @@ function goalRef(c, key) {
   return { base, prevPct, isRate };
 }
 const goalRefValue = (c, key) => goalRef(c, key).base;
+// 最初に出す目標カテゴリ。対象部門/商品の売上が出せない起票直後は「店全体の売上」を既定にして、
+// いきなり〈データなし〉の空欄で始まらないようにする（実績が見える状態から書き始められる）。
+function defaultGoalKey(c) {
+  try { return goalRef(c, "sales").base != null ? "sales" : "store_sales"; }
+  catch (e) { return "sales"; }
+}
 // 目標マップ（指標→値）をサーバ保存。既存キー∪新キー（時間帯バンド hour_sales#dinner
 // なども含む）を突き合わせ、渡した指標は upsert、渡っていない指標は削除（消した行の反映）。
 async function saveGoalMap(gkey, map) {
@@ -443,10 +449,12 @@ function makeGoalRows(container, getCtx, forceEl) {
     row.innerHTML = `<div class="gr-top">
         <span class="gr-n">目標</span>
         <select class="pf-in gr-cat">${GOAL_CAT_OPTS.map(o => `<option value="${o.key}"${o.key === def ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select>
+        <button type="button" class="gr-del" title="この目標を削除" aria-label="削除">×</button>
+      </div>
+      <div class="gr-line2">
         <select class="pf-in gr-band"${HOUR_METRICS.has(def) ? "" : " hidden"}>${bandOptsHtml(selBand)}</select>
         <input class="pf-in gr-val" type="number" inputmode="decimal" step="any" value="${val != null && val !== "" ? val : ""}">
         <button type="button" class="gr-fill" title="目安（直近実績±2%）を入れる">目安</button>
-        <button type="button" class="gr-del" title="この目標を削除" aria-label="削除">×</button>
       </div>
       <div class="gr-help"></div>`;
     container.appendChild(row);
@@ -517,7 +525,7 @@ function openGoalGrid(c) {
     if (typeof v === "number") saved.push({ key: k, val: v });
   }
   if (!saved.length) { const sv = targetMetricOf(c, "sales"); if (sv != null) saved.push({ key: "sales", val: sv }); }
-  const initRows = saved.length ? saved : [{ key: "sales", val: "" }];
+  const initRows = saved.length ? saved : [{ key: defaultGoalKey(c), val: "" }];
 
   let ov = document.getElementById("goalgrid"); if (ov) ov.remove();
   ov = document.createElement("div"); ov.id = "goalgrid"; ov.className = "crprev";
@@ -2468,6 +2476,34 @@ function updateTargetDiff(key) {
   out.textContent = `直近比 ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
   out.className = "pf-tg-diff " + (Math.abs(pct) < 0.05 ? "flat" : good ? "good" : "bad");
 }
+// 年月プルダウン（ブラウザ標準の <input type=month> は端末言語で英語表記になるため、
+// 「2026年」「11月」の日本語プルダウンに置き換える）。値は隠しinput #id に "YYYY-MM" で持つ。
+function ymPickerHtml(id, value, allowBlank) {
+  const now = Number(CURRENT_MONTH.slice(0, 4));
+  const y0 = now - 1, y1 = now + 2;
+  const [vy, vm] = (value || "").split("-");
+  // 年・月とも先頭に空の選択肢（未選択）。開始月は未選択で始め、選ぶと目標欄が出る。
+  const yBlank = allowBlank ? "―（常設）" : "年を選ぶ";
+  const mBlank = allowBlank ? "―" : "月を選ぶ";
+  const yOpts = [`<option value=""${!vy ? " selected" : ""}>${yBlank}</option>`];
+  for (let y = y0; y <= y1; y++) yOpts.push(`<option value="${y}"${String(y) === vy ? " selected" : ""}>${y}年</option>`);
+  const mOpts = [`<option value=""${!vm ? " selected" : ""}>${mBlank}</option>`];
+  for (let m = 1; m <= 12; m++) { const mm = String(m).padStart(2, "0"); mOpts.push(`<option value="${mm}"${mm === vm ? " selected" : ""}>${m}月</option>`); }
+  return `<span class="pf-ym">`
+    + `<select class="pf-in pf-ym-y" id="${id}-y" aria-label="年">${yOpts.join("")}</select>`
+    + `<select class="pf-in pf-ym-m" id="${id}-m" aria-label="月">${mOpts.join("")}</select>`
+    + `<input type="hidden" id="${id}" value="${esc(value || "")}"></span>`;
+}
+// 年・月プルダウンの変更を隠しinputへ反映し、changeを飛ばして既存リスナー（段階表示など）を起こす。
+function wireYmPicker(root, id) {
+  const y = root.querySelector("#" + id + "-y"), m = root.querySelector("#" + id + "-m"), h = root.querySelector("#" + id);
+  if (!y || !m || !h) return;
+  const sync = () => {
+    h.value = (y.value && m.value) ? `${y.value}-${m.value}` : "";
+    h.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  y.addEventListener("change", sync); m.addEventListener("change", sync);
+}
 function openPlanEditor(seed) {
   if (!PLANS_API_OK) { alert("販促の起票は本番（ログイン済み）でのみ使えます。"); return; }
   const s = seed || {};
@@ -2511,8 +2547,8 @@ function openPlanEditor(seed) {
           <label class="pf-l">対象区分<select class="pf-in" id="pf-bucket">${bucketOpts}</select></label>
         </div>
         <div class="pf-row">
-          <label class="pf-l">開始月<input class="pf-in" id="pf-start" type="month" value="${esc(ym(s.start))}"></label>
-          <label class="pf-l">終了月<span class="pf-hint">空欄＝常設</span><input class="pf-in" id="pf-end" type="month" value="${esc(s.open_ended ? "" : ym(s.end))}"></label>
+          <label class="pf-l">開始月${ymPickerHtml("pf-start", ym(s.start), false)}</label>
+          <label class="pf-l">終了月<span class="pf-hint">未選択＝常設</span>${ymPickerHtml("pf-end", s.open_ended ? "" : ym(s.end), true)}</label>
         </div>
         <label class="pf-l">販促物（PDF・画像）<input class="pf-in" id="pf-pdf" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*,application/pdf"></label>
         <div id="pf-goalhint" class="pf-goalhint">↑「販促名」と「開始月」を入れると、その期間の目安つきで目標欄が出ます。</div>
@@ -2534,6 +2570,7 @@ function openPlanEditor(seed) {
       </div>
     </div>`;
   document.body.appendChild(ov);
+  wireYmPicker(ov, "pf-start"); wireYmPicker(ov, "pf-end");
   ov.addEventListener("click", e => { if (e.target.hasAttribute("data-planclose")) ov.remove(); });
   ov.querySelector("#pf-save").addEventListener("click", () => savePlanFromForm(s));
   const del = ov.querySelector("[data-plandelete]");
@@ -2548,7 +2585,7 @@ function openPlanEditor(seed) {
   // 目標行（▽で選ぶ形）を共通コントローラで作る。起票フォームでも時間帯バンドが選べる。
   const pfRows = makeGoalRows(ov.querySelector("#pf-goalrows"), getPseudoCtx, ov.querySelector("#pf-goalforce"));
   ov._goalRows = pfRows;
-  (initGoalRows.length ? initGoalRows : [{ key: "sales", val: "" }]).forEach(r => pfRows.addRow(r.key, r.val));
+  (initGoalRows.length ? initGoalRows : [{ key: defaultGoalKey(getPseudoCtx()), val: "" }]).forEach(r => pfRows.addRow(r.key, r.val));
   pfRows.renumber();
   ov.querySelector("#pf-goaladd").addEventListener("click", () => { pfRows.addRow(null, ""); pfRows.renumber(); });
   // 期間（開始月）を入れたら目標欄を出す（算出は一瞬なのでそのまま表示）。

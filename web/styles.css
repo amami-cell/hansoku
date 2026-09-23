@@ -1502,6 +1502,9 @@ textarea.pf-in{resize:vertical;line-height:1.5;}
 .pf-row .pf-l{flex:1;}
 .pf-msg{font-size:12px;color:var(--critical-ink);background:var(--warn-soft);border-radius:7px;padding:6px 10px;}
 .pf-hint{font-size:10.5px;font-weight:600;color:var(--sub);margin-left:6px;}
+.pf-ym{display:flex;gap:6px;}
+.pf-ym-y{flex:1 1 0;min-width:0;}
+.pf-ym-m{flex:0 0 auto;width:5.2em;}
 .pf-tg-head{font-size:12px;font-weight:800;color:var(--ink-2);margin-top:4px;border-top:1px solid var(--line);padding-top:10px;}
 .pf-goalhint{font-size:12.5px;color:var(--ink-3);background:var(--surface-2);border:1px dashed var(--line);
   border-radius:9px;padding:11px 12px;margin-top:6px;line-height:1.5;}
@@ -1513,11 +1516,12 @@ textarea.pf-in{resize:vertical;line-height:1.5;}
 /* 目標行（カテゴリ▽＋値＋目安＋削除）。＋追加で複数持てる。 */
 .gg-rows{display:flex;flex-direction:column;gap:10px;margin:8px 0;}
 .gr{border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:var(--surface-2);}
-.gr-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+.gr-top{display:flex;align-items:center;gap:7px;}
 .gr-n{font-size:12px;font-weight:800;color:var(--ink-2);flex:0 0 auto;min-width:38px;}
-.gr-cat{flex:1 1 130px;min-width:120px;}
-.gr-band{flex:1 1 120px;min-width:110px;}
-.gr-val{flex:1 1 110px;min-width:90px;}
+.gr-cat{flex:1 1 auto;min-width:0;}
+.gr-line2{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px;padding-left:45px;}
+.gr-band{flex:1 1 150px;min-width:120px;}
+.gr-val{flex:1 1 130px;min-width:100px;}
 .gg-force{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-2);cursor:pointer;margin:2px 0 10px;}
 .gg-force input{width:16px;height:16px;}
 .gr-fill{flex:0 0 auto;font:inherit;font-size:12px;color:var(--accent);background:var(--surface);
