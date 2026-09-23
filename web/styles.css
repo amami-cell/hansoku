@@ -1836,6 +1836,18 @@ b.warn{color:var(--warning-ink);}
 .moredet>summary::-webkit-details-marker{display:none;}
 .moredet>summary::before{content:"▸ ";}
 .moredet[open]>summary::before{content:"▾ ";}
+/* 「販促一覧」「もっと見る」ボタン（畳んだ中身を開く大きな押しやすいバー）。 */
+.opendet{margin-bottom:16px;}
+.opendet:last-child{margin-bottom:36px;}
+.opendet>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:10px;
+  min-height:52px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;
+  background:var(--surface-2);color:var(--ink);font-weight:700;font-size:15px;}
+.opendet>summary::-webkit-details-marker{display:none;}
+.opendet>summary::before{content:"▸";color:var(--accent);font-weight:700;flex:0 0 auto;}
+.opendet[open]>summary::before{content:"▾";}
+.opendet[open]>summary{border-radius:12px 12px 0 0;margin-bottom:0;background:var(--surface);}
+.opendet>summary:hover{border-color:var(--accent);}
+.openbtn-t{flex:1 1 auto;min-width:0;}
 
 /* ══ さがす（シート）══════════════════════════════════════════════════ */
 .sheet{position:fixed;inset:0;z-index:60;display:flex;}

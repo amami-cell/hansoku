@@ -1133,12 +1133,12 @@ test("storeCampEffect：測り方未設定の販促は measured=false で理由�
   assert.equal(e.state, "測り方 未設定");
 });
 
-test("renderStore：効果サマリー（効果あり）と、販促一覧の結果バッジが出る", () => {
+test("renderStore：効果サマリー（◎効いた）と、販促一覧の判定バッジが出る", () => {
   const c = camp({ bucket: "コース", start: "2026-01-01", end: "2026-01-31" });
   const ctx = loadApp({ ...base, campaigns: [c] });
   const html = call(ctx, `renderStore("1006")`);
-  assert.ok(html.includes("効果あり"), "やさしい言葉の効果サマリー");
-  assert.ok(html.includes("cvm good"), "販促一覧の結果バッジ（効果あり）");
+  assert.ok(html.includes("効いた"), "販促の効果サマリー（◎効いた）");
+  assert.ok(html.includes("cvm good"), "販促一覧の◎判定バッジ");
 });
 
 test("storeAnnualChart：年サマリ＋月次の推移（一覧・1行=1ヶ月）が頭に出る", () => {
