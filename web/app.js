@@ -317,6 +317,67 @@ async function editGoal(id) {
   render();
 }
 
+// カテゴリ別の目標設定ダイアログ。目標ボタン（data-goal）から開く。
+// カテゴリ（指標）を選んで打ち込む＝各指標に1行、薄字＝直近実績＋2%の目安。
+// 既存の目標グリッド部品（refreshTargetPlaceholders / updateTargetDiff /
+// validateTargetInputs / saveTargetsFromForm）をそのまま使い回す。
+function openGoalGrid(c) {
+  const key = campKey(c);
+  const code = (c.stores || [])[0] || "";
+  const sm = (c.start || "").slice(0, 7);
+  const em = c.open_ended ? "" : (c.end || c.start || "").slice(0, 7);
+  let ov = document.getElementById("goalgrid"); if (ov) ov.remove();
+  ov = document.createElement("div"); ov.id = "goalgrid"; ov.className = "crprev";
+  const tgRows = TARGET_METRICS.map(mt => {
+    const saved = targetMetricOf(c, mt.key);
+    const suf = mt.unit === "円" ? "円" : mt.unit === "%" ? "％" : mt.unit;
+    return `<div class="pf-tg">
+      <span class="pf-tg-l">${esc(mt.label)}<span class="pf-tg-u">${esc(suf)}</span>${mt.higher ? "" : '<span class="pf-tg-rev" title="低いほど良い">↓良</span>'}</span>
+      <input class="pf-in pf-tg-in" id="pf-tg-${mt.key}" type="number" inputmode="decimal" step="any" value="${saved != null ? saved : ""}">
+      <button type="button" class="pf-tg-fill" data-fillcur="${mt.key}" title="目安（直近実績±2%）を目標欄に入れる">目安</button>
+      <span class="pf-tg-help" id="pf-tghelp-${mt.key}"></span>
+      <span class="pf-tg-diff" id="pf-tgdiff-${mt.key}"></span>
+    </div>`;
+  }).join("");
+  ov.innerHTML = `<div class="crprev-bd" data-goalclose></div>
+    <div class="crprev-box planbox" role="dialog" aria-modal="true">
+      <div class="crprev-bar"><span class="crprev-title">目標を設定</span>
+        <button class="crprev-x" type="button" data-goalclose aria-label="閉じる">×</button></div>
+      <div class="planform">
+        <div class="gg-h"><b>${esc(c.title)}</b><span class="sub">${esc(campRange(c))}${code ? "・" + esc(storeName(code)) : ""}</span></div>
+        <div class="pf-tg-head">入れたい指標だけ打ち込めばOK（空欄は保存しません）。薄字＝直近実績＋2%の目安（原価率は−2%）。「目安」ボタンで入ります。</div>
+        <div class="pf-tg-grid">${tgRows}</div>
+        <input type="hidden" id="pf-store" value="${esc(code)}">
+        <input type="hidden" id="pf-start" value="${esc(sm)}">
+        <input type="hidden" id="pf-end" value="${esc(em)}">
+        <div class="pf-msg" id="pf-msg" hidden></div>
+        <div class="pf-actions"><span></span><div>
+          <button class="pf-cancel" type="button" data-goalclose>キャンセル</button>
+          <button class="pf-save" type="button" id="gg-save">保存</button>
+        </div></div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target.hasAttribute("data-goalclose")) ov.remove(); });
+  ov.querySelectorAll("[data-fillcur]").forEach(btn => btn.addEventListener("click", () => {
+    const k = btn.dataset.fillcur, sug = TG_SUGGEST[k], inp = document.getElementById("pf-tg-" + k);
+    if (inp && sug != null) { inp.value = sug; updateTargetDiff(k); }
+  }));
+  TARGET_METRICS.forEach(mt => {
+    const inp = ov.querySelector("#pf-tg-" + mt.key);
+    if (inp) inp.addEventListener("input", () => updateTargetDiff(mt.key));
+  });
+  refreshTargetPlaceholders();
+  ov.querySelector("#gg-save").addEventListener("click", async () => {
+    const err = validateTargetInputs();
+    const msg = ov.querySelector("#pf-msg");
+    if (err) { if (msg) { msg.textContent = err; msg.hidden = false; } return; }
+    if (msg) { msg.textContent = "保存中…"; msg.hidden = false; }
+    await saveTargetsFromForm(key);
+    ov.remove(); render();
+  });
+}
+
 // 販促の要因メモ（施策id→本文）。目標と同じく本番=Neon(/api/notes)共有、
 // API が無い所では端末内(localStorage)に保存する。
 let SERVER_NOTES = {};           // id → {note, by, at}（サーバ値）
@@ -1238,7 +1299,13 @@ function render() {
   app.querySelectorAll("[data-year]").forEach(el =>
     el.addEventListener("click", () => { YEAR = +el.dataset.year; render(); syncHash(); }));
   app.querySelectorAll("[data-goal]").forEach(el =>
-    el.addEventListener("click", e => { e.stopPropagation(); editGoal(el.dataset.goal); }));
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const key = el.dataset.goal;
+      // 本番（API）ではカテゴリ別グリッドを開く。ローカル等では従来の売上プロンプト。
+      const c = API_OK ? (DATA.campaigns || []).find(x => campKey(x) === key || x.id === bareId(key)) : null;
+      if (c) openGoalGrid(c); else editGoal(key);
+    }));
   app.querySelectorAll("[data-memo]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); editMemo(el.dataset.memo); }));
   app.querySelectorAll("[data-status]").forEach(el =>
@@ -2140,8 +2207,11 @@ function refreshTargetPlaceholders() {
   const sm = g("pf-start") ? g("pf-start").value : "";
   const em = g("pf-end") ? g("pf-end").value : "";
   const openEnded = !em;
+  // 円は大きい額（売上）は「○万」、小さい額（客単価）は「¥○」で見せる。%はそのまま。
   const fmtVal = (mt, v) => v == null ? "―"
-    : (mt.unit === "円" ? man(v) + "万" : mt.unit === "%" ? v + "%" : ten(v) + mt.unit);
+    : mt.unit === "円" ? (Math.abs(v) >= 100000 ? man(v) : yen(v))
+    : mt.unit === "%" ? v + "%"
+    : ten(v) + mt.unit;
   for (const mt of TARGET_METRICS) {
     const inp = g("pf-tg-" + mt.key); if (!inp) continue;
     // 直近確定の実績（＝現状）と、その ±2% の目安（薄字）。原価率など↓良は −2%。
