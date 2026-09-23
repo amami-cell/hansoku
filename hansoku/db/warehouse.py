@@ -245,6 +245,16 @@ class Warehouse(ABC):
         削除の対象にも入らず、前回の値がそのまま残る。
         """
 
+    def execute(self, sql: str, params: dict[str, Any] | None = None) -> None:
+        """**書き換えを流して確定させる。**
+
+        ⚠️ `query()` では消えない。postgres は `autocommit=False` なので、
+        DELETE を `query()` で流すとコミットされず、**消えたように見えて
+        消えていない**。書き換えは必ずこちらを使う。
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} は書き換えに対応していません")
+
     @abstractmethod
     def table_name(self, name: str) -> str:
         """方言に応じた完全修飾テーブル名。"""

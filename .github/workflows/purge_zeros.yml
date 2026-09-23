@@ -1,0 +1,87 @@
+name: 0の実績を消す
+
+# 開店前の月などに入ってしまった「0」を片付けるための手動ワークフロー。
+#
+# ⚠️ **既定は素振り。** apply を true にしたときだけ本当に消す。
+# ⚠️ **source は必ず指定する。** 空だと全ソースの0が対象になりかねないので、
+#    CLI 側で必須にしてある（未指定なら落ちる）。
+# ⚠️ **再取込では消えない。** replace_actuals は「渡した行が覆う範囲」しか
+#    削除しないので、0を作らなくなった月は削除範囲にも入らない。だからこれが要る。
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: '取り込み口（例 pos_sheet）。必須'
+        required: true
+        default: 'pos_sheet'
+      store:
+        description: '店舗コード（カンマ区切り。空なら全店）'
+        required: false
+        default: ''
+      metric:
+        description: '指標（カンマ区切り。空なら全指標）'
+        required: false
+        default: ''
+      date_from:
+        description: '開始日 YYYY-MM-DD（空なら制限なし）'
+        required: false
+        default: ''
+      date_to:
+        description: '終了日 YYYY-MM-DD（空なら制限なし）'
+        required: false
+        default: ''
+      apply:
+        description: '**本当に消す**（false のままなら素振りで一覧を出すだけ）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  purge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: 0を消す（既定は素振り）
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          args="--source '${{ inputs.source }}'"
+          for s in $(echo "${{ inputs.store }}" | tr ',' ' '); do
+            [ -n "$s" ] && args="$args --store $s"
+          done
+          for m in $(echo "${{ inputs.metric }}" | tr ',' ' '); do
+            [ -n "$m" ] && args="$args --metric $m"
+          done
+          [ -n "${{ inputs.date_from }}" ] && args="$args --date-from ${{ inputs.date_from }}"
+          [ -n "${{ inputs.date_to }}" ] && args="$args --date-to ${{ inputs.date_to }}"
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            args="$args --apply"
+          fi
+          # 結果はジョブのサマリにも残す（ログを掘らなくても読める）
+          {
+            echo '## 0の実績'
+            echo ''
+            echo "apply: \`${{ inputs.apply }}\`"
+            echo ''
+            echo '```'
+            eval python -m hansoku.cli purge-zeros $args
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
