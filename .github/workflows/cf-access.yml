@@ -47,6 +47,7 @@ jobs:
           # トークンが見られる全アカウントを列挙し、env の2つと合わせて重複排除して走査する。
           echo "== トークンが見られるアカウント一覧 =="
           accts_json="$(api "https://api.cloudflare.com/client/v4/accounts?per_page=50")"
+          echo "  meta: $(echo "$accts_json" | jq -c '{success, errors, n:(.result|length)}')"
           echo "$accts_json" | jq -r '.result[]? | "   \(.id)\t\(.name)"' || true
           API_ACCTS="$(echo "$accts_json" | jq -r '.result[]?.id' 2>/dev/null || true)"
 
