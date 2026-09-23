@@ -68,10 +68,10 @@ await test("制作物PDFも入口の内側", async () => {
 await test("ログイン画面は誰でも見られる", async () => {
   const res = await call("/login");
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /パスワード/);
+  assert.match(await res.text(), /合言葉/);
 });
 
-await test("参加コードが違えば401で、入れない", async () => {
+await test("合言葉が違えば401で、入れない", async () => {
   const res = await call("/login", { method: "POST", body: form({ name: "天", password: "ちがう" }) });
   assert.equal(res.status, 401);
   assert.equal(res.headers.get("set-cookie"), null);
@@ -83,48 +83,29 @@ await test("名前が空なら通さない（誰が入れたか残らなくな�
   assert.equal(res.headers.get("set-cookie"), null);
 });
 
-// 初回・未設定：参加コード(8888)を入れると「本入場」ではなく、パスワード設定へ誘導する。
-await test("初回は参加コードでパスワード設定へ誘導される（本セッションは出ない）", async () => {
+// 正しい合言葉＋お名前だけで本セッションが発行され、本編に入れる（個人パスワード・設定画面は無い）。
+await test("正しい合言葉とお名前で入場でき、本セッションが発行される", async () => {
   const res = await call("/login", { method: "POST", body: form({ name: "天", password: ENV.APP_PASSWORD }) });
   assert.equal(res.status, 303);
-  assert.equal(res.headers.get("location"), "/setpw");
+  assert.equal(res.headers.get("location"), "/");
   const sc = res.headers.get("set-cookie");
-  assert.match(sc, /hansoku_setpw=/);      // 設定用の短命クッキー（本セッションではない）
-  assert.doesNotMatch(sc, /hansoku_session=/);
+  assert.match(sc, /hansoku_session=/);       // 本セッション（設定用の短命クッキーではない）
+  assert.doesNotMatch(sc, /hansoku_setpw=/);
   assert.match(sc, /HttpOnly/);
   assert.match(sc, /Secure/);
   assert.match(sc, /SameSite=Lax/);
+  // そのクッキーで本編（ASSETS）に入れる。
+  const home = await call("/", { headers: { cookie: cookieOf(res) } });
+  assert.equal(home.status, 200);
 });
 
-// 設定前の一時クッキーで本編に入れてしまうと「8888だけで書き込める」ことになる。防ぐ。
-await test("設定用の一時クッキーでは本編に入れない", async () => {
-  const login = await call("/login", { method: "POST", body: form({ name: "天", password: ENV.APP_PASSWORD }) });
-  const res = await call("/", { headers: { cookie: cookieOf(login) } });
-  assert.equal(res.status, 303);
-  assert.equal(res.headers.get("location"), "/login");
-});
-
-// 一時クッキーを本セッション名に付け替えても、setpw マーカーは入場・書き込みを許さない。
-await test("設定用クッキーを session 名に移しても書き込めない", async () => {
-  const login = await call("/login", { method: "POST", body: form({ name: "天", password: ENV.APP_PASSWORD }) });
-  const tok = cookieOf(login).split("=").slice(1).join("=");
-  const forged = "hansoku_session=" + tok;
-  assert.equal((await call("/", { headers: { cookie: forged } })).status, 303);
-  const post = await call("/api/targets", {
-    method: "POST", headers: { cookie: forged, "content-type": "application/json" },
-    body: JSON.stringify({ id: "x@2026", target: 1 }),
-  });
-  assert.equal(post.status, 401);
-});
-
-// 一時クッキーが無ければ設定画面は使えない（ログインからやり直し）。
-await test("/setpw は一時クッキー無しだとログインへ戻す", async () => {
+// 旧・個人パスワード設定（/setpw・/join）は廃止。ログインへ寄せる。
+await test("旧 /setpw はログインへ転送（設定画面は廃止）", async () => {
   const res = await call("/setpw");
   assert.equal(res.status, 303);
   assert.equal(res.headers.get("location"), "/login");
 });
 
-// 旧URL /join は廃止しログインへ寄せる。
 await test("旧 /join はログインへ転送", async () => {
   const res = await call("/join");
   assert.equal(res.status, 303);

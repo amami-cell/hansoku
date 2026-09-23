@@ -9,10 +9,9 @@
 import { neon } from "@neondatabase/serverless";
 
 import {
-  clearCookie, identify, makeToken, readToken, sessionCookie, SESSION_DAYS, timingSafeEqual,
-  hashPassword, verifyPassword, readCookie, PENDING_COOKIE, pendingCookie, clearPending,
+  clearCookie, identify, makeToken, sessionCookie, SESSION_DAYS, timingSafeEqual,
 } from "./auth.js";
-import { htmlResponse, loginPage, setpwPage } from "./login.js";
+import { htmlResponse, loginPage } from "./login.js";
 
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
@@ -66,19 +65,20 @@ async function logAudit(env, actor, action, target, detail) {
 }
 
 /**
- * ログイン。ID（お名前）＋ パスワード の1本化フロー。
- *   - 個人パスワードが設定済み … 照合してログイン。
- *   - 初回 / 初期化済み … パスワード欄に参加コード(8888)を入れると本人確認OKとみなし、
- *     パスワード設定画面(/setpw)へ短命クッキーで誘導する（ここではまだ本入場させない）。
+ * ログイン。共通の合言葉 ＋ お名前 だけで入る（個人パスワード・初期設定は廃止）。
+ *   - 合言葉（env.APP_PASSWORD）が正しければ入場。お名前は「誰が入れたか」の記録用。
+ *   - 合言葉が未設定なら、開けっ放しにせず誰も入れない。
+ *   - 停止(disabled)アカウントは名前で拒否。オーナーは名前で判定。
+ * セキュリティは「全員共通の合言葉」に依存する（1人から漏れれば全員ぶん漏れる）ため、
+ * 合言葉は英数記号まぜた十分な長さにし、漏れたら env の値を差し替える運用にする。
  */
 async function handleLogin(request, env) {
-  if (!env.COOKIE_SECRET) {
+  if (!env.COOKIE_SECRET || !env.APP_PASSWORD) {
     return htmlResponse(loginPage({ error: "ログインの初期設定が未完了です。本部（システム担当）へ連絡してください。" }), 503);
   }
   if (request.method === "GET") {
     const q = new URL(request.url).searchParams;
-    const notice = q.get("set") ? "パスワードを設定しました。ID（お名前）と新しいパスワードでログインしてください。" : "";
-    return htmlResponse(loginPage({ name: normName(q.get("name") || ""), notice }));
+    return htmlResponse(loginPage({ name: normName(q.get("name") || "") }));
   }
   if (request.method !== "POST") return json({ error: "method" }, 405);
 
@@ -87,114 +87,32 @@ async function handleLogin(request, env) {
   const password = String(form.get("password") || "");
   await new Promise((r) => setTimeout(r, 400));   // 総当たり対策：合否に依らず待つ
 
-  if (!name) return htmlResponse(loginPage({ error: "ID（お名前）を入れてください。" }), 400);
+  if (!name) return htmlResponse(loginPage({ error: "お名前を入れてください。" }), 400);
+  // 合言葉の照合は定数時間（合否に依らず全長を比較）。
+  if (!timingSafeEqual(password, env.APP_PASSWORD)) {
+    return htmlResponse(loginPage({ error: "合言葉が違います。もう一度お確かめください。", name }), 401);
+  }
+  // 停止アカウントは名前で拒否。権限は登録があれば尊重し、無ければ編集者。
   const user = await getUser(env, name);
   if (user && user.disabled) {
     return htmlResponse(loginPage({ error: "このアカウントは停止中です。本部へご連絡ください。", name }), 403);
   }
-
-  // 個人パスワードが既にある人は、それで照合（乗っ取り防止のため 8888 は通さない）。
-  if (user && user.pass_hash && !user.must_reset) {
-    if (!(await verifyPassword(password, user.pass_salt, user.pass_hash))) {
-      return htmlResponse(loginPage({ error: "パスワードが違います。", name }), 401);
-    }
-    let role = user.role || "editor";
-    if (isOwnerName(name, env) && role !== "owner") {
-      role = "owner";
+  let role = (user && user.role) || "editor";
+  if (isOwnerName(name, env)) {
+    role = "owner";
+    if (user && user.role !== "owner") {
       try { const sql = neon(env.DATABASE_URL); await sql`UPDATE app_users SET role='owner', updated_at=now() WHERE name=${name}`; } catch {}
     }
-    try { const sql = neon(env.DATABASE_URL); await sql`UPDATE app_users SET last_login=now() WHERE name=${name}`; } catch {}
-    const token = await makeToken(env.COOKIE_SECRET, name, role, Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
-    return new Response(null, {
-      status: 303,
-      headers: { location: "/", "set-cookie": sessionCookie(token), "cache-control": "no-store" },
-    });
   }
-
-  // 初回・初期化済み：参加コード(8888)で本人確認 → パスワード設定画面へ。
-  if (env.APP_PASSWORD && timingSafeEqual(password, env.APP_PASSWORD)) {
-    const pend = await makeToken(env.COOKIE_SECRET, name, "setpw", Date.now() + 15 * 60 * 1000);
-    return new Response(null, {
-      status: 303,
-      headers: { location: "/setpw", "set-cookie": pendingCookie(pend), "cache-control": "no-store" },
-    });
-  }
-  return htmlResponse(loginPage({
-    error: "初めての方・忘れた方は、パスワード欄に参加コード（8888）を入れてください。",
-    name,
-  }), 401);
-}
-
-/**
- * パスワード設定（初回・再設定）。/login で 8888 を通った人だけが持つ短命クッキーで本人確認。
- * 今のパスワード（初回は8888、変更時は現パスワード）＋新しいパスワードを受け取り保存。
- * 完了後はログイン画面へ戻し、ID＋新パスワードで入ってもらう（端末に保存できる）。
- */
-async function handleSetpw(request, env) {
-  if (!env.COOKIE_SECRET) {
-    return htmlResponse(setpwPage({ error: "設定の初期化が未完了です。本部（システム担当）へ連絡してください。" }), 503);
-  }
-  const pendTok = readCookie(request.headers.get("cookie"), PENDING_COOKIE);
-  const pend = pendTok && (await readToken(env.COOKIE_SECRET, pendTok));
-  const name = pend && pend.role === "setpw" ? pend.name : "";
-
-  // 本人確認クッキーが無い/切れた → ログインからやり直し。
-  if (!name) {
-    return new Response(null, { status: 303, headers: { location: "/login", "cache-control": "no-store" } });
-  }
-  if (request.method === "GET") return htmlResponse(setpwPage({ name }));
-  if (request.method !== "POST") return json({ error: "method" }, 405);
-  // 保存には参加コード照合とDBが要る。
-  if (!env.APP_PASSWORD || !env.DATABASE_URL) {
-    return htmlResponse(setpwPage({ error: "設定の初期化が未完了です。本部（システム担当）へ連絡してください。", name }), 503);
-  }
-
-  const form = await request.formData();
-  const oldpw = String(form.get("oldpw") || "");
-  const newpw = String(form.get("newpw") || "");
-  const newpw2 = String(form.get("newpw2") || "");
-  await new Promise((r) => setTimeout(r, 400));
-
-  const user = await getUser(env, name);
-  if (user && user.disabled) {
-    return htmlResponse(setpwPage({ error: "このアカウントは停止中です。本部へご連絡ください。", name }), 403);
-  }
-  // 今のパスワード確認：設定済みなら現パスワード、初回/初期化済みなら参加コード(8888)。
-  const okOld = (user && user.pass_hash && !user.must_reset)
-    ? await verifyPassword(oldpw, user.pass_salt, user.pass_hash)
-    : timingSafeEqual(oldpw, env.APP_PASSWORD);
-  if (!okOld) {
-    return htmlResponse(setpwPage({ error: "今のパスワード（初回は 8888）が違います。", name }), 401);
-  }
-  if (newpw.length < 4) return htmlResponse(setpwPage({ error: "新しいパスワードは4文字以上にしてください。", name }), 400);
-  if (newpw !== newpw2) return htmlResponse(setpwPage({ error: "確認用パスワードが一致しません。", name }), 400);
-  if (timingSafeEqual(newpw, env.APP_PASSWORD)) {
-    return htmlResponse(setpwPage({ error: "参加コード（8888）と同じものは使えません。別のパスワードにしてください。", name }), 400);
-  }
-
-  const { hash, salt } = await hashPassword(newpw);
-  let role = user ? (user.role || "editor") : "editor";
-  if (isOwnerName(name, env)) role = "owner";
-  const sql = neon(env.DATABASE_URL);
-  await ensureUsers(sql);
-  await sql`
-    INSERT INTO app_users (name, pass_hash, pass_salt, role, disabled, must_reset, created_at, updated_at, last_login)
-    VALUES (${name}, ${hash}, ${salt}, ${role}, false, false, now(), now(), now())
-    ON CONFLICT (name) DO UPDATE
-      SET pass_hash=EXCLUDED.pass_hash, pass_salt=EXCLUDED.pass_salt, role=${role},
-          must_reset=false, updated_at=now()`;
-  await logAudit(env, name, (user && user.pass_hash) ? "user.reset" : "user.join", name, role);
-
-  // 設定完了 → ログイン画面へ。名前を入れておき、成功メッセージを出す。短命クッキーは破棄。
+  // 最終ログイン記録（DBがあれば・任意）。失敗しても入場は止めない。
+  try { const sql = neon(env.DATABASE_URL); await sql`UPDATE app_users SET last_login=now() WHERE name=${name}`; } catch {}
+  const token = await makeToken(env.COOKIE_SECRET, name, role, Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
   return new Response(null, {
     status: 303,
-    headers: {
-      location: `/login?set=1&name=${encodeURIComponent(name)}`,
-      "set-cookie": clearPending(),
-      "cache-control": "no-store",
-    },
+    headers: { location: "/", "set-cookie": sessionCookie(token), "cache-control": "no-store" },
   });
 }
+
 
 export default {
   async fetch(request, env) {
@@ -207,15 +125,8 @@ export default {
         return serverError(e);
       }
     }
-    if (url.pathname === "/setpw") {
-      try {
-        return await handleSetpw(request, env);
-      } catch (e) {
-        return serverError(e);
-      }
-    }
-    // 旧URL（/join）は設定画面に一本化。互換のためログインへ寄せる。
-    if (url.pathname === "/join") {
+    // 旧URL（/setpw・/join＝個人パスワード設定）は廃止。互換のためログインへ寄せる。
+    if (url.pathname === "/setpw" || url.pathname === "/join") {
       return new Response(null, { status: 303, headers: { location: "/login", "cache-control": "no-store" } });
     }
     if (url.pathname === "/logout") {
