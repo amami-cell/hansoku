@@ -15,15 +15,142 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import yaml
+
 from hansoku.db import get_warehouse
 from hansoku.db.warehouse import AggregateQuery
-from hansoku.model import GRAIN_MONTH, METRIC_PRODUCT_SALES
+from hansoku.model import (
+    GRAIN_DAY,
+    GRAIN_MONTH,
+    METRIC_DEPT_SALES,
+    METRIC_PRODUCT_SALES,
+    METRIC_SALES,
+)
 from hansoku.settings import load_settings
 from hansoku.web.export import classify_category, load_store_categories
 
 CODE = os.environ.get("STORE", "1160")
 FROM = date(2024, 1, 1)
 TO = date(2026, 12, 31)
+NET_DIVISOR = 1.10  # 税込→税抜（export と同じ）
+
+# 飲み物と分かる語（ドリンク/アルコール以外に落ちていたら誤分類の疑い）。
+DRINK_HINTS = ["ドリンク", "ラテ", "コーヒー", "珈琲", "カフェ", "ティー", "紅茶", "ソーダ",
+               "ジュース", "スムージー", "フロート", "レモネード", "モカ", "コーラ",
+               "エスプレッソ", "カプチーノ", "アイスチョコ"]
+
+
+def _months_with_data(wh, metric: str) -> list[str]:
+    """店 CODE で、その指標の月次データがある YYYY-MM の一覧。前年比が出せるかの確認用。"""
+    ms = set()
+    for r in wh.aggregate(
+        AggregateQuery(
+            date_from=FROM, date_to=TO, grain=GRAIN_MONTH,
+            metrics=[metric], store_codes=[CODE], group_by=("date",),
+        )
+    ):
+        d = r.get("date")
+        if d is not None and (r.get("value") or 0):
+            ms.add(d.strftime("%Y-%m"))
+    return sorted(ms)
+
+
+def audit_yoy_coverage(wh) -> None:
+    """前年実績（前年同月比）が出せるかを、月次データのカバレッジで確認する。
+    店全体の売上・部門(ABC)・商品(ABC)の各シリーズが、どの年月まで遡れるか。"""
+    print(f"\n== 前年実績カバレッジ（{CODE}・前年比が出せるか） ==")
+    for label, metric in (("店全体の売上", METRIC_SALES),
+                          ("部門ABC(dept)", METRIC_DEPT_SALES),
+                          ("商品ABC(product)", METRIC_PRODUCT_SALES)):
+        ms = _months_with_data(wh, metric)
+        if not ms:
+            print(f"  {label:16}: データなし")
+            continue
+        years = sorted({m[:4] for m in ms})
+        # 2025年・2024年が何ヶ月あるか（前年比の分母になる）。
+        y25 = [m for m in ms if m.startswith("2025")]
+        y24 = [m for m in ms if m.startswith("2024")]
+        print(f"  {label:16}: {ms[0]}〜{ms[-1]}（{len(ms)}ヶ月・年={','.join(years)}）"
+              f"  2025={len(y25)}ヶ月 2024={len(y24)}ヶ月")
+
+
+def _expected_cat(cid: str) -> str | None:
+    """施策id から期待される品目区分（ズレ検出の目安）。noel はケーキ寄りの例外扱いなし。"""
+    c = cid or ""
+    if "cake" in c:
+        return "ケーキ"
+    if "parfait" in c:
+        return "パフェ"
+    if "gelato" in c:
+        return "ジェラート"
+    if "collab" in c:
+        return "コラボ"
+    return None
+
+
+def _schedule_titles() -> dict[str, str]:
+    """config/schedule.yaml から 施策id → タイトル。監査の見出し用（読み取りのみ）。"""
+    path = Path(__file__).resolve().parent.parent / "config" / "schedule.yaml"
+    if not path.exists():
+        return {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    out: dict[str, str] = {}
+    for c in data.get("campaigns") or []:
+        cid = str(c.get("id", ""))
+        if cid:
+            out[cid] = str(c.get("title", ""))
+    return out
+
+
+def audit_campaign_pages(rows, rules) -> None:
+    """販促ページ（campDeptMix）が見せる「この販促だけの部門別内訳」を実データで再現し、
+    施策ごとに 商品→品目区分 の割り振りが正しいかを一覧する。誤分類の疑いは★で。
+    ソースは export._build_campaign_actuals と同じ fw_abc_camp（登録した販売期間の実績）。"""
+    titles = _schedule_titles()
+    # 施策id → 商品名 → 税抜売上
+    per_camp: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for r in rows:
+        cid = r.get("product_category")
+        name = r.get("product_name")
+        if not cid or not name:
+            continue
+        per_camp[cid][name] += (r["value"] or 0) / NET_DIVISOR
+
+    print(f"\n== 販促ページの部門割り振り監査（fw_abc_camp・{CODE}） {len(per_camp)}施策 ==")
+    if not per_camp:
+        print("  fw_abc_camp の実績がまだありません（abc-campaign 未取込の販促は監査対象外）。")
+        return
+    other_name = rules.get("other", "その他")
+    flagged = 0
+    for cid in sorted(per_camp):
+        items = per_camp[cid]
+        tot = sum(items.values()) or 1
+        by_cat: dict[str, float] = defaultdict(float)
+        susp: list[tuple[str, str, float]] = []
+        for name, s in items.items():
+            cat = classify_category(name, rules)
+            by_cat[cat] += s
+            if cat not in ("ドリンク", "アルコール") and any(h in name for h in DRINK_HINTS):
+                susp.append((name, cat, s))
+        title = titles.get(cid, "")
+        cats = "／".join(f"{c} {v/tot*100:.0f}%" for c, v in sorted(by_cat.items(), key=lambda x: -x[1]))
+        head = f"  ▸ {cid} {title}".rstrip()
+        # 施策名（id）から期待される区分と、実データの最多区分がズレたら中身を全部出す。
+        expected = _expected_cat(cid)
+        top_cat = max(by_cat.items(), key=lambda x: x[1])[0] if by_cat else None
+        mismatch = expected and top_cat and top_cat != expected
+        print(f"{head}  [{round(tot):,}円]  {cats}" + (f"  ⚠ 想定={expected} / 実態={top_cat}" if mismatch else ""))
+        for name, cat, s in sorted(susp, key=lambda x: -x[2]):
+            print(f"      ★誤分類の疑い [{cat}] {name}  {round(s):,}円")
+            flagged += 1
+        if mismatch:
+            for name, s in sorted(items.items(), key=lambda x: -x[1]):
+                print(f"      ・[{classify_category(name, rules)}] {name}  {round(s):,}円")
+        elif other_name in by_cat:
+            for name, s in sorted(items.items(), key=lambda x: -x[1]):
+                if classify_category(name, rules) == other_name:
+                    print(f"      ・未分類({other_name}) {name}  {round(s):,}円")
+    print(f"\n  → 誤分類の疑い 計 {flagged}件（★）。0なら販促ページの部門割り振りは規則上OK。")
 
 
 def main() -> int:
@@ -38,6 +165,15 @@ def main() -> int:
                 date_from=FROM, date_to=TO, grain=GRAIN_MONTH,
                 metrics=[METRIC_PRODUCT_SALES], store_codes=[CODE],
                 group_by=("store_code", "product_name"),
+            )
+        )
+        # 販促ページ（この販促だけの部門別内訳）用に、fw_abc_camp を同じ接続で取っておく。
+        camp_rows = wh.aggregate(
+            AggregateQuery(
+                date_from=FROM, date_to=TO, grain=GRAIN_DAY,
+                metrics=[METRIC_PRODUCT_SALES], store_codes=[CODE],
+                group_by=("product_category", "product_name"),
+                sources=["fw_abc_camp"],
             )
         )
     other_name = rules.get("other", "その他")
@@ -77,6 +213,12 @@ def main() -> int:
     print(f"\n-- 「{other_name}」に落ちている商品 {len(other_products)}件（{osum/ (total or 1)*100:.1f}%）売上順 --")
     for name, s in sorted(other_products.items(), key=lambda x: -x[1])[:60]:
         print(f"  {round(s):>11,}円  {name}")
+
+    # 販促ページ（この販促だけの部門別内訳）の割り振りを施策ごとに監査。
+    audit_campaign_pages(camp_rows, rules)
+    # 前年実績（前年同月比）が出せるかのカバレッジ確認。
+    with get_warehouse(settings) as wh2:
+        audit_yoy_coverage(wh2)
     return 0
 
 

@@ -779,6 +779,48 @@ html{overflow-anchor:none;}
 .cprog-now.live{color:var(--accent);}
 .cprog-now.done{color:var(--ink-3);}
 .cgoalbar{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);}
+
+/* ── 達成サマリー（5段階評価）───────────────────────────────────────────── */
+.ach{display:flex;gap:16px;align-items:stretch;flex-wrap:wrap;margin-top:14px;}
+.ach-hero{flex:0 0 auto;display:flex;align-items:center;gap:12px;min-width:190px;
+  border-radius:16px;padding:16px 20px;border:1.5px solid var(--line);}
+.ach-mark{font-size:40px;font-weight:800;line-height:1;}
+.ach-mark.sm{font-size:22px;}
+.ach-figs{display:flex;flex-direction:column;}
+.ach-rate{font-size:38px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em;}
+.ach-rate .u{font-size:18px;font-weight:700;margin-left:1px;}
+.ach-grade{font-size:14px;font-weight:800;letter-spacing:.02em;margin-top:3px;}
+.ach-meta{flex:1 1 220px;min-width:200px;display:flex;flex-direction:column;justify-content:center;gap:4px;}
+.ach-line{font-size:14px;color:var(--ink);font-variant-numeric:tabular-nums;}
+.ach-line b{font-weight:800;}
+.ach-line.sub,.ach .sub{color:var(--ink-3);font-size:12px;font-weight:500;}
+.ach-scale{font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums;letter-spacing:.02em;margin-top:2px;}
+.ach-proj{display:flex;align-items:center;gap:10px;border-radius:12px;padding:9px 12px;margin-top:6px;
+  border:1px solid var(--line);}
+.ach-proj-b{font-size:13px;line-height:1.4;}
+.ach-proj-b b{font-weight:800;font-variant-numeric:tabular-nums;}
+.ach-pill{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:999px;
+  background:var(--accent-soft);color:var(--accent);vertical-align:middle;}
+/* 5段階のトーン。◎超優秀 / 〇優秀 / △改善 / ×要改善 / ××大幅未達 */
+.g-sup{background:var(--good-soft);border-color:var(--good-ink);color:var(--good-ink);}
+.g-good{background:var(--good-soft);border-color:color-mix(in srgb,var(--good-ink) 55%,var(--line));color:var(--good-ink);}
+.g-warn{background:var(--warn-soft);border-color:color-mix(in srgb,var(--warning-ink) 55%,var(--line));color:var(--warning-ink);}
+.g-bad{background:color-mix(in srgb,var(--critical-ink) 12%,var(--surface));
+  border-color:color-mix(in srgb,var(--critical-ink) 45%,var(--warning-ink));
+  color:color-mix(in srgb,var(--critical-ink) 60%,var(--warning-ink));}
+.g-crit{background:color-mix(in srgb,var(--critical-ink) 16%,var(--surface));
+  border-color:var(--critical-ink);color:var(--critical-ink);}
+.g-sup .ach-grade,.g-good .ach-grade,.g-warn .ach-grade,.g-bad .ach-grade,.g-crit .ach-grade{color:inherit;}
+@media (max-width:520px){
+  .ach-hero{flex:1 1 100%;justify-content:center;}
+  .ach-rate{font-size:34px;} .ach-mark{font-size:36px;}
+}
+
+/* 結果（全体）の「店全体の参考」1行注記（大カードから降格） */
+.camp-storewide{margin-top:10px;font-size:12px;line-height:1.5;font-variant-numeric:tabular-nums;}
+.camp-storewide b{color:var(--ink);font-weight:700;}
+.camp-storewide .up{color:var(--good-ink);font-weight:600;} .camp-storewide .down{color:var(--critical-ink);font-weight:600;}
+
 /* 対象店ごとの結果 */
 .cmlist{list-style:none;margin:0;padding:0;}
 .cmrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:11px 4px;
