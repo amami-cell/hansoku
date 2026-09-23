@@ -401,13 +401,20 @@ function openGoalGrid(c) {
   ov = document.createElement("div"); ov.id = "goalgrid"; ov.className = "crprev";
   ov.innerHTML = `<div class="crprev-bd" data-goalclose></div>
     <div class="crprev-box planbox" role="dialog" aria-modal="true">
-      <div class="crprev-bar"><span class="crprev-title">目標を設定</span>
+      <div class="crprev-bar"><span class="crprev-title">目標・POPを設定</span>
         <button class="crprev-x" type="button" data-goalclose aria-label="閉じる">×</button></div>
       <div class="planform">
         <div class="gg-h"><b>${esc(c.title)}</b><span class="sub">${esc(campRange(c))}${(c.stores || [])[0] ? "・" + esc(storeName(c.stores[0])) : ""}</span></div>
         <div class="pf-tg-head">カテゴリを選んで目標を打ち込む。薄字＝直近実績＋2%の目安（原価率は−2%）。「＋目標を追加」で複数入れられます。</div>
         <div class="gg-rows" id="gg-rows"></div>
         <button type="button" class="gg-add" id="gg-add">＋ 目標を追加</button>
+        ${CREATIVES_API_OK ? `
+        <div class="pf-tg-head" style="margin-top:16px">POP・画像（同じ画面でアップロード）</div>
+        <div class="gg-pop" id="gg-pop"></div>
+        <div class="gg-pop-actions">
+          <label class="gg-upl">＋ 今アップロード<input type="file" id="gg-pop-file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,image/*,application/pdf" hidden></label>
+          <span class="gr-help">完成していれば今アップロード。まだなら、このまま保存でOK（「来月やること」に〈POPを用意する〉として残ります）。</span>
+        </div>` : ""}
         <div class="pf-msg" id="pf-msg" hidden></div>
         <div class="pf-actions"><span></span><div>
           <button class="pf-cancel" type="button" data-goalclose>キャンセル</button>
@@ -416,6 +423,23 @@ function openGoalGrid(c) {
       </div>
     </div>`;
   document.body.appendChild(ov);
+  // POP・画像：同じ画面でアップロード（クリック回数を減らす）。あとで＝そのまま保存でOK。
+  const refreshPops = () => {
+    const box = ov.querySelector("#gg-pop"); if (!box) return;
+    const crs = creativesForCampaign(c.id);
+    box.innerHTML = crs.length
+      ? `<div class="cgrid mini">${crs.map(creativeCard).join("")}</div>`
+      : `<div class="gr-help">まだPOP・画像はありません。完成次第でOKです。</div>`;
+  };
+  refreshPops();
+  const popFile = ov.querySelector("#gg-pop-file");
+  if (popFile) popFile.addEventListener("change", async () => {
+    const f = popFile.files && popFile.files[0]; if (!f) return;
+    const msg = ov.querySelector("#pf-msg"); if (msg) { msg.textContent = "アップロード中…"; msg.hidden = false; }
+    await uploadCreative(f, c.id, "");
+    popFile.value = ""; refreshPops();
+    if (msg) { msg.textContent = "POPをアップロードしました。"; }
+  });
   const rowsEl = ov.querySelector("#gg-rows");
   let seq = 0;
   const renumber = () => [...rowsEl.querySelectorAll(".gr-n")].forEach((el, i) => el.textContent = `目標${i + 1}`);
