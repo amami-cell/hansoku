@@ -44,15 +44,25 @@ jobs:
           echo "== token 権限確認 =="
           api "https://api.cloudflare.com/client/v4/user/tokens/verify" | jq '{success, errors}' || true
 
-          # 候補アカウント（CLOUDFLARE_ACCOUNT_ID と R2_ACCOUNT_ID）で対象アプリを探す
+          # トークンが見られる全アカウントを列挙し、env の2つと合わせて重複排除して走査する。
+          echo "== トークンが見られるアカウント一覧 =="
+          accts_json="$(api "https://api.cloudflare.com/client/v4/accounts?per_page=50")"
+          echo "$accts_json" | jq -r '.result[]? | "   \(.id)\t\(.name)"' || true
+          API_ACCTS="$(echo "$accts_json" | jq -r '.result[]?.id' 2>/dev/null || true)"
+
           ACCT=""; APPID=""; BASE=""
-          for a in "$CF_ACCOUNT" "$R2_ACCOUNT"; do
+          seen=""
+          for a in $API_ACCTS "$CF_ACCOUNT" "$R2_ACCOUNT"; do
             aa="$(printf '%s' "$a" | tr -d '[:space:]"'\''')"
             [ -z "$aa" ] && continue
+            case " $seen " in *" $aa "*) continue;; esac
+            seen="$seen $aa"
             b="https://api.cloudflare.com/client/v4/accounts/$aa/access/apps"
             apps="$(api "$b?per_page=200")"
+            ok="$(echo "$apps" | jq -r '.success')"
             n="$(echo "$apps" | jq -r '.result | length // 0' 2>/dev/null || echo 0)"
-            echo "-- account ${aa:0:8}… : Access app ${n}件 / success=$(echo "$apps" | jq -r '.success')"
+            echo "-- account ${aa:0:8}… : Access app ${n}件 / success=$ok"
+            [ "$ok" != "true" ] && echo "   errors: $(echo "$apps" | jq -c '.errors')"
             echo "$apps" | jq -r '.result[]? | "   \(.id)\t\(.domain)\t\(.name)"' || true
             id="$(echo "$apps" | jq -r --arg h "$HOST" '.result[]? | select((.domain // "")|test($h)) | .id' | head -1)"
             if [ -n "$id" ] && [ "$id" != "null" ]; then ACCT="$aa"; APPID="$id"; BASE="$b"; fi
