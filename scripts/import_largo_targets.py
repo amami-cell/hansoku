@@ -14,6 +14,10 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
+
+# repo ルートを import パスに追加（`python scripts/xxx.py` 実行でも hansoku を読めるように）。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # 施策(id@開始年) → 売上目標(円)。KPI(区分×月)を販売期間がまたぐ月で合計したもの。
 # 月の割り当ては「その月の見出し販促」＝シートの区分×月の1枠に対応（重なる月は開始側の販促に寄せる）。
