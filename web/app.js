@@ -85,7 +85,8 @@ let API_OK = false;              // 目標APIが使えるか（本番=true）
 let SERVER_TARGETS = {};         // id → {value, by, at}（売上のみ・後方互換）
 let SERVER_TARGETS_M = {};       // id → { metric: {value, by, at} }（全指標）
 let GOALS = {};                  // id → 円（端末内フォールバック）
-let TG_CUR = {};                 // 目標フォームの現状（薄字）値。指標key→数値。「現状を入れる」と現状比に使う。
+let TG_CUR = {};                 // 目標フォームの直近実績（現状）値。指標key→数値。「直近比」の基準。
+let TG_SUGGEST = {};             // 目標フォームの目安（薄字）値＝直近×102%（原価率は×98%）。「目安を入れる」で使う。
 
 function loadGoals() { try { return JSON.parse(localStorage.getItem("hansoku_goals") || "{}"); } catch (e) { return {}; } }
 function saveGoals() { try { localStorage.setItem("hansoku_goals", JSON.stringify(GOALS)); } catch (e) { /* 保存不可でも表示は続ける */ } }
@@ -198,6 +199,16 @@ function currentTargetValue(metric, code, startYM, endYM, openEnded) {
     : monthsBetween(shiftYear(startYM, -1), shiftYear(endYM || startYM, -1));
   return _metricOverMonths(metric, code, months);
 }
+// 目安の基準＝直近確定の実績。期間の長さぶんの「直近の確定月」で集計する（常設は直近1ヶ月）。
+// 目標の薄字は、この直近実績を +2%（原価率など↓良は −2%）した値を出す（会社の規定）。
+function recentTargetValue(metric, code, startYM, endYM, openEnded) {
+  if (!code) return null;
+  const latest = _latestMonth(code);
+  if (!latest) return null;
+  const len = openEnded ? 1 : Math.max(1, monthsBetween(startYM, endYM || startYM).length);
+  const start = addMonth(latest, -(len - 1));
+  return _metricOverMonths(metric, code, monthsBetween(start, latest));
+}
 // 販促の「実績」値（振り返り）。当年の販促期間（常設＝開始〜直近）で集計。
 function actualTargetValue(metric, code, startYM, endYM, openEnded) {
   if (!code || !startYM) return null;
@@ -255,21 +266,23 @@ async function editGoal(id) {
   const c = (DATA.campaigns || []).find(x => campKey(x) === id || x.id === bareId(id));
   const basis = c ? goalBasisLabel(c) : null;
   const per = c && goalIsMonthly(c) ? "1ヶ月あたりの" : "期間ぜんぶの";
-  // 目安（規定）：前年同期の実績があれば「前年並み／＋5％／＋10％」を提示し、
-  // 未入力なら既定値に「前年＋5％」を入れる。フリーワードのままにせず、判断の物差しを添える。
+  // 目安（規定）＝直近実績＋2%。この販促の対象（部門/商品）を、直近確定の同じ長さの期間で
+  // 集計し、その＋2%を初期値に入れる。フリーワードのままにせず、判断の物差しを添える。
   let guide = "", suggested = cur;
   if (c) {
     const fmt = n => Math.round(n).toLocaleString("ja-JP");
-    const t = campTargeted(c);
-    const prevA = (t && t.prev != null && t.prev > 0) ? t.prev : null;
-    if (prevA) {
-      const p5 = Math.round(prevA * 1.05), p10 = Math.round(prevA * 1.10);
-      guide = `\n\n【目安】前年同期の${basis || "実績"}：${fmt(prevA)}円\n`
-        + `　・前年並み ${fmt(prevA)}円\n　・＋5%（おすすめ）${fmt(p5)}円\n　・＋10%（強気）${fmt(p10)}円\n`
-        + `迷ったら「前年＋5%」。金額は円で自由に上書きできます。`;
-      if (cur == null) suggested = p5;
-    } else if (!goalIsMonthly(c)) {
-      guide = `\n\n【目安】前年同期の実績がまだ無いため、狙いたい売上を円で入力してください。`;
+    const latest = addMonth(CURRENT_MONTH, -1);
+    const len = goalIsMonthly(c) ? 1 : Math.max(1, monthsBetween(c.start.slice(0, 7), campEndM(c)).length);
+    const rng = { from: addMonth(latest, -(len - 1)), to: latest };
+    const tr = campTargeted(c, null, rng);
+    const base = (tr && tr.cur > 0) ? tr.cur : null;
+    if (base) {
+      const s2 = Math.round(base * 1.02);
+      guide = `\n\n【目安】直近${len}ヶ月の${basis || "実績"}：${fmt(base)}円\n`
+        + `　おすすめ目標＝直近＋2% ＝ ${fmt(s2)}円（円で自由に上書きできます）`;
+      if (cur == null) suggested = s2;
+    } else {
+      guide = `\n\n【目安】直近の実績がまだ取れないため、狙いたい売上を円で入力してください。`;
     }
   }
   const v = window.prompt(
@@ -2127,20 +2140,26 @@ function refreshTargetPlaceholders() {
   const sm = g("pf-start") ? g("pf-start").value : "";
   const em = g("pf-end") ? g("pf-end").value : "";
   const openEnded = !em;
+  const fmtVal = (mt, v) => v == null ? "―"
+    : (mt.unit === "円" ? man(v) + "万" : mt.unit === "%" ? v + "%" : ten(v) + mt.unit);
   for (const mt of TARGET_METRICS) {
     const inp = g("pf-tg-" + mt.key); if (!inp) continue;
-    const cur = currentTargetValue(mt.key, code, sm, em, openEnded);
-    TG_CUR[mt.key] = cur;   // 「現状を入れる」チップと現状比が使う
-    inp.placeholder = cur == null ? "―（データなし）"
-      : (mt.unit === "円" ? man(cur) + "万" : mt.unit === "%" ? cur + "%" : ten(cur) + mt.unit) + "（現状）";
+    // 直近確定の実績（＝現状）と、その ±2% の目安（薄字）。原価率など↓良は −2%。
+    const cur = recentTargetValue(mt.key, code, sm, em, openEnded);
+    const factor = mt.higher ? 1.02 : 0.98;
+    const suggest = cur == null ? null
+      : (mt.unit === "%" ? Math.round(cur * factor * 10) / 10 : Math.round(cur * factor));
+    TG_CUR[mt.key] = cur;         // 「直近比」の基準
+    TG_SUGGEST[mt.key] = suggest; // 「目安を入れる」で使う（薄字の値）
+    inp.placeholder = suggest == null ? "―（データなし）"
+      : `${fmtVal(mt, suggest)}（目安 直近${mt.higher ? "+2" : "−2"}%）`;
     const fill = document.querySelector(`[data-fillcur="${mt.key}"]`);
-    if (fill) fill.disabled = cur == null;   // 現状値が無ければコピー不可
+    if (fill) fill.disabled = suggest == null;   // 目安が無ければコピー不可
     const help = g("pf-tghelp-" + mt.key);
     if (help) {
-      const per = mt.daily
-        ? (openEnded ? "開始〜直近の時間帯1日平均（A/V）" : "前年同期の時間帯1日平均（A/V）")
-        : openEnded ? "開始〜直近の実績" : "前年同期の実績";
-      help.textContent = cur == null ? "（現状値なし）" : `薄字＝${per}`;
+      const avn = mt.daily ? "1日平均（A/V）" : "実績";
+      help.textContent = cur == null ? "（直近の実績なし）"
+        : `薄字＝直近${avn} ${fmtVal(mt, cur)} の ${mt.higher ? "+2%" : "−2%"}`;
     }
     updateTargetDiff(mt.key);
   }
@@ -2157,7 +2176,7 @@ function updateTargetDiff(key) {
   if (v == null || !isFinite(v) || cur == null || !cur) { out.textContent = ""; out.className = "pf-tg-diff"; return; }
   const pct = (v - cur) / cur * 100;
   const good = mt.higher ? pct >= 0 : pct <= 0;   // 客単価↑・原価率↓が良い
-  out.textContent = `現状比 ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+  out.textContent = `直近比 ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
   out.className = "pf-tg-diff " + (Math.abs(pct) < 0.05 ? "flat" : good ? "good" : "bad");
 }
 function openPlanEditor(seed) {
@@ -2190,7 +2209,7 @@ function openPlanEditor(seed) {
     return `<div class="pf-tg">
       <span class="pf-tg-l">${esc(mt.label)}<span class="pf-tg-u">${esc(suf)}</span>${mt.higher ? "" : '<span class="pf-tg-rev" title="低いほど良い">↓良</span>'}</span>
       <input class="pf-in pf-tg-in" id="pf-tg-${mt.key}" type="number" inputmode="decimal" step="any" value="${val !== "" ? val : ""}">
-      <button type="button" class="pf-tg-fill" data-fillcur="${mt.key}" title="現状（薄字）の値を目標欄に入れる">現状</button>
+      <button type="button" class="pf-tg-fill" data-fillcur="${mt.key}" title="目安（直近実績±2%）を目標欄に入れる">目安</button>
       <span class="pf-tg-help" id="pf-tghelp-${mt.key}"></span>
       <span class="pf-tg-diff" id="pf-tgdiff-${mt.key}"></span>
     </div>`;
@@ -2214,7 +2233,7 @@ function openPlanEditor(seed) {
           <label class="pf-l">終了月<span class="pf-hint">空欄＝常設</span><input class="pf-in" id="pf-end" type="month" value="${esc(s.open_ended ? "" : ym(s.end))}"></label>
         </div>
         <label class="pf-l">販促物（PDF・画像）<input class="pf-in" id="pf-pdf" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*,application/pdf"></label>
-        <div class="pf-tg-head">目標数値（入れた項目だけ保存。薄字＝現状の参考値）${inherited ? `<span class="pf-tg-inherit">複製元から${inherited}件引き継ぎ（要確認）</span>` : ""}</div>
+        <div class="pf-tg-head">目標数値（入れた項目だけ保存。薄字＝直近実績＋2%の目安／原価率は−2%。「目安」ボタンで入る）${inherited ? `<span class="pf-tg-inherit">複製元から${inherited}件引き継ぎ（要確認）</span>` : ""}</div>
         <div class="pf-tg-grid">${tgRows}</div>
         <label class="pf-l">メモ（任意）<textarea class="pf-in" id="pf-note" rows="2" placeholder="狙い・段取りなど">${esc(s.note || "")}</textarea></label>
         <div class="pf-msg" id="pf-msg" hidden></div>
@@ -2238,8 +2257,8 @@ function openPlanEditor(seed) {
   });
   // 「現状を入れる」チップ：薄字の値を目標欄にコピー。
   ov.querySelectorAll("[data-fillcur]").forEach(btn => btn.addEventListener("click", () => {
-    const k = btn.dataset.fillcur, cur = TG_CUR[k], inp = document.getElementById("pf-tg-" + k);
-    if (inp && cur != null) { inp.value = cur; updateTargetDiff(k); }
+    const k = btn.dataset.fillcur, sug = TG_SUGGEST[k], inp = document.getElementById("pf-tg-" + k);
+    if (inp && sug != null) { inp.value = sug; updateTargetDiff(k); }
   }));
   // 目標を打つと「現状比 +X%」を即時表示（達成の妥当性が直感で分かる）。
   TARGET_METRICS.forEach(mt => {
