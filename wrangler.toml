@@ -26,8 +26,10 @@ binding = "CREATIVES"
 bucket_name = "hansoku-creatives"
 
 # 開放モード（ログイン無し）。合言葉を外して誰でも入れる。
-#   1 = 開放（全店の実売上がURLだけで見える）／ 消す or "0" = 個人ログイン必須に戻す。
-# OWNER_NAME = アカウント管理（権限変更・パスワード初期化）ができるオーナーの表示名。
+#   1 = 開放（全店の実売上がURLだけで見える）／ "0" = 合言葉ログイン必須。
+# いまは "0"：前段の Cloudflare Access を外し、アプリ自身の「お名前＋合言葉」で入る運用。
+#   （合言葉＝Worker秘密 APP_PASSWORD。deploy.yml が HANSOKU_APP_PASSWORD から設定）
+# OWNER_NAME = アカウント管理（権限変更）ができるオーナーの表示名。
 [vars]
-OPEN_ACCESS = "1"
+OPEN_ACCESS = "0"
 OWNER_NAME = "天見 真悟"
