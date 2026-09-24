@@ -4209,6 +4209,34 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
         print(f"  {h['html']}")
     _NOTES.append(f"ボタンの正体: {[{k: v for k, v in h.items() if k != 'html'} for h in html]}")
 
+def _watch_page(session) -> None:
+    """画面が出す合図を拾う。**押したのに何も起きない**の原因を掴むため。
+
+    Playwright は `alert` / `confirm` を既定で自動的に却下する。確認が
+    出ていれば黙って消されて処理が止まる。受け入れる側に倒す（読み取りの
+    画面で、押しているのは『ダウンロード』だけなので「はい」で困らない）。
+    あわせてコンソールのエラー・失敗した通信・download事象も記録する。
+    """
+    page = session.page
+
+    def _on_dialog(d):
+        _NOTES.append(f"画面の確認ダイアログ: {d.type} / {d.message[:80]!r} → 受け入れる")
+        print(_NOTES[-1])
+        try:
+            d.accept()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_console(m):
+        if m.type in ("error", "warning"):
+            _NOTES.append(f"コンソール {m.type}: {m.text[:120]}")
+
+    page.on("dialog", _on_dialog)
+    page.on("console", _on_console)
+    page.on("requestfailed", lambda r: _NOTES.append(f"通信が失敗: {r.url[:90]}"))
+    page.on("download", lambda d: _NOTES.append(f"download事象: {d.suggested_filename}"))
+
+
 def _click_role_button(session, name: str) -> bool:
     """role=button として名前で押す。Playwright の本物のクリック。"""
     try:
