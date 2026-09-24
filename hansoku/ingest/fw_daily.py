@@ -4077,15 +4077,7 @@ def _commit_store(session, timeout: float = 60.0) -> bool:
     ⚠️ 完全一致で探す。この画面には『登録』が隣（x=990 y=112）にあり、
        押すとマスタを書き換えてしまう。
     """
-    clicked = session.page.evaluate(
-        r"""() => {
-        for (const el of document.querySelectorAll('label, button, a, span, div')) {
-            if (!el.offsetParent) continue;
-            if ((el.innerText || '').replace(/\s/g, '') === '店舗') { el.click(); return true; }
-        }
-        return false;
-    }"""
-    )
+    clicked = _click_exact(session, "店舗")
     if not clicked:
         print("[分析コード] 『店舗』が押せませんでした")
         return False
@@ -4098,20 +4090,79 @@ def _commit_store(session, timeout: float = 60.0) -> bool:
     return False
 
 
-def _download_analysis_csv(session) -> bytes | None:
-    """『CSV出力』を押してCSVを受け取る。
+def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
+    """『CSV出力』→ ダイアログで範囲を選ぶ → 『ダウンロード』。
 
-    ⚠️ **押してよいのは『CSV出力』だけ。** 隣に『CSV取込』があり、
-       部分一致で探すとそちらに当たる。当たったらマスタを壊す。
+    `CSV出力` はその場で落ちてこない。**ダイアログが開く**（実測）。
+
+        画面表示 / 全店 / 店舗選択   ←ラジオ
+        ダウンロード | キャンセル
+
+    既定は `全店`。130店ぶん一度に落ちるので、**23店を1店ずつ回さずに済む**。
+    どの店の行かはCSVの中で見分ける。
+
+    ⚠️ 押してよいのは `CSV出力` と `ダウンロード` だけ。すぐ隣に
+       `CSV取込`(x=530) と `キャンセル`(x=652) があるので**完全一致**で探す。
+       部分一致で `CSV出力` を探すと `CSV取込` に当たり、マスタを壊す。
     """
-    try:
-        with session.page.expect_download(timeout=120000) as dl:
-            session.page.get_by_text("CSV出力", exact=True).first.click(timeout=8000)
-        return open(dl.value.path(), "rb").read()
-    except Exception as e:  # noqa: BLE001
-        print(f"[分析コード] CSV出力を押せませんでした: {type(e).__name__}: {e}")
-        session.snapshot("analysis_csv_failed")
+    if not _click_exact(session, "CSV出力"):
+        print("[分析コード] 『CSV出力』が押せませんでした")
         return None
+    # ダイアログが出るまで待つ（『ダウンロード』が見えたら出たとみなす）
+    start = time.monotonic()
+    while time.monotonic() - start < 30.0:
+        if _has_exact(session, "ダウンロード"):
+            break
+        time.sleep(0.5)
+    else:
+        print("[分析コード] CSV出力のダイアログが出ませんでした")
+        _dump_screen(session, "ダイアログが出ない")
+        return None
+
+    if not _click_exact(session, scope):
+        print(f"[分析コード] 範囲『{scope}』を選べませんでした（既定のまま進みます）")
+    time.sleep(0.5)
+
+    try:
+        with session.page.expect_download(timeout=180000) as dl:
+            if not _click_exact(session, "ダウンロード"):
+                raise RuntimeError("『ダウンロード』が押せませんでした")
+        data = open(dl.value.path(), "rb").read()
+        print(f"[分析コード] 範囲={scope} / 名前={dl.value.suggested_filename}")
+        return data
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] ダウンロードできませんでした: {type(e).__name__}: {e}")
+        session.snapshot("analysis_csv_failed")
+        _dump_screen(session, "ダウンロードできない")
+        return None
+
+
+def _click_exact(session, label: str) -> bool:
+    """文字が**完全一致**する見えている要素を押す。
+
+    この画面は `CSV出力`/`CSV取込`、`ダウンロード`/`キャンセル`、
+    `店舗`/`登録` が隣り合っている。部分一致や近傍で押すと
+    **マスタを書き換える側**に当たる。ここは必ず完全一致にすること。
+    """
+    return bool(session.page.evaluate(
+        r"""(want) => {
+        for (const el of document.querySelectorAll(
+                'button, a, label, input[type=button], input[type=submit], div[role=button], span')) {
+            if (!el.offsetParent) continue;
+            const t = ((el.innerText || el.value || '').replace(/\s/g, ''));
+            if (t === want) { el.click(); return true; }
+        }
+        return false;
+    }""", label))
+
+
+def _has_exact(session, label: str) -> bool:
+    """完全一致で見えている要素があるか。"""
+    return bool(session.page.evaluate(
+        r"""(want) => [...document.querySelectorAll('button, a, label, input[type=button], div[role=button], span')]
+              .some(el => el.offsetParent
+                       && (el.innerText || el.value || '').replace(/\s/g, '') === want)""",
+        label))
 
 
 def _grid_is_empty(session) -> bool:
