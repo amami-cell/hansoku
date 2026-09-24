@@ -184,8 +184,8 @@ await test("時間帯売上/集客は対象月の1日平均（A/V）、前年同
 await test("部門別・商品・予算達成率の目標が集計できる（選択付きキー）", () => {
   const d = { ...base,
     departments_monthly: { "1160": {
-      "2026-07": { total_sales: 1000000, buckets: [ { name: "コース", sales: 300000, qty: 200 }, { name: "アラカルト", sales: 500000, qty: 400 } ] },
-      "2026-08": { total_sales: 1000000, buckets: [ { name: "コース", sales: 300000, qty: 200 }, { name: "アラカルト", sales: 500000, qty: 400 } ] },
+      "2026-07": { total_sales: 1000000, buckets: [ { name: "コース", sales: 300000, qty: 200 }, { name: "アラカルト", sales: 500000, qty: 400 } ], alacarte: { "フード": 120000, "ドリンク": 84000 }, alacarte_qty: { "フード": 200, "ドリンク": 120 } },
+      "2026-08": { total_sales: 1000000, buckets: [ { name: "コース", sales: 300000, qty: 200 }, { name: "アラカルト", sales: 500000, qty: 400 } ], alacarte: { "フード": 120000, "ドリンク": 84000 }, alacarte_qty: { "フード": 200, "ドリンク": 120 } },
     } },
     products_monthly: { "1160": {
       "2026-07": [ { name: "刺身盛合せ", sales: 120000 } ],
@@ -204,6 +204,9 @@ await test("部門別・商品・予算達成率の目標が集計できる（�
   assert.equal(call(`_metricOverMonths("dept_avg_check#アラカルト","1160",${ms})`), 1250, "部門別客単価＝売上/数量");
   assert.equal(call(`_metricOverMonths("prod_sales#刺身盛合せ","1160",${ms})`), 250000, "商品の売上＝選んだ商品の合算");
   assert.equal(call(`_metricOverMonths("budget_rate","1160",${ms})`), 100, "予算達成率＝売上/予算×100");
+  // 一品単価＝金額合計÷出品数合計。フード=(120000×2)/(200×2)=600、ドリンク=(84000×2)/(120×2)=700
+  assert.equal(call(`_metricOverMonths("alacarte_food_avg","1160",${ms})`), 600, "フード一品単価＝アラカルトフード金額÷出品数");
+  assert.equal(call(`_metricOverMonths("alacarte_drink_avg","1160",${ms})`), 700, "ドリンク一品単価＝アラカルトドリンク金額÷出杯数");
   assert.equal(call(`metricLabel("dept_sales#コース")`), "部門別売上（コース）", "ラベルに選択が付く");
   assert.equal(call(`subKind("prod_sales")`), "prod", "商品指標は商品ピッカー");
 });

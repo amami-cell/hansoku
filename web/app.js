@@ -127,9 +127,11 @@ const TARGET_METRICS = [
   { key: "dept_sales", label: "部門別売上", unit: "円", higher: true },
   { key: "dept_qty", label: "部門別出数", unit: "点", higher: true, daily: true },
   { key: "dept_share", label: "部門構成比", unit: "%", higher: true },
-  { key: "dept_avg_check", label: "部門別客単価", unit: "円", higher: true },
+  { key: "dept_avg_check", label: "部門別一品単価", unit: "円", higher: true },
   { key: "prod_sales", label: "商品の売上", unit: "円", higher: true },
   { key: "budget_rate", label: "予算達成率", unit: "%", higher: true },
+  { key: "alacarte_food_avg", label: "フード一品単価（アラカルト）", unit: "円", higher: true },
+  { key: "alacarte_drink_avg", label: "ドリンク一品単価（アラカルト）", unit: "円", higher: true },
 ];
 const HOUR_METRICS = new Set(["hour_sales", "hour_covers", "hour_avg_check"]);
 // 部門を選ぶ指標（部門＝コース/飲み放題/アラカルト/ランチ/食べ放題）と、商品を選ぶ指標。
@@ -283,6 +285,18 @@ function _metricOverMonths(metric, code, months) {
       if (typeof sv === "number" && typeof bv === "number" && bv > 0) { sales += sv; bud += bv; }
     }
     return bud ? +((sales / bud) * 100).toFixed(1) : null;
+  }
+  // アラカルトのフード/ドリンク一品単価＝アラカルトのフード（ドリンク）金額合計 ÷ 出品数合計。
+  // 金額分け(alacarte)と点数分け(alacarte_qty)は departments_monthly の各月に入っている。
+  if (base === "alacarte_food_avg" || base === "alacarte_drink_avg") {
+    const fk = base === "alacarte_food_avg" ? "フード" : "ドリンク";
+    let s = 0, q = 0, any = false;
+    for (const cd of codes) for (const m of months) {
+      const dm = ((DATA.departments_monthly || {})[cd] || {})[m]; if (!dm) continue;
+      const sp = dm.alacarte || {}, qp = dm.alacarte_qty || {};
+      if (qp[fk]) { s += sp[fk] || 0; q += qp[fk] || 0; any = true; }
+    }
+    return (any && q) ? Math.round(s / q) : null;
   }
   let sales = 0, covers = 0, costNum = 0, costDen = 0, sN = 0, cN = 0;
   for (const cd of codes) for (const m of months) {
@@ -443,9 +457,11 @@ const GOAL_CAT_OPTS = [
   { key: "dept_sales", label: "部門別 売上" },
   { key: "dept_qty", label: "部門別 出数（点数・皿数／1日A/V）" },
   { key: "dept_share", label: "部門構成比" },
-  { key: "dept_avg_check", label: "部門別 客単価" },
+  { key: "dept_avg_check", label: "部門別 一品単価（売上÷出品数）" },
   { key: "prod_sales", label: "商品の売上" },
   { key: "budget_rate", label: "予算達成率" },
+  { key: "alacarte_food_avg", label: "フード一品単価（アラカルト）" },
+  { key: "alacarte_drink_avg", label: "ドリンク一品単価（アラカルト）" },
 ];
 // 選んだ指標の「直近実績」（＝目安の基準）と前年比。売上はこの販促の対象（部門/商品）、
 // 他は店の直近同期間で見る。前年比は率指標（原価率）は差分ポイント、他は％。

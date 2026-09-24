@@ -571,6 +571,9 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
     total = sum(d["sales"] for d in depts.values()) or 1.0
     buckets: dict[str, dict] = {}
     alacarte_split = {"フード": 0.0, "ドリンク": 0.0}
+    # アラカルトの出品数（点数）をフード/ドリンクに分ける。金額分け(alacarte_split)と同じ
+    # is_drink_dept 判定で束ねる。フード/ドリンク別の一品単価（＝金額÷点数）に使う。
+    alacarte_qty = {"フード": 0.0, "ドリンク": 0.0}
     raw_list = []
     for name, d in depts.items():
         bucket = dept_bucket(name)
@@ -587,6 +590,7 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
         if bucket == "アラカルト":
             key = "ドリンク" if is_drink_dept(name) else "フード"
             alacarte_split[key] += d["sales"]
+            alacarte_qty[key] += d["qty"]
         raw_list.append(
             {
                 "name": name,
@@ -621,6 +625,7 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
         "total_sales": round(total),
         "buckets": bucket_list,
         "alacarte": {k: round(v) for k, v in alacarte_split.items()},
+        "alacarte_qty": {k: round(v) for k, v in alacarte_qty.items()},
         "raw": raw_list,
     }
 
