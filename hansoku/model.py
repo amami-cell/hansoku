@@ -143,6 +143,19 @@ def is_drink_dept(name: str) -> bool:
     return any(w in name for w in _DEPT_DRINK_WORDS)
 
 
+# お通し／席チャージ（テーブルチャージ）を表す語。これらは1客に1つ付くため、
+# その点数＝アラカルト（一品注文）の人数の近似として使う（一人当たり出品数の分母）。
+_COVER_CHARGE_WORDS: Final = (
+    "お通し", "おとおし", "御通し", "通し料", "つきだし", "突き出", "突出",
+    "付き出", "付出", "席料", "席チャージ", "テーブルチャージ", "カバーチャージ", "チャージ",
+)
+
+
+def is_cover_charge(name: str) -> bool:
+    """お通し／席チャージ系か（＝1客1点。アラカルト人数の近似に使う）。"""
+    return any(w in name for w in _COVER_CHARGE_WORDS)
+
+
 @dataclass(frozen=True)
 class ActualRow:
     """``f_actuals`` の1行。"""
