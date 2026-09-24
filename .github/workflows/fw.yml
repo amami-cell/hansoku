@@ -72,6 +72,13 @@ on:
         description: 'abc-store-probe: 終了日 YYYY-MM-DD / monthly-coverage: 終了月 YYYY-MM'
         required: false
         default: '2026-08-25'
+      code_store:
+        # ⚠️ abc_store は既定値が 'ぎふや 天満橋店' なので、**空を渡しても
+        #    GitHubが既定値に戻す**。全店を指定する口が無かった（実際に
+        #    「対象 1店」で終わった）。空を空のまま渡せる入力を分けて持つ。
+        description: '分析用コードの点検: 店舗を1つに絞る（空なら全店）'
+        required: false
+        default: ''
       abc_levels:
         description: 'abc-store-probe: 出す分類（カンマ区切り。例 部門）'
         required: false
@@ -332,12 +339,12 @@ jobs:
               # 全店の分析用コードの入力漏れを調べ、あれば赤くする。DB書込なし。
               # ⚠️ この画面の『登録』『CSV取込』はマスタを書き換える。触らない。
               xvfb-run -a python -m hansoku.cli fw-daily --mode analysis-code-audit \
-                --abc-store "${{ inputs.abc_store }}" --artifacts fw-artifacts
+                --abc-store "${{ inputs.code_store }}" --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "analysis-code-probe" ]; then
               # 分析用コード設定の画面を1店だけ見る診断。DB書込なし。
               # ⚠️ この画面の『登録』『CSV取込』はマスタを書き換える。触らない。
               xvfb-run -a python -m hansoku.cli fw-daily --mode analysis-code-probe \
-                --abc-store "${{ inputs.abc_store }}" --artifacts fw-artifacts
+                --abc-store "${{ inputs.code_store }}" --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "abc-dom-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode abc-dom-probe \
                 --abc-store "${{ inputs.abc_store }}" \
