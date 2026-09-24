@@ -165,6 +165,34 @@ def _pick_store(session, name: str) -> bool:
     )
 
 
+def _capture_csv(session, artifacts: Path) -> str | None:
+    """画面の「CSV出力」を押してCSVをダウンロード取得し、テキストで返す（cp932想定）。"""
+    try:
+        with session.page.expect_download(timeout=30000) as dl_info:
+            session.page.evaluate(
+                """() => {
+                const b = [...document.querySelectorAll('button,a,div,span')]
+                    .find(e => (e.textContent || '').trim() === 'CSV出力' && e.offsetParent);
+                if (b) b.click();
+            }"""
+            )
+        dl = dl_info.value
+        raw = Path(dl.path()).read_bytes()
+        try:
+            dl.save_as(str(artifacts / "analysis_codes.csv"))
+        except Exception:
+            pass
+        for enc in ("cp932", "utf-8-sig", "utf-8"):
+            try:
+                return raw.decode(enc)
+            except Exception:
+                continue
+        return raw.decode("cp932", "replace")
+    except Exception as e:
+        print(f"⚠ CSV出力の取得に失敗: {e}")
+        return None
+
+
 def probe(artifacts: Path) -> int:
     with fw_session(artifacts) as session:
         for label in NAV:
@@ -215,20 +243,23 @@ def probe(artifacts: Path) -> int:
             if len(session.page.evaluate(_EXTRACT_JS)) >= 3:
                 break
             print(f"  待機中… ({attempt + 1})")
-        # 最後までスクロールして全行を集める。
+
+        # 全行を確実に取るため CSV出力 を試す。
+        csv_text = _capture_csv(session, artifacts)
+        if csv_text is not None:
+            lines = [ln for ln in csv_text.splitlines() if ln.strip()]
+            print(f"\n=== CSV出力 取得成功：{len(lines)}行 ===")
+            print("=== CSVヘッダ＋先頭8行 ===")
+            for ln in lines[:9]:
+                print("  " + ln[:300])
+        else:
+            print("\n=== CSV出力は不可。グリッド読取にフォールバック ===")
+
+        # 参考：グリッド読取（未入力検出の確認用。仮想スクロールのため一部のみ）。
         rows = _collect_all_rows(session)
-        session.snapshot("analysis_grid")
         missing = [r for r in rows if not r["code"]]
-        codes = {}
-        for r in rows:
-            codes[r["code"] or "(空欄)"] = codes.get(r["code"] or "(空欄)", 0) + 1
-        print(f"\n=== 取得 総行数: {len(rows)} ===")
-        print(f"=== 分析用コード分布: {dict(sorted(codes.items(), key=lambda x: str(x[0])))}")
-        print(f"=== 分析用コード未入力: {len(missing)}件 ===")
-        for r in missing[:30]:
+        print(f"\n=== グリッド読取 {len(rows)}行 / 未入力 {len(missing)}件（参考）===")
+        for r in missing[:20]:
             print(f"  未入力 CD={r['cd']} 名称={r['name']}")
-        print("=== サンプル 先頭20行（CD｜名称｜コード）===")
-        for r in rows[:20]:
-            print(f"  {r['cd']} | {r['name']} | {r['code'] or '(空欄)'}")
     print(f"\n成果物: {artifacts}")
     return 0
