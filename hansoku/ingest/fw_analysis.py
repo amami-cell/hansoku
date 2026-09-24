@@ -211,6 +211,18 @@ _SELECT_STORE_JS = r"""(code) => {
 }"""
 
 
+def _combo_state(session) -> str:
+    """店舗コンボの『いま選ばれている店名』らしき表示文字を拾う（切替が効いたか判定用）。"""
+    return session.page.evaluate(
+        """() => {
+        const b = document.querySelector('.dropdown-btn');
+        if (b && (b.innerText||'').trim()) return (b.innerText||'').trim().slice(0, 60);
+        const sel = document.querySelector('.dropdown-btn .selected, .dropdown-btn span, [class*="combo"] span');
+        return sel ? (sel.innerText||sel.textContent||'').trim().slice(0, 60) : '(取得不可)';
+    }"""
+    )
+
+
 def _store_options(session) -> list[dict]:
     return session.page.evaluate(
         """() => [...document.querySelectorAll('li.option')]
@@ -388,5 +400,67 @@ def probe(artifacts: Path) -> int:
         print(f"=== 分析用コード未入力: {len(missing)}件 ===")
         for r in missing[:40]:
             print(f"  未入力 CD={r['cd']} 名称={r['name']}")
+
+        # ── 別店（非デフォルト）への切替が本当に効くかを診断する ───────────────
+        # 実測で 1006 以外は 0件。1006 は既定表示なだけで、選択自体は効いて
+        # いない疑いが強い。コンボの表示・ドロップダウンのHTML・選択前後の
+        # 行数を採って、直せる不良か（表示待ちだけか／選択が効かないか）見る。
+        print("\n=== 店舗切替の診断 ===")
+        other = next(
+            (s for s in stores if not s["code"].endswith("1006")
+             and s["code"] not in (target["code"],)),
+            None,
+        )
+        print(f"  現在のコンボ表示: {_combo_state(session)!r}")
+        _dump_store_control(session)  # 03..: ancestorHtml を成果物に残す
+        ctrl = _dump_store_control(session)
+        print(f"  店舗コントロールHTML(先頭700): {ctrl.get('ancestorHtml','')[:700]}")
+        if other:
+            print(f"  → 切替先: {other['code']}:{other['name']}")
+            opened = session.page.evaluate(
+                """() => { const b = document.querySelector('.dropdown-btn.enabledbutton');
+                   if (b) { b.click(); return true; } return false; }"""
+            )
+            time.sleep(1.0)
+            vis = session.page.evaluate(
+                """(code) => {
+                   const lis = [...document.querySelectorAll('li.option')];
+                   const t = lis.find(o => (o.getAttribute('value')||'').trim() === code);
+                   const info = o => o ? ({visible: !!o.offsetParent,
+                       rect: (r => ({x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)}))(o.getBoundingClientRect()),
+                       html: (o.outerHTML||'').slice(0,160)}) : null;
+                   return {count: lis.length, target: info(t),
+                           first3: lis.slice(0,3).map(o => (o.getAttribute('value')||'')+':'+(o.textContent||'').trim())};
+                }""",
+                other["code"],
+            )
+            print(f"  ドロップダウン開けた: {opened} / li数: {vis['count']} / 先頭3: {vis['first3']}")
+            print(f"  対象li: {vis['target']}")
+            # 3通りの当て方を順に試し、都度コンボ表示と行数を見る。
+            for how in ("dispatch", "native", "mousedown"):
+                session.page.evaluate(
+                    """([code, how]) => {
+                       const b = document.querySelector('.dropdown-btn.enabledbutton'); if (b) b.click();
+                       const li = [...document.querySelectorAll('li.option')].find(o => (o.getAttribute('value')||'').trim() === code);
+                       if (!li) return false;
+                       if (how === 'native') { li.click(); }
+                       else if (how === 'mousedown') {
+                         for (const t of ['mousedown','mouseup','click'])
+                           li.dispatchEvent(new MouseEvent(t, {bubbles:true, cancelable:true, view:window}));
+                       } else { li.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true})); }
+                       return true;
+                    }""",
+                    [other["code"], how],
+                )
+                try:
+                    session.page.keyboard.press("Enter")
+                except Exception:
+                    pass
+                time.sleep(4.0)
+                n = len(session.page.evaluate(_EXTRACT_JS))
+                print(f"    [{how}] 選択後 コンボ表示: {_combo_state(session)!r} / グリッド行数: {n}")
+                if n >= 3:
+                    break
+            session.snapshot("analysis_other_store")
     print(f"\n成果物: {artifacts}")
     return 0
