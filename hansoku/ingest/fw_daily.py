@@ -3977,6 +3977,9 @@ def probe(artifacts: Path) -> int:
 #
 # ⚠️ この画面は**マスタを書き換えられる**。`登録` と `CSV取込` には
 #    絶対に触らないこと。押してよいのは `CSV出力` だけ。
+_NOTES: list[str] = []
+
+
 ANALYSIS_CODE_MENU = ("マスタ管理", "販売マスタ", "分析用コード設定")
 
 
@@ -4039,7 +4042,13 @@ def probe_analysis_codes(artifacts: Path, master, store: str = "") -> int:
 
         data = _download_analysis_csv(session)
         if data is None:
-            _dump_screen(session, "CSV出力が押せない")
+            # ⚠️ 画面ダンプのあとに結論を置く。実行環境ではログの**末尾しか
+            #    読めない**ので、先に出すとダンプに押し流されて見えない。
+            print("")
+            print("=== 結論 ===")
+            print("  経路とグリッド表示までは通った。CSVのダウンロードだけが未完。")
+            for line in _NOTES:
+                print(f"  {line}")
             return 1
         print(f"[分析コード] CSVを取得: {len(data)} バイト")
         _describe_analysis_csv(data)
@@ -4134,17 +4143,17 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
         }
         return null;
     }""", scope)
-    if picked is None:
-        print(f"[分析コード] 範囲『{scope}』のラジオが見つかりません（既定のまま進みます）")
-    else:
-        print(f"[分析コード] 範囲『{scope}』を選んだ: checked={picked}")
+    _NOTES.append(f"範囲『{scope}』のラジオ: "
+                  + ("見つからない" if picked is None else f"checked={picked}"))
+    print(_NOTES[-1])
     time.sleep(0.8)
     states = session.page.evaluate(
         r"""() => [...document.querySelectorAll('input[type=radio]')]
               .filter(e => e.offsetParent)
               .map(e => `${e.value}=${e.checked}`)"""
     )
-    print(f"[分析コード] ラジオの状態: {states}")
+    _NOTES.append(f"ラジオの状態: {states}")
+    print(_NOTES[-1])
 
     # ⚠️ expect_page を expect_download の外に巻かないこと。sync API の
     #    `expect_*` は with を抜けるときにイベントを待つので、**ダウンロードが
@@ -4162,8 +4171,10 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
             extra = [p.url for p in session.page.context.pages]
         except Exception:  # noqa: BLE001
             extra = []
-        print(f"[分析コード] ダウンロードできませんでした: {type(e).__name__}: {e}")
-        print(f"[分析コード] 開いているページ: {extra}")
+        _NOTES.append(f"ダウンロード失敗: {type(e).__name__}: {str(e)[:160]}")
+        _NOTES.append(f"開いているページ: {extra}")
+        print(_NOTES[-2])
+        print(_NOTES[-1])
         session.snapshot("analysis_csv_failed")
         _dump_screen(session, "ダウンロードできない")
         return None
@@ -4230,6 +4241,10 @@ def _dump_screen(session, when: str) -> None:
                 const t = clip(el.innerText || el.value);
                 if (!t) continue;
                 const r = el.getBoundingClientRect();
+                // 上部のナビ（TOP/販売管理/…）は毎回同じで、**肝心の行を
+                // ログの末尾から押し出す**。実行環境ではログの末尾しか
+                // 読めないので、画面本体だけに絞る。
+                if (r.y < 60) continue;
                 btns.push({t, tag: el.tagName.toLowerCase(),
                            x: Math.round(r.x), y: Math.round(r.y)});
             }
@@ -4244,8 +4259,8 @@ def _dump_screen(session, when: str) -> None:
             const dialogs = [...document.querySelectorAll(
                 '[role=dialog], .modal, .dialog, .v-dialog, .popup')]
                 .filter(vis).map(d => clip(d.innerText)).slice(0, 6);
-            return {url: location.href, btns: btns.slice(0, 40),
-                    inputs: inputs.slice(0, 25), dialogs,
+            return {url: location.href, btns: btns.slice(0, 14),
+                    inputs: inputs.slice(0, 12), dialogs,
                     empty: /データなし/.test(document.body.innerText || '')};
         }"""
         )
