@@ -9,7 +9,7 @@
 どこも空欄にならないため資料は完成して見え、間違いに気づけない。
 ここの判定が「何を漏れとみなすか」を決める。
 """
-from hansoku.ingest.fw_daily import analysis_code_summary
+from hansoku.ingest.fw_daily import _report_analysis_codes, analysis_code_summary
 
 # 実測の見出し（マスタ管理→販売マスタ→分析用コード設定 の CSV出力）
 HEAD = ["店舗コード", "店舗名", "メニューコード", "名称", "標準税率10%込",
@@ -99,3 +99,41 @@ class Test使われているコード:
     def test_重複を畳んで数の順に並べる(self):
         rows = [HEAD, _row("15"), _row("15"), _row("2"), _row("")]
         assert analysis_code_summary(rows)["codes"] == ["2", "15"]
+
+
+class Test赤くするかの判断:
+    """資料は完成して見えるので、**ここで赤くしないと誰も気づけない**。
+    逆に、取れなかった店を黙って飛ばすと「漏れ無し」と嘘をつく。"""
+
+    @staticmethod
+    def _store(code: str):
+        from types import SimpleNamespace
+        return SimpleNamespace(store_code=code, store_name=f"店{code}")
+
+    def _entry(self, code: str, blanks: int, total: int = 100):
+        return {
+            "store": self._store(code),
+            "got": {
+                "total": total,
+                "filled": total - blanks,
+                "blank": [{"store_code": code, "store_name": "", "menu": f"品{i}"}
+                          for i in range(blanks)],
+                "by_store": {code: blanks} if blanks else {},
+                "codes": ["1"],
+                "header_row": 0, "col": 14, "name_col": 3, "store_col": 0,
+            },
+        }
+
+    def test_漏れがあれば赤(self):
+        assert _report_analysis_codes([self._entry("1006", 78)], []) == 1
+
+    def test_漏れが無ければ緑(self):
+        assert _report_analysis_codes([self._entry("1006", 0)], []) == 0
+
+    def test_取れなかった店があれば赤(self):
+        # 黙って飛ばすと「漏れ無し」と嘘をつく。取れなかったことも異常。
+        assert _report_analysis_codes([self._entry("1006", 0)], ["1766"]) == 1
+
+    def test_1店でも漏れていれば赤(self):
+        entries = [self._entry("1006", 0), self._entry("1015", 0), self._entry("1766", 1)]
+        assert _report_analysis_codes(entries, []) == 1

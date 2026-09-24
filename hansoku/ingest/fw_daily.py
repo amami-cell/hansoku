@@ -4597,3 +4597,132 @@ def _describe_analysis_csv(data: bytes) -> None:
             print(f"    {code}\t{n}件")
     for b in got["blank"][:15]:
         print(f"    コード空: {b['store_code']} {b['menu'][:30]}")
+
+
+def audit_analysis_codes(
+    artifacts: Path,
+    master,
+    *,
+    store_filter: str = "",
+    store_limit: int | None = None,
+) -> int:
+    """全店の分析用コードの入力漏れを調べ、あれば赤くする。FWには書き込まない。
+
+    店長会資料はコード1〜28の上に乗っていて、アラカルトは
+
+        アラカルト = 総数 －宴会 －ランチ －食べ飲み －ツアー －単品飲み放題 －テイクアウト
+
+    という引き算で出る。**コードを付け忘れたメニューは消えずにアラカルトへ
+    紛れ込む**ので、どこも空欄にならず資料は完成して見える。だから人が
+    気づけない。ここで赤くするのが唯一の防波堤。
+
+    ⚠️ `全店` でのCSV出力は130店ぶんで、5分待っても落ちてこなかった。
+       1店ずつ `画面表示` で落とす。ログインは1回なので実行時間は許容範囲。
+    ⚠️ この画面は『登録』『CSV取込』でマスタを書き換えられる。触らない。
+    """
+    from .fw_budget import _select_combo
+
+    key = (store_filter or "").strip()
+    per_store: list[dict] = []
+    failures: list[str] = []
+
+    with fw_session(artifacts) as session:
+        _watch_page(session)
+        _open_menu(session, ANALYSIS_CODE_MENU)
+        options = _wait_combo_options(session)
+        print(f"[分析コード] 店舗コンボ {len(options)}件")
+
+        active = {s.store_code: s for s in master.active}
+        targets = []
+        for opt in options:
+            code = opt["value"].lstrip("0")
+            st = active.get(code) or master.find_by_name(opt["name"])
+            if st and st.active:
+                targets.append((opt, st))
+        if key:
+            targets = [(o, s) for o, s in targets
+                       if s.store_code == key.lstrip("0") or key in s.store_name]
+        if store_limit:
+            targets = targets[:store_limit]
+        print(f"[分析コード] 対象 {len(targets)}店")
+        if not targets:
+            print("::error::[分析コード] 対象の店が1件もありません")
+            return 1
+
+        for opt, st in targets:
+            label = f"{st.store_code} {st.store_name[:14]}"
+            try:
+                if not _select_combo(session, opt["value"]):
+                    raise RuntimeError("店舗コンボから選べない")
+                if not _commit_store(session):
+                    raise RuntimeError("グリッドに中身が出ない")
+                data = _download_analysis_csv(session)
+                if data is None:
+                    raise RuntimeError("CSVが落ちてこない")
+                got = analysis_code_summary(_read_csv_rows(data))
+                if got is None:
+                    raise RuntimeError("『分析用コード』の列が無い")
+            except Exception as e:  # noqa: BLE001
+                print(f"  ✗ {label}  {type(e).__name__}: {str(e)[:60]}")
+                failures.append(st.store_code)
+                continue
+            per_store.append({"store": st, "got": got})
+            n = len(got["blank"])
+            mark = "⚠" if n else "✓"
+            print(f"  {mark} {label}  メニュー {got['total']}件 / 未設定 {n}件")
+
+    return _report_analysis_codes(per_store, failures)
+
+
+def _read_csv_rows(data: bytes) -> list[list[str]]:
+    """落ちてきたCSVを行の並びにする。文字コードは総当たりで決める。"""
+    import csv as _csv
+    import io as _io
+
+    for cand in ("cp932", "utf-8-sig", "utf-8", "euc_jp"):
+        try:
+            return list(_csv.reader(_io.StringIO(data.decode(cand))))
+        except UnicodeDecodeError:
+            continue
+    return []
+
+
+def _report_analysis_codes(per_store: list[dict], failures: list[str]) -> int:
+    """結果をまとめて出し、赤くするかを決める。
+
+    ⚠️ **金額は出さない。** この画面には単価と原価が載っていて、この
+       リポジトリは公開。出すのはメニュー名と件数だけにする。
+    """
+    print("")
+    print("=== 分析用コードの入力漏れ ===")
+    total_menu = sum(p["got"]["total"] for p in per_store)
+    gaps = [p for p in per_store if p["got"]["blank"]]
+    total_gap = sum(len(p["got"]["blank"]) for p in per_store)
+
+    for p in sorted(gaps, key=lambda p: -len(p["got"]["blank"])):
+        st, got = p["store"], p["got"]
+        print(f"  ⚠ {st.store_code} {st.store_name[:16]:<16} "
+              f"{got['total']}件中 {len(got['blank'])}件が未設定")
+        for b in got["blank"][:5]:
+            print(f"        {b['menu'][:34]}")
+        if len(got["blank"]) > 5:
+            print(f"        …ほか {len(got['blank']) - 5}件")
+
+    ok = [p for p in per_store if not p["got"]["blank"]]
+    if ok:
+        print(f"  ✓ 漏れ無し {len(ok)}店: "
+              f"{', '.join(p['store'].store_code for p in ok)}")
+
+    print(f"=== 調べた {len(per_store)}店 / メニュー {total_menu}件 / "
+          f"未設定 {total_gap}件（{len(gaps)}店）===")
+
+    if failures:
+        print(f"::error::[分析コード] 調べられなかった店 {len(failures)}件: {failures}")
+    if total_gap:
+        # 資料は完成して見えるので、ここで赤くしないと誰も気づけない。
+        print(f"::error::[分析コード] 分析用コードが未設定のメニューが {total_gap}件 "
+              f"あります。店長会資料ではこのぶんがアラカルトに紛れ込みます")
+    if failures or total_gap:
+        return 1
+    print("分析用コードの入力漏れはありません。")
+    return 0
