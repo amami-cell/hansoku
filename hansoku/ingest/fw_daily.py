@@ -4159,76 +4159,55 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
     #
     # ⚠️ 3通りとも『ダウンロード』の完全一致だけを狙う。すぐ隣に
     #    『キャンセル』(x=652) がある。
-    ways = (
-        ("role=button", lambda: _click_role_button(session, "ダウンロード")),
-        ("座標", lambda: _click_at_text(session, "ダウンロード")),
-        ("JS", lambda: _click_exact(session, "ダウンロード")),
-    )
-    for name, press in ways:
-        if not _has_exact(session, "ダウンロード"):
-            _NOTES.append(f"{name}: ダイアログがもう無い（前の押下が効いた可能性）")
-            print(_NOTES[-1])
-            break
-        try:
-            # 1回あたりは短く。落ちないと分かったら次の当て方へ回す。
-            with session.page.expect_download(timeout=45000) as dl:
-                ok = press()
-                if not ok:
-                    raise RuntimeError("押せなかった")
-            data = open(dl.value.path(), "rb").read()
-            _NOTES.append(f"✅ 『ダウンロード』は {name} で効いた"
-                          f" / 名前={dl.value.suggested_filename} / {len(data)}バイト")
-            print(_NOTES[-1])
-            return data
-        except Exception as e:  # noqa: BLE001
-            still = _has_exact(session, "ダウンロード")
-            _NOTES.append(f"{name}: 駄目（{type(e).__name__}）"
-                          f" / ダイアログはまだ開いている={still}")
-            print(_NOTES[-1])
-
+    # ⚠️ **待ちを縮めたのは私の検証ミス。** ラジオが選べるようになったのと
+    #    同じ回に 180秒→45秒 に縮めたので、「全店が選ばれた状態で長く待つ」
+    #    を一度も試していなかった。130店ぶんの生成に時間がかかるだけ、
+    #    という可能性が残っている。ここは長く待つ。
     try:
-        extra = [pg.url for pg in session.page.context.pages]
-    except Exception:  # noqa: BLE001
-        extra = []
-    _NOTES.append(f"開いているページ: {extra}")
-    print(_NOTES[-1])
-    session.snapshot("analysis_csv_failed")
-    _dump_screen(session, "ダウンロードできない")
-    return None
-
-
-def _watch_page(session) -> None:
-    """画面が出す合図を拾う。**押したのに何も起きない**の原因を掴むため。
-
-    ⚠️ いちばん効くのはこれ。**Playwright は `alert` / `confirm` を
-       既定で自動的に却下する。** 「この内容でよろしいですか？」のような
-       確認が出ていると、黙って消されて処理が止まる。押したのに
-       ダイアログが開いたまま、という症状はこれで説明がつく。
-       受け入れる側に倒す（読み取りの画面なので、確認に「はい」で進んで
-       困るものは無い。押しているのは『ダウンロード』だけ）。
-    """
-    page = session.page
-
-    def _on_dialog(d):
-        _NOTES.append(f"画面の確認ダイアログ: {d.type} / {d.message[:80]!r} → 受け入れる")
+        with session.page.expect_download(timeout=300000) as dl:
+            if not (_click_role_button(session, "ダウンロード")
+                    or _click_at_text(session, "ダウンロード")
+                    or _click_exact(session, "ダウンロード")):
+                raise RuntimeError("『ダウンロード』が押せなかった")
+        data = open(dl.value.path(), "rb").read()
+        _NOTES.append(f"✅ 取得できた / 名前={dl.value.suggested_filename} / {len(data)}バイト")
         print(_NOTES[-1])
-        try:
-            d.accept()
-        except Exception:  # noqa: BLE001
-            pass
+        return data
+    except Exception as e:  # noqa: BLE001
+        _NOTES.append(f"5分待っても来なかった: {type(e).__name__}")
+        print(_NOTES[-1])
 
-    def _on_console(m):
-        if m.type in ("error", "warning"):
-            _NOTES.append(f"コンソール {m.type}: {m.text[:120]}")
-
-    def _on_failed(r):
-        _NOTES.append(f"通信が失敗: {r.url[:90]}")
-
-    page.on("dialog", _on_dialog)
-    page.on("console", _on_console)
-    page.on("requestfailed", _on_failed)
-    page.on("download", lambda d: _NOTES.append(f"download事象: {d.suggested_filename}"))
-
+    # 押しても何も起きないなら、**そのボタンの正体をHTMLで見る**。
+    # disabled なのか、別の要素に覆われているのか、onclick が付いているのか。
+    # ここまで一度も見ていなかった。
+    html = session.page.evaluate(
+        r"""() => {
+        const out = [];
+        const norm = s => (s || '').replace(/\s/g, '');
+        for (const el of document.querySelectorAll('button, a, input, div[role=button]')) {
+            if (!el.offsetParent) continue;
+            if (!['ダウンロード', 'キャンセル', '全店'].includes(norm(el.innerText || el.value))) continue;
+            const r = el.getBoundingClientRect();
+            const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+            out.push({
+                html: el.outerHTML.replace(/\s+/g, ' ').slice(0, 300),
+                disabled: !!el.disabled,
+                onclick: !!el.onclick,
+                pe: getComputedStyle(el).pointerEvents,
+                // その座標で実際に前面にいる要素（覆われていないか）
+                topmost: top ? (top.tagName + '.' + (top.className || '').toString().slice(0, 40)) : null,
+                sameEl: top === el || (top && el.contains(top)),
+            });
+        }
+        return out;
+    }"""
+    )
+    print("――― ボタンの正体 ―――")
+    for h in html:
+        print(f"  disabled={h['disabled']} onclick={h['onclick']} pointer-events={h['pe']}")
+        print(f"  前面の要素={h['topmost']} 自分自身か={h['sameEl']}")
+        print(f"  {h['html']}")
+    _NOTES.append(f"ボタンの正体: {[{k: v for k, v in h.items() if k != 'html'} for h in html]}")
 
 def _click_role_button(session, name: str) -> bool:
     """role=button として名前で押す。Playwright の本物のクリック。"""
