@@ -4163,6 +4163,16 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
     #    同じ回に 180秒→45秒 に縮めたので、「全店が選ばれた状態で長く待つ」
     #    を一度も試していなかった。130店ぶんの生成に時間がかかるだけ、
     #    という可能性が残っている。ここは長く待つ。
+    # ⚠️ **『ダウンロード』は disabled のことがある**（実測で disabled=True）。
+    #    押せないボタンを押していたので何も起きなかった。覆われてもいないし
+    #    座標も合っていた。有効になるまで待つ。画面には読み込み中を示す
+    #    `IMG.waiting` も出ていたので、処理が終わるのを待つのが筋。
+    if not _wait_enabled(session, "ダウンロード"):
+        _NOTES.append("『ダウンロード』が有効にならなかった")
+        print(_NOTES[-1])
+        _dump_screen(session, "ダウンロードが有効にならない")
+        return None
+
     try:
         with session.page.expect_download(timeout=300000) as dl:
             if not (_click_role_button(session, "ダウンロード")
@@ -4235,6 +4245,49 @@ def _watch_page(session) -> None:
     page.on("console", _on_console)
     page.on("requestfailed", lambda r: _NOTES.append(f"通信が失敗: {r.url[:90]}"))
     page.on("download", lambda d: _NOTES.append(f"download事象: {d.suggested_filename}"))
+
+
+def _wait_enabled(session, label: str, timeout: float = 90.0) -> bool:
+    """そのボタンが**押せる状態になる**まで待つ。
+
+    実測で『ダウンロード』は `disabled=True` だった。押せないボタンを
+    押しても何も起きないのは当然で、原因を外（覆い・座標・イベントの
+    信用度）に探して何回も無駄にした。**押す前に押せるか見る。**
+
+    読み込み中を示す `IMG.waiting` が消えるのも一緒に待つ。
+    """
+    start = time.monotonic()
+    last = None
+    while time.monotonic() - start < timeout:
+        st = session.page.evaluate(
+            r"""(want) => {
+            const norm = s => (s || '').replace(/\s/g, '');
+            let found = null;
+            for (const el of document.querySelectorAll('button, input[type=button], a')) {
+                if (!el.offsetParent) continue;
+                if (norm(el.innerText || el.value) !== want) continue;
+                found = {disabled: !!el.disabled,
+                         cls: (el.className || '').toString().slice(0, 40)};
+                break;
+            }
+            const busy = [...document.querySelectorAll('img.waiting, .waiting, .loading')]
+                .some(e => e.offsetParent !== null);
+            return {found, busy};
+        }""", label)
+        cur = (st["found"] or {}).get("disabled"), st["busy"]
+        if cur != last:
+            print(f"[分析コード] 『{label}』 disabled={cur[0]} 読込中={cur[1]}"
+                  f" （{time.monotonic() - start:.0f}秒）")
+            last = cur
+        if st["found"] and not st["found"]["disabled"] and not st["busy"]:
+            _NOTES.append(f"『{label}』が押せる状態になった（{time.monotonic() - start:.0f}秒）")
+            print(_NOTES[-1])
+            return True
+        time.sleep(1.0)
+    _NOTES.append(f"『{label}』は {timeout:.0f}秒たっても disabled={last[0] if last else '?'}"
+                  f" 読込中={last[1] if last else '?'}")
+    print(_NOTES[-1])
+    return False
 
 
 def _click_role_button(session, name: str) -> bool:
