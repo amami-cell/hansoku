@@ -1,0 +1,94 @@
+name: 分析用コードの入力漏れ点検
+
+# 店長会資料は分析用コード1〜28の上に乗っていて、アラカルトは
+#
+#   アラカルト = 総数 －宴会 －ランチ －食べ飲み －ツアー －単品飲み放題 －テイクアウト
+#
+# という引き算で出る。**コードを付け忘れたメニューは消えずにアラカルトへ
+# 紛れ込む**ので、どこも空欄にならず資料は完成して見える。人が見ても
+# 気づけないので、機械で毎月見る。
+#
+# 実測（2026-09）では 22店 12120件中 2701件が未設定、うち**売れているのに
+# 未設定が1375件**。1743 すさび湯新宿東口店だけで494件あった。
+#
+# ⚠️ この点検はFWの画面を読むだけ。『登録』『CSV取込』には触らない。
+
+on:
+  schedule:
+    # 毎月1日 18:00 JST（= 09:00 UTC）。
+    # 月初に出しておけば、直したぶんはその月の資料に間に合う。
+    # 既存パイプラインのFW実行（3〜5日/16〜20日の09:00 JST）と、
+    # 日次の ingest（10:30 JST）を避けた時刻にしている。
+    - cron: '0 9 1 * *'
+  workflow_dispatch:
+    inputs:
+      code_store:
+        description: '店舗を1つに絞る（空なら全店）'
+        required: false
+        default: ''
+
+# 読むだけ。push もコメントもしない。
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    # 22店を1店ずつCSVで落とすので10分前後かかる。余裕を持たせる。
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: 分析用コードの入力漏れを調べる
+        env:
+          TZ: Asia/Tokyo
+          FOODIST_JOURNAL_USER_ID: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FOODIST_JOURNAL_PASSWORD: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+          HANSOKU_ENV: cloud
+          # 「売れているのに未設定」を見分けるため商品別売上を読む。
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          # ⚠️ `{ … } | tee` の中で走らせない。それだと最後の echo の結果が
+          #    ジョブの成否になり、**漏れがあっても緑**になる。
+          set +e
+          out="$(xvfb-run -a python -m hansoku.cli fw-daily \
+                   --mode analysis-code-audit \
+                   --abc-store "${{ inputs.code_store }}" \
+                   --artifacts fw-artifacts 2>&1)"
+          rc=$?
+          set -e
+          {
+            echo '## 分析用コードの入力漏れ'
+            echo ''
+            echo "終了コード: \`$rc\`（0=問題なし / 1=要対応あり）"
+            echo ''
+            echo '```'
+            echo "$out"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit $rc
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: analysis-code-artifacts
+          path: fw-artifacts/
+          retention-days: 7
+          if-no-files-found: warn
