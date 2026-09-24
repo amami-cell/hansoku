@@ -219,12 +219,28 @@ def _store_options(session) -> list[dict]:
     )
 
 
-def _wait_grid(session, tries: int = 15) -> bool:
+def _first_cd(session) -> str:
+    rows = session.page.evaluate(_EXTRACT_JS)
+    return rows[0]["cd"] if rows else ""
+
+
+def _wait_grid(session, tries: int = 20) -> bool:
     for _ in range(tries):
         time.sleep(1.5)
         if len(session.page.evaluate(_EXTRACT_JS)) >= 3:
             return True
     return False
+
+
+def _wait_grid_change(session, prev_cds: set[str], tries: int = 20) -> bool:
+    """店を切り替えたら、前店に無い商品CDが現れる（＝新しい店の表に再読込された）まで待つ。"""
+    for _ in range(tries):
+        time.sleep(1.5)
+        rows = session.page.evaluate(_EXTRACT_JS)
+        cds = [r["cd"] for r in rows if r["cd"]]
+        if len(cds) >= 3 and any(c not in prev_cds for c in cds):
+            return True
+    return len(session.page.evaluate(_EXTRACT_JS)) >= 3
 
 
 def ingest(artifacts: Path, db, active_codes: set[str], *, dry_run: bool = False, limit: int | None = None) -> int:
@@ -251,12 +267,20 @@ def ingest(artifacts: Path, db, active_codes: set[str], *, dry_run: bool = False
         print(f"=== 対象（イニシエート）{len(targets)}店 / FW全体 {len(stores)}店 ===")
 
         grand_rows = grand_missing = 0
+        prev_cds: set[str] = set()
+        first = True
         for s in targets:
             if not session.page.evaluate(_SELECT_STORE_JS, s["code"]):
                 print(f"⚠ {s['app']} {s['name']}：店舗選択に失敗。スキップ。")
                 continue
-            _wait_grid(session)
+            # 店切替はグリッドが前店から変わるまで待つ（初回は描画待ち）。
+            if first:
+                _wait_grid(session)
+                first = False
+            else:
+                _wait_grid_change(session, prev_cds)
             rows = _collect_all_rows(session)
+            prev_cds = {r["cd"] for r in rows if r["cd"]}
             recs = [
                 {
                     "product_code": r["cd"],
