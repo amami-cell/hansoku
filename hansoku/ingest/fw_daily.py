@@ -4804,7 +4804,10 @@ def _report_analysis_codes(per_store: list[dict], failures: list[str],
         rows.append((st, got, buckets))
 
     need = [(st, got, bk) for st, got, bk in rows if bk["売れた"] or bk["判定不能"]]
-    for st, got, bk in sorted(need, key=lambda r: -(len(r[2]["売れた"]) + len(r[2]["判定不能"]))):
+    # 明細は上位5店だけ。全店ぶん出すとログの末尾が明細で埋まる。
+    # 全体像は下の順位表で見る。
+    ordered = sorted(need, key=lambda r: -(len(r[2]["売れた"]) + len(r[2]["判定不能"])))
+    for st, got, bk in ordered[:5]:
         head = f"  ⚠ {st.store_code} {st.store_name[:16]:<16} {got['total']}件中 "
         parts = []
         if bk["売れた"]:
@@ -4826,6 +4829,21 @@ def _report_analysis_codes(per_store: list[dict], failures: list[str],
         note = f"（売れていない未設定 {harmless}件は影響なし）" if harmless else ""
         print(f"  ✓ 対応不要 {len(clean)}店: "
               f"{', '.join(r[0].store_code for r in clean)} {note}")
+
+    # ⚠️ **順位表は明細のあとに置く。** 実行環境ではログの末尾しか読めず、
+    #    明細（1店あたり最大9行）が長いので、先に出すと上位の店が
+    #    押し出されて見えない。実際に1375件中244件ぶんしか読めなかった。
+    ranked = [(st, len(bk["売れた"]), len(bk["判定不能"]), len(bk["売れてない"]))
+              for st, _, bk in rows]
+    ranked.sort(key=lambda r: (-r[1], -r[2]))
+    print("")
+    print("--- 要対応の多い順 ---")
+    for st, n_s, n_u, n_h in ranked:
+        if not (n_s or n_u):
+            continue
+        extra = f" / 判定不能 {n_u}" if n_u else ""
+        print(f"  {st.store_code} {st.store_name[:16]:<16} 要対応 {n_s:>4}件{extra}"
+              f"  （影響なし {n_h}）")
 
     n_sold = sum(len(bk["売れた"]) for _, _, bk in rows)
     n_unknown = sum(len(bk["判定不能"]) for _, _, bk in rows)
