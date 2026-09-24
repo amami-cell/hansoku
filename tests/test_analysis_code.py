@@ -9,7 +9,14 @@
 どこも空欄にならないため資料は完成して見え、間違いに気づけない。
 ここの判定が「何を漏れとみなすか」を決める。
 """
-from hansoku.ingest.fw_daily import _report_analysis_codes, analysis_code_summary
+# ⚠️ 関数はモジュール先頭で import する。クラスの属性に置くと**メソッド扱い**に
+#    なり、第1引数に self が入って TypeError になる（この回で2度踏んだ）。
+from hansoku.ingest.fw_daily import (
+    _report_analysis_codes,
+    analysis_code_summary,
+    classify_blank,
+    menu_key,
+)
 
 # 実測の見出し（マスタ管理→販売マスタ→分析用コード設定 の CSV出力）
 HEAD = ["店舗コード", "店舗名", "メニューコード", "名称", "標準税率10%込",
@@ -137,3 +144,70 @@ class Test赤くするかの判断:
     def test_1店でも漏れていれば赤(self):
         entries = [self._entry("1006", 0), self._entry("1015", 0), self._entry("1766", 1)]
         assert _report_analysis_codes(entries, []) == 1
+
+
+class Test売れているものだけ赤にする:
+    """全部を赤にすると一覧が2701件になり、`お冷`・`コピー`・`-` が混じった
+    まま誰も着手しない（実際そうなった）。売れていないメニューはアラカルトに
+    紛れても影響しないので、数だけ出す。"""
+
+    def test_売れていれば要対応(self):
+        b = {"store_code": "1151", "menu": "カールスバーグ"}
+        assert classify_blank(b, {("1151", menu_key("カールスバーグ"))}, {"1151"}) == "売れた"
+
+    def test_売れていなければ影響なし(self):
+        b = {"store_code": "1739", "menu": "お冷"}
+        assert classify_blank(b, set(), {"1739"}) == "売れてない"
+
+    def test_売上データが無い店は判定不能(self):
+        # ⚠️ ここを「売れてない」に倒すと、ABCが未取得なだけの店を
+        #    静かに見逃す。赤の側へ寄せる。
+        b = {"store_code": "2004", "menu": "からあげ"}
+        assert classify_blank(b, set(), set()) == "判定不能"
+
+    def test_別の店の売上に引っ張られない(self):
+        # 同じ名前のメニューが他店で売れていても、その店の話ではない。
+        b = {"store_code": "1015", "menu": "からあげ"}
+        sold = {("1151", menu_key("からあげ"))}
+        assert classify_blank(b, sold, {"1015", "1151"}) == "売れてない"
+
+    def test_全角半角と空白の揺れを吸収する(self):
+        assert menu_key("ＲＯＫＵ 〈六〉") == menu_key("ROKU〈六〉")
+
+
+class Test赤にする範囲:
+    """要対応・判定不能があれば赤、売れていないものだけなら緑。"""
+
+    @staticmethod
+    def _entry(code: str, menus: list[str], total: int = 100):
+        from types import SimpleNamespace
+        return {
+            "store": SimpleNamespace(store_code=code, store_name=f"店{code}"),
+            "got": {"total": total, "filled": total - len(menus),
+                    "blank": [{"store_code": code, "store_name": "", "menu": m}
+                              for m in menus],
+                    "by_store": {}, "codes": [], "header_row": 0,
+                    "col": 14, "name_col": 3, "store_col": 0},
+        }
+
+    def test_売れていないものだけなら緑(self):
+        # `お冷` が1件あるだけで毎月赤くなると、警報として使われなくなる。
+        e = self._entry("1739", ["お冷"])
+        assert _report_analysis_codes([e], [], sold=set(), judged={"1739"}) == 0
+
+    def test_売れているものがあれば赤(self):
+        e = self._entry("1151", ["カールスバーグ", "お冷"])
+        sold = {("1151", menu_key("カールスバーグ"))}
+        assert _report_analysis_codes([e], [], sold=sold, judged={"1151"}) == 1
+
+    def test_判定不能があれば赤(self):
+        e = self._entry("2004", ["からあげ"])
+        assert _report_analysis_codes([e], [], sold=set(), judged=set()) == 1
+
+    def test_漏れが無ければ緑(self):
+        assert _report_analysis_codes([self._entry("1729", [])], [],
+                                      sold=set(), judged={"1729"}) == 0
+
+    def test_取れなかった店があれば赤(self):
+        assert _report_analysis_codes([self._entry("1729", [])], ["1766"],
+                                      sold=set(), judged={"1729"}) == 1
