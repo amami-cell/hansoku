@@ -4114,7 +4114,7 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
        `CSV取込`(x=530) と `キャンセル`(x=652) があるので**完全一致**で探す。
        部分一致で `CSV出力` を探すと `CSV取込` に当たり、マスタを壊す。
     """
-    if not _click_exact(session, "CSV出力"):
+    if not (_click_real(session, "CSV出力") or _click_exact(session, "CSV出力")):
         print("[分析コード] 『CSV出力』が押せませんでした")
         return None
     # ダイアログが出るまで待つ（『ダウンロード』が見えたら出たとみなす）
@@ -4128,24 +4128,17 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
         _dump_screen(session, "ダイアログが出ない")
         return None
 
-    # ラベルを押してもラジオが選ばれないことがある（for が張られていない）。
-    # **input を直接押して、選ばれたかを読み直す。** ここを確かめないと
-    # 「全店のつもりで画面表示ぶんだけ落とす」という静かな取り違えになる。
-    picked = session.page.evaluate(
-        r"""(want) => {
-        for (const el of document.querySelectorAll('input[type=radio]')) {
-            if (!el.offsetParent) continue;
-            if ((el.value || '').replace(/\s/g, '') === want) {
-                el.click();
-                el.dispatchEvent(new Event('change', {bubbles: true}));
-                return el.checked;
-            }
-        }
-        return null;
-    }""", scope)
+    # ⚠️ JS の el.click() では**3つとも checked=false のまま**だった（実測）。
+    #    合成イベントは isTrusted=false で、フレームワークが無視する。
+    #    Playwright の本物のクリックで押し、選べたかを読み直す。
+    picked = _check_radio_real(session, scope)
     _NOTES.append(f"範囲『{scope}』のラジオ: "
                   + ("見つからない" if picked is None else f"checked={picked}"))
     print(_NOTES[-1])
+    if picked is False and _click_real(session, scope):
+        picked = _check_radio_real(session, scope)
+        _NOTES.append(f"ラベル経由で押し直した: checked={picked}")
+        print(_NOTES[-1])
     time.sleep(0.8)
     states = session.page.evaluate(
         r"""() => [...document.querySelectorAll('input[type=radio]')]
@@ -4161,7 +4154,8 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
     #    落ちてこなかったときだけ、別タブが開いていないかを後から見る。
     try:
         with session.page.expect_download(timeout=180000) as dl:
-            if not _click_exact(session, "ダウンロード"):
+            if not (_click_real(session, "ダウンロード")
+                    or _click_exact(session, "ダウンロード")):
                 raise RuntimeError("『ダウンロード』が押せませんでした")
         data = open(dl.value.path(), "rb").read()
         print(f"[分析コード] 範囲={scope} / 名前={dl.value.suggested_filename}")
@@ -4177,6 +4171,52 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
         print(_NOTES[-1])
         session.snapshot("analysis_csv_failed")
         _dump_screen(session, "ダウンロードできない")
+        return None
+
+
+def _click_real(session, label: str) -> bool:
+    """Playwright の**本物のクリック**で押す。
+
+    JS の `el.click()` は `isTrusted=false` の合成イベントで、
+    フレームワークのハンドラやダウンロードの経路が反応しないことがある。
+    実測では、ラジオを JS で押しても3つとも `checked=false` のままで、
+    その結果『ダウンロード』も何も起こさなかった。
+
+    ⚠️ 完全一致。この画面は押してよいものと**マスタを書き換えるもの**が
+       隣り合っている（CSV出力↔CSV取込、ダウンロード↔キャンセル）。
+    """
+    try:
+        loc = session.page.get_by_text(label, exact=True)
+        for i in range(min(loc.count(), 6)):
+            el = loc.nth(i)
+            if el.is_visible():
+                el.click(timeout=8000)
+                return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] 『{label}』の本物クリックに失敗: {type(e).__name__}")
+    return False
+
+
+def _check_radio_real(session, value: str) -> bool | None:
+    """ラジオを本物のクリックで選び、選べたかを読み直して返す。
+
+    見つからなければ None。**選べたことを読み直して確かめる**のは、
+    「全店のつもりで別の範囲を落とす」という静かな取り違えを防ぐため。
+    """
+    sel = f'input[type=radio][value="{value}"]'
+    try:
+        loc = session.page.locator(sel)
+        if loc.count() == 0:
+            return None
+        el = loc.first
+        try:
+            el.check(timeout=8000)
+        except Exception:  # noqa: BLE001
+            # 本体が隠れて label で操作する作りのこともある
+            el.click(timeout=8000, force=True)
+        return bool(el.is_checked())
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] ラジオ『{value}』を押せません: {type(e).__name__}")
         return None
 
 
