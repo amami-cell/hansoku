@@ -4022,33 +4022,106 @@ def probe_analysis_codes(artifacts: Path, master, store: str = "") -> int:
         opt, st = target
         print(f"[分析コード] 対象: {opt['value']} {st.store_code} {st.store_name}")
 
+        _dump_screen(session, "メニューを開いた直後")
+
         if not _select_combo(session, opt["value"]):
-            print("::error::[分析コード] 店舗を選べませんでした")
-            return 1
-        # この画面に検索ボタンは無い（ボタンは 店舗/登録/キャンセル/CSV取込/CSV出力）。
-        # 店を選んだだけで出るのか確かめたいので、待ってから行数を見る。
+            print("[分析コード] 店舗コンボからは選べませんでした")
         rows = _wait_for_grid(session)
-        session.snapshot("analysis_after_select")
-        print(f"[分析コード] 店を選んだあとの表の行 {rows}")
+        print(f"[分析コード] コンボで選んだあとの表の行 {rows}")
+        _dump_screen(session, "コンボで店を選んだあと")
 
-        _dump_grid_tables(session)
+        # コンボだけでは「データなし」のままだった。画面にある『店舗』が
+        # 実際の店選びなのかを確かめる。**『登録』『CSV取込』は押さない。**
+        if _grid_is_empty(session):
+            print("[分析コード] まだ中身が出ない。『店舗』を押してみる")
+            hit = session.page.evaluate(
+                """() => {
+                for (const el of document.querySelectorAll(
+                        'button, a, input[type=button], div[role=button], span, label')) {
+                    if (!el.offsetParent) continue;
+                    const t = ((el.innerText || el.value || '').replace(/\\s/g, ''));
+                    // 完全一致。『CSV取込』や『登録』に当てない。
+                    if (t === '店舗') { el.click(); return true; }
+                }
+                return false;
+            }"""
+            )
+            print(f"[分析コード] 『店舗』を押せた: {hit}")
+            session.page.wait_for_timeout(4000)
+            _dump_screen(session, "『店舗』を押したあと")
 
-        # ⚠️ 押すのは CSV出力 だけ。`CSV取込` は取り違えると**マスタを壊す**ので
-        #    完全一致で探す。部分一致にすると「CSV取込」にも当たる。
-        try:
-            with session.page.expect_download(timeout=120000) as dl:
-                session.page.get_by_text("CSV出力", exact=True).first.click(timeout=8000)
-            data = open(dl.value.path(), "rb").read()
-        except Exception as e:  # noqa: BLE001
-            print(f"[分析コード] CSV出力を押せませんでした: {type(e).__name__}: {e}")
-            session.snapshot("analysis_csv_failed")
-            session.dump_clickables("analysis_csv_failed")
-            return 1
-
-        print(f"[分析コード] CSVを取得: {len(data)} バイト / 名前={dl.value.suggested_filename}")
-        _describe_analysis_csv(data)
+        session.snapshot("analysis_probe_end")
     print(f"\n成果物: {artifacts}")
     return 0
+
+
+def _grid_is_empty(session) -> bool:
+    """グリッドが「データなし」のままかを見る。
+
+    行数だけでは分からない。**空でも見出しと『データなし』で19行ある**ので、
+    `_wait_for_grid` は満足してしまう（実測でそうだった）。
+    """
+    try:
+        return bool(session.page.evaluate(
+            """() => /データなし|該当するデータ/.test(document.body.innerText || '')"""
+        ))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _dump_screen(session, when: str) -> None:
+    """その時点の押せるもの・入力欄・選択肢を位置つきで出す。
+
+    分析用コード設定は当て推量が続いたので、**1回のランで見られるものは
+    全部見る**。成果物は落とせない（blob storage が 403）ので標準出力に出す。
+    """
+    print(f"――― {when} ―――")
+    try:
+        info = session.page.evaluate(
+            r"""() => {
+            const clip = s => (s || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+            const vis = el => el.offsetParent !== null;
+            const btns = [];
+            for (const el of document.querySelectorAll(
+                    'button, a, input[type=button], input[type=submit], div[role=button], label')) {
+                if (!vis(el)) continue;
+                const t = clip(el.innerText || el.value);
+                if (!t) continue;
+                const r = el.getBoundingClientRect();
+                btns.push({t, tag: el.tagName.toLowerCase(),
+                           x: Math.round(r.x), y: Math.round(r.y)});
+            }
+            const inputs = [];
+            for (const el of document.querySelectorAll('input, select, textarea')) {
+                if (!vis(el)) continue;
+                const r = el.getBoundingClientRect();
+                inputs.push({tag: el.tagName.toLowerCase(), type: el.type || '',
+                             val: clip(el.value), ph: clip(el.placeholder),
+                             name: clip(el.name), x: Math.round(r.x), y: Math.round(r.y)});
+            }
+            const dialogs = [...document.querySelectorAll(
+                '[role=dialog], .modal, .dialog, .v-dialog, .popup')]
+                .filter(vis).map(d => clip(d.innerText)).slice(0, 6);
+            return {url: location.href, btns: btns.slice(0, 40),
+                    inputs: inputs.slice(0, 25), dialogs,
+                    empty: /データなし/.test(document.body.innerText || '')};
+        }"""
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"  画面を読めませんでした: {type(e).__name__}: {e}")
+        return
+    print(f"  url={info['url']}  データなし={info['empty']}")
+    print(f"  押せるもの {len(info['btns'])}件:")
+    for b in info["btns"]:
+        print(f"    {b['tag']:<6} x={b['x']:>4} y={b['y']:>4}  {b['t']}")
+    print(f"  入力欄 {len(info['inputs'])}件:")
+    for i in info["inputs"]:
+        print(f"    {i['tag']}/{i['type']:<8} x={i['x']:>4} y={i['y']:>4}"
+              f"  値={i['val']!r} 名={i['name']!r} ヒント={i['ph']!r}")
+    if info["dialogs"]:
+        print(f"  ダイアログらしきもの {len(info['dialogs'])}件:")
+        for d in info["dialogs"]:
+            print(f"    {d}")
 
 
 def analysis_code_summary(rows: list[list[str]]) -> dict | None:
