@@ -4487,46 +4487,72 @@ def analysis_code_summary(rows: list[list[str]]) -> dict | None:
     店長会資料はコードの上に乗っていて、付け忘れたメニューは消えずに
     アラカルトに紛れ込むので、ここの判定を間違えると静かに嘘をつく。
 
-    見出し行はCSVの先頭とは限らない（実測では1〜2行目に分かれていた）ので、
-    先頭の数行から「分析用コード」の欄を探して見出しの位置を決める。
+    実測の見出し（`画面表示` で落としたCSV）:
 
-    ⚠️ **部分一致で探さないこと。** タイトル行の「分析用コード設定」にも
-    当たってしまい、そこを見出しと誤認する。すると列位置が全部ずれ、
-    アラートが静かに嘘をつく（テストで実際に踏んだ）。空白を落として
-    **完全一致**で探し、見つからなければ当て推量せず None を返す。
+        店舗コード | 店舗名 | メニューコード | 名称 | 標準税率10%込 |
+        軽減税率8%込 | 税抜 | 原価 | 部門コード | 部門名称 |
+        グループコード | グループ名称 | 消費税 | ユーザーコード | 分析用コード
+
+    ⚠️ **列は名前で探すこと。** メニュー名を1列目と決め打ちしていたら、
+       そこは `店舗名` で、漏れの一覧に店名が78個並んだ（実際に出した）。
+       どの列も見出しの**完全一致**で引く。部分一致だとタイトル行の
+       「分析用コード設定」に当たって全部ずれる。
     """
     def _norm(c: str | None) -> str:
         return "".join((c or "").split())
 
-    head_i = col = None
+    head_i = head = None
     for i, row in enumerate(rows[:5]):
-        for j, cell in enumerate(row):
-            if _norm(cell) == "分析用コード":
-                head_i, col = i, j
-                break
-        if col is not None:
+        if any(_norm(c) == "分析用コード" for c in row):
+            head_i, head = i, row
             break
-    if col is None:
+    if head is None:
         return None
 
+    def _col(name: str) -> int | None:
+        for j, c in enumerate(head):
+            if _norm(c) == name:
+                return j
+        return None
+
+    col = _col("分析用コード")
+    name_col = _col("名称")
+    store_col = _col("店舗コード")
+    store_name_col = _col("店舗名")
+    if name_col is None:                 # 見出しが変わったときの保険
+        name_col = 1 if len(head) > 1 else 0
+
     body = [r for r in rows[head_i + 1:] if any((c or "").strip() for c in r)]
-    name_col = 1 if len(rows[head_i]) > 1 else 0
 
-    def _code(r: list[str]) -> str:
-        return (r[col] or "").strip() if len(r) > col else ""
+    def _at(r: list[str], j: int | None) -> str:
+        return (r[j] or "").strip() if j is not None and len(r) > j else ""
 
-    def _name(r: list[str]) -> str:
-        return (r[name_col] or "").strip() if len(r) > name_col else ""
+    blank: list[dict] = []
+    by_store: dict[str, int] = {}
+    codes: set[str] = set()
+    for r in body:
+        code = _at(r, col)
+        if code:
+            codes.add(code)
+            continue
+        store = _at(r, store_col)
+        blank.append({
+            "store_code": store.lstrip("0"),
+            "store_name": _at(r, store_name_col),
+            "menu": _at(r, name_col),
+        })
+        by_store[store.lstrip("0")] = by_store.get(store.lstrip("0"), 0) + 1
 
-    blank = [_name(r) for r in body if not _code(r)]
-    codes = sorted({_code(r) for r in body if _code(r)})
     return {
         "header_row": head_i,
         "col": col,
+        "name_col": name_col,
+        "store_col": store_col,
         "total": len(body),
         "filled": len(body) - len(blank),
         "blank": blank,
-        "codes": codes,
+        "by_store": by_store,
+        "codes": sorted(codes, key=lambda c: (len(c), c)),
     }
 
 
@@ -4560,9 +4586,14 @@ def _describe_analysis_csv(data: bytes) -> None:
     if got is None:
         print("[分析コード] 『分析用コード』の列が見出しに見つかりません")
         return
-    print(f"[分析コード] 『分析用コード』は {got['header_row']}行目の {got['col']}列目")
+    print(f"[分析コード] 分析用コード={got['col']}列 / 名称={got['name_col']}列"
+          f" / 店舗コード={got['store_col']}列")
     print(f"[分析コード] メニュー {got['total']}行 / コード有り {got['filled']}"
           f" / 空 {len(got['blank'])}")
-    print(f"[分析コード] 使われているコード {len(got['codes'])}種: {got['codes'][:40]}")
-    for nm in got["blank"][:10]:
-        print(f"    コード空: {nm[:30]}")
+    print(f"[分析コード] 使われているコード {len(got['codes'])}種: {got['codes']}")
+    if got["by_store"]:
+        print("[分析コード] 店ごとのコード未設定:")
+        for code, n in sorted(got["by_store"].items(), key=lambda kv: -kv[1]):
+            print(f"    {code}\t{n}件")
+    for b in got["blank"][:15]:
+        print(f"    コード空: {b['store_code']} {b['menu'][:30]}")
