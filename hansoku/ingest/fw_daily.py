@@ -48,9 +48,43 @@ def _open_menu(session, labels) -> None:
     for label in labels:
         if not session.click_text(label):
             session.snapshot(f"missing_{label}")
-            session.dump_clickables(f"failed_{label}")
+            items = session.dump_clickables(f"failed_{label}")
+            # ⚠️ **成果物だけに残しても読めない。** 実行環境から
+            # artifacts を落とせないことがあり（blob storage が 403）、
+            # そうなると「進めませんでした」しか分からず、正しいラベルを
+            # 当て推量で探すことになる。画面の選択肢はログにも出す。
+            print(f"[menu] 「{label}」が見つかりません。画面にあるもの {len(items)}件:")
+            for it in items:
+                t = " ".join((it.get("text") or "").split())
+                if t:
+                    print(f"    - {t[:40]}")
             raise FWError(f"「{label}」に進めませんでした")
         session.snapshot(f"opened_{label}")
+
+
+def _wait_for_grid(session, *, timeout: float = 60.0, quiet: float = 3.0) -> int:
+    """表が描き終わるまで待ち、読めた行数を返す。
+
+    画面によっては検索の直後は空で、**しばらくしてから出てくる**
+    （分析用コード設定がそう）。固定の sleep で読むと空の画面を
+    「これが正」として記録してしまい、次のランをまるごと無駄にする。
+    行数が増えなくなってから読む。
+    """
+    start = time.monotonic()
+    last, stable_since = -1, start
+    while time.monotonic() - start < timeout:
+        n = session.page.evaluate(
+            """() => [...document.querySelectorAll('table')]
+                 .filter(t => t.offsetParent)
+                 .reduce((a, t) => a + t.querySelectorAll('tr').length, 0)"""
+        )
+        if n != last:
+            last, stable_since = n, time.monotonic()
+        elif n > 0 and time.monotonic() - stable_since >= quiet:
+            break
+        time.sleep(0.5)
+    print(f"[probe] 表の行 {last}行で落ち着いた（{time.monotonic() - start:.0f}秒待った）")
+    return last
 
 
 def report_probe(artifacts: Path, path_str: str) -> int:
@@ -61,7 +95,24 @@ def report_probe(artifacts: Path, path_str: str) -> int:
     labels = [s.strip() for s in path_str.split(",") if s.strip()]
     last_label = labels[-1] if labels else path_str
     with fw_session(artifacts) as session:
-        _open_menu(session, labels)
+        # 1段ずつ押して、**そのたびに画面の項目を出す**。
+        # まとめて `_open_menu` で開くと、失敗した段の画面しか見られない。
+        # 同じ名前の項目が2か所にあると（販売管理はナビとマスタ管理の下の
+        # 両方にある）、狙いと違うほうを押しても気づけない。位置(x,y)まで
+        # 出すのは、どちらを押したのかを見分けるため。
+        for i, label in enumerate(labels, 1):
+            ok = session.click_text(label)
+            items = session.dump_clickables(f"step{i}_{label}")
+            print(f"[probe] {i}. 「{label}」 {'押せた' if ok else '押せなかった'}"
+                  f" → いま画面にある項目 {len(items)}件")
+            for it in items:
+                t = " ".join((it.get("text") or "").split())
+                if t:
+                    print(f"    {it.get('tag',''):<6} x={it.get('x',0):>4} y={it.get('y',0):>4}"
+                          f"  {t[:38]}")
+            if not ok:
+                session.snapshot(f"missing_{label}")
+                raise FWError(f"「{label}」に進めませんでした")
         items = session.dump_clickables("report_screen")
         print(f"[report] 「{last_label}」の操作要素 {len(items)}件")
         print("[report] クリック要素テキスト一覧:")
@@ -75,7 +126,8 @@ def report_probe(artifacts: Path, path_str: str) -> int:
             print(f"[report] 先頭店舗を選ぶ: {options[0]['value']} {options[0]['name']}")
             _select_combo(session, options[0]["value"])
         _click_search(session)
-        time.sleep(1.2)
+        # 固定待ちにしない。描き終わるまで待たないと空を正として記録する。
+        _wait_for_grid(session)
         session.snapshot("after_search")
         print(f"[report] 表示中の月: {_read_month(session)}")
         info = session.page.evaluate(
@@ -3913,4 +3965,930 @@ def probe(artifacts: Path) -> int:
         _dump_report_rows(session)
         _dump_inputs_grouped(session)
     print(f"\n成果物: {artifacts}")
+    return 0
+
+
+# ── 分析用コード設定（マスタ管理→販売マスタ）─────────────────────────────
+#
+# 店長会資料は分析用コード1〜28の上に乗っている。アラカルトの数字が
+#   アラカルト客数 = 総客数 －宴会 －ランチ －食べ飲み －ツアー －単品飲み放題 －テイクアウト
+# という**引き算**で出るので、コードを付け忘れたメニューは消えずに
+# **アラカルトに紛れ込む**。どこも空欄にならないので資料は完成して見える。
+#
+# ⚠️ この画面は**マスタを書き換えられる**。`登録` と `CSV取込` には
+#    絶対に触らないこと。押してよいのは `CSV出力` だけ。
+_NOTES: list[str] = []
+
+
+ANALYSIS_CODE_MENU = ("マスタ管理", "販売マスタ", "分析用コード設定")
+
+
+def probe_analysis_codes(artifacts: Path, master, store: str = "") -> int:
+    """分析用コード設定の画面を1店だけ見る診断。DBにもFWにも書き込まない。
+
+    見たいのは3つ。
+      ① 130件ある店舗コンボのうち、うちの店がどの value で引けるか
+      ② 店を選んだあと、何をすればグリッドに中身が出るのか
+      ③ `CSV出力` が本当にダウンロードとして落ちてくるか、列は何か
+    """
+    from .fw_budget import _combo_options, _select_combo
+
+    key = (store or "").strip()
+    with fw_session(artifacts) as session:
+        _watch_page(session)
+        options = _open_and_wait_combo(session)
+        print(f"[分析コード] 店舗コンボ {len(options)}件")
+        if not options:
+            print("::error::[分析コード] 店舗コンボが空のままでした")
+            _dump_screen(session, "コンボが空")
+            return 1
+
+        # うちの店だけに絞る。FWのコードは0埋めなので lstrip して突き合わせる。
+        active = {s.store_code: s for s in master.active}
+        mine = []
+        for opt in options:
+            code = opt["value"].lstrip("0")
+            st = active.get(code) or master.find_by_name(opt["name"])
+            if st and st.active:
+                mine.append((opt, st))
+        print(f"[分析コード] マスタと一致した稼働店 {len(mine)}件")
+        for opt, st in mine[:30]:
+            print(f"    {opt['value']}\t{st.store_code}\t{st.store_name}")
+        if not mine:
+            print("::error::[分析コード] うちの店が1件も引けませんでした")
+            return 1
+
+        target = mine[0]
+        if key:
+            hit = [(o, s) for o, s in mine
+                   if s.store_code == key.lstrip("0") or key in s.store_name]
+            if not hit:
+                print(f"::error::[分析コード] 店舗が見つかりません: {store}")
+                return 1
+            target = hit[0]
+        opt, st = target
+        print(f"[分析コード] 対象: {opt['value']} {st.store_code} {st.store_name}")
+
+        if not _select_combo(session, opt["value"]):
+            print("[分析コード] 店舗コンボから選べませんでした")
+            _dump_screen(session, "コンボで選べなかった")
+            return 1
+
+        if not _commit_store(session):
+            print("::error::[分析コード] 店を選んでも中身が出ませんでした")
+            _dump_screen(session, "中身が出ないまま")
+            return 1
+        print("[分析コード] グリッドに中身が出た")
+
+        data = _download_analysis_csv(session)
+        if data is None:
+            # ⚠️ 画面ダンプのあとに結論を置く。実行環境ではログの**末尾しか
+            #    読めない**ので、先に出すとダンプに押し流されて見えない。
+            print("")
+            print("=== 結論 ===")
+            print("  経路とグリッド表示までは通った。CSVのダウンロードだけが未完。")
+            for line in _NOTES[-25:]:
+                print(f"  {line}")
+            return 1
+        print(f"[分析コード] CSVを取得: {len(data)} バイト")
+        _describe_analysis_csv(data)
+        session.snapshot("analysis_probe_end")
+    print(f"\n成果物: {artifacts}")
+    return 0
+
+
+def _open_and_wait_combo(session, tries: int = 3) -> list[dict]:
+    """分析用コード設定を開き、店舗コンボが埋まるまで待つ。駄目なら開き直す。
+
+    待つだけでは足りなかった。60秒待っても 0件のまま終わったランがある
+    （直前のランの4分後で、FW側のセッションの影響とみられる）。
+    **開き直して取り直す**。月次で回すものなので、1回の空振りで
+    「対象の店が1件もありません」と言って終わるのは困る。
+    """
+    options: list[dict] = []
+    for i in range(1, tries + 1):
+        if i > 1:
+            print(f"[分析コード] 店舗コンボが空。メニューを開き直す（{i}回目）")
+            try:
+                session.click_text("TOP")
+                session.page.wait_for_timeout(3000)
+            except Exception:  # noqa: BLE001
+                pass
+        _open_menu(session, ANALYSIS_CODE_MENU)
+        options = _wait_combo_options(session, timeout=45.0)
+        if options:
+            return options
+    return options
+
+
+def _wait_combo_options(session, timeout: float = 60.0) -> list[dict]:
+    """店舗コンボの選択肢が入るまで待ってから返す。
+
+    メニューを開いた直後に読むと**空のことがある**（実測で 130件 → 0件 と
+    ランによって割れた）。空で先に進むと「うちの店が1件も無い」という
+    見当違いの結論になる。選択肢が出るまで待つ。
+    """
+    start = time.monotonic()
+    options: list[dict] = []
+    while time.monotonic() - start < timeout:
+        options = _combo_options(session)
+        if options:
+            if time.monotonic() - start > 1.0:
+                print(f"[分析コード] コンボの選択肢が出るまで {time.monotonic() - start:.0f}秒")
+            return options
+        time.sleep(1.0)
+    return options
+
+
+def _commit_store(session, timeout: float = 60.0) -> bool:
+    """店を選んだあと、グリッドに中身が出るまで押して待つ。
+
+    コンボに値を入れただけでは読み込みが走らない（欄には店名が入るのに
+    『データなし』のまま）。**『店舗』はボタンではなく入力欄のラベル**で、
+    これを押すと読み込みが走る、というのが実測。
+
+    ⚠️ 完全一致で探す。この画面には『登録』が隣（x=990 y=112）にあり、
+       押すとマスタを書き換えてしまう。
+    """
+    clicked = _click_exact(session, "店舗")
+    if not clicked:
+        print("[分析コード] 『店舗』が押せませんでした")
+        return False
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        if not _grid_is_empty(session):
+            print(f"[分析コード] 『店舗』を押して {time.monotonic() - start:.0f}秒で出た")
+            return True
+        time.sleep(1.0)
+    return False
+
+
+def _download_analysis_csv(session, scope: str = "画面表示") -> bytes | None:
+    """『CSV出力』→ ダイアログで範囲を選ぶ → 『ダウンロード』。
+
+    `CSV出力` はその場で落ちてこない。**ダイアログが開く**（実測）。
+
+        画面表示 / 全店 / 店舗選択   ←ラジオ
+        ダウンロード | キャンセル
+
+    既定は `画面表示`（いま出している1店ぶん）。`全店` は130店ぶんで、
+    押しても5分でCSVが来なかった（押下自体は効いていて、ボタンが
+    無効化される＝処理は走っている）。**まず軽いほうで経路を通す。**
+    1店ずつでも、ログインは1回で23店まわせる。
+
+    ⚠️ 押してよいのは `CSV出力` と `ダウンロード` だけ。すぐ隣に
+       `CSV取込`(x=530) と `キャンセル`(x=652) があるので**完全一致**で探す。
+       部分一致で `CSV出力` を探すと `CSV取込` に当たり、マスタを壊す。
+    """
+    if not (_click_real(session, "CSV出力") or _click_exact(session, "CSV出力")):
+        print("[分析コード] 『CSV出力』が押せませんでした")
+        return None
+    # ダイアログが出るまで待つ（『ダウンロード』が見えたら出たとみなす）
+    start = time.monotonic()
+    while time.monotonic() - start < 30.0:
+        if _has_exact(session, "ダウンロード"):
+            break
+        time.sleep(0.5)
+    else:
+        print("[分析コード] CSV出力のダイアログが出ませんでした")
+        _dump_screen(session, "ダイアログが出ない")
+        return None
+
+    # ⚠️ JS の el.click() では**3つとも checked=false のまま**だった（実測）。
+    #    合成イベントは isTrusted=false で、フレームワークが無視する。
+    #    Playwright の本物のクリックで押し、選べたかを読み直す。
+    picked = _check_radio_real(session, scope)
+    _NOTES.append(f"範囲『{scope}』のラジオ: "
+                  + ("見つからない" if picked is None else f"checked={picked}"))
+    print(_NOTES[-1])
+    if picked is False and _click_real(session, scope):
+        picked = _check_radio_real(session, scope)
+        _NOTES.append(f"ラベル経由で押し直した: checked={picked}")
+        print(_NOTES[-1])
+    time.sleep(0.8)
+    states = session.page.evaluate(
+        r"""() => [...document.querySelectorAll('input[type=radio]')]
+              .filter(e => e.offsetParent)
+              .map(e => `${e.value}=${e.checked}`)"""
+    )
+    _NOTES.append(f"ラジオの状態: {states}")
+    print(_NOTES[-1])
+
+    # ブラウザでは普通にCSVが落ちる（利用者に確認済み）。つまり押し方の問題。
+    # 当て方を3通り順に試し、**どれが効いたかを残す**。効いた1つだけを
+    # 本番に残せるように、毎回この記録を見る。
+    #
+    # 1) role=button で名前指定（いちばん素直）
+    # 2) 画面に見えている座標を直接クリック（当たる場所が確実）
+    # 3) JSのclick（合成イベント。効かない実績があるが最後の砦）
+    #
+    # ⚠️ 3通りとも『ダウンロード』の完全一致だけを狙う。すぐ隣に
+    #    『キャンセル』(x=652) がある。
+    # ⚠️ **待ちを縮めたのは私の検証ミス。** ラジオが選べるようになったのと
+    #    同じ回に 180秒→45秒 に縮めたので、「全店が選ばれた状態で長く待つ」
+    #    を一度も試していなかった。130店ぶんの生成に時間がかかるだけ、
+    #    という可能性が残っている。ここは長く待つ。
+    # ⚠️ **『ダウンロード』は disabled のことがある**（実測で disabled=True）。
+    #    押せないボタンを押していたので何も起きなかった。覆われてもいないし
+    #    座標も合っていた。有効になるまで待つ。画面には読み込み中を示す
+    #    `IMG.waiting` も出ていたので、処理が終わるのを待つのが筋。
+    if not _wait_enabled(session, "ダウンロード"):
+        _NOTES.append("『ダウンロード』が有効にならなかった")
+        print(_NOTES[-1])
+        _dump_screen(session, "ダウンロードが有効にならない")
+        return None
+
+    try:
+        with session.page.expect_download(timeout=300000) as dl:
+            if not (_click_role_button(session, "ダウンロード")
+                    or _click_at_text(session, "ダウンロード")
+                    or _click_exact(session, "ダウンロード")):
+                raise RuntimeError("『ダウンロード』が押せなかった")
+        data = open(dl.value.path(), "rb").read()
+        _NOTES.append(f"✅ 取得できた / 名前={dl.value.suggested_filename} / {len(data)}バイト")
+        print(_NOTES[-1])
+        return data
+    except Exception as e:  # noqa: BLE001
+        _NOTES.append(f"5分待っても来なかった: {type(e).__name__}")
+        print(_NOTES[-1])
+
+    # 押しても何も起きないなら、**そのボタンの正体をHTMLで見る**。
+    # disabled なのか、別の要素に覆われているのか、onclick が付いているのか。
+    # ここまで一度も見ていなかった。
+    html = session.page.evaluate(
+        r"""() => {
+        const out = [];
+        const norm = s => (s || '').replace(/\s/g, '');
+        for (const el of document.querySelectorAll('button, a, input, div[role=button]')) {
+            if (!el.offsetParent) continue;
+            if (!['ダウンロード', 'キャンセル', '全店'].includes(norm(el.innerText || el.value))) continue;
+            const r = el.getBoundingClientRect();
+            const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+            out.push({
+                html: el.outerHTML.replace(/\s+/g, ' ').slice(0, 300),
+                disabled: !!el.disabled,
+                onclick: !!el.onclick,
+                pe: getComputedStyle(el).pointerEvents,
+                // その座標で実際に前面にいる要素（覆われていないか）
+                topmost: top ? (top.tagName + '.' + (top.className || '').toString().slice(0, 40)) : null,
+                sameEl: top === el || (top && el.contains(top)),
+            });
+        }
+        return out;
+    }"""
+    )
+    print("――― ボタンの正体 ―――")
+    for h in html:
+        print(f"  disabled={h['disabled']} onclick={h['onclick']} pointer-events={h['pe']}")
+        print(f"  前面の要素={h['topmost']} 自分自身か={h['sameEl']}")
+        print(f"  {h['html']}")
+    _NOTES.append(f"ボタンの正体: {[{k: v for k, v in h.items() if k != 'html'} for h in html]}")
+
+def _watch_page(session) -> None:
+    """画面が出す合図を拾う。**押したのに何も起きない**の原因を掴むため。
+
+    Playwright は `alert` / `confirm` を既定で自動的に却下する。確認が
+    出ていれば黙って消されて処理が止まる。受け入れる側に倒す（読み取りの
+    画面で、押しているのは『ダウンロード』だけなので「はい」で困らない）。
+    あわせてコンソールのエラー・失敗した通信・download事象も記録する。
+    """
+    page = session.page
+
+    def _on_dialog(d):
+        _NOTES.append(f"画面の確認ダイアログ: {d.type} / {d.message[:80]!r} → 受け入れる")
+        print(_NOTES[-1])
+        try:
+            d.accept()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_console(m):
+        if m.type in ("error", "warning"):
+            _NOTES.append(f"コンソール {m.type}: {m.text[:120]}")
+
+    page.on("dialog", _on_dialog)
+    page.on("console", _on_console)
+    page.on("requestfailed", lambda r: _NOTES.append(f"通信が失敗: {r.url[:90]}"))
+    page.on("download", lambda d: _NOTES.append(f"download事象: {d.suggested_filename}"))
+
+
+def _wait_enabled(session, label: str, timeout: float = 90.0) -> bool:
+    """そのボタンが**押せる状態になる**まで待つ。
+
+    実測で『ダウンロード』は `disabled=True` だった。押せないボタンを
+    押しても何も起きないのは当然で、原因を外（覆い・座標・イベントの
+    信用度）に探して何回も無駄にした。**押す前に押せるか見る。**
+
+    読み込み中を示す `IMG.waiting` が消えるのも一緒に待つ。
+    """
+    start = time.monotonic()
+    last = None
+    while time.monotonic() - start < timeout:
+        st = session.page.evaluate(
+            r"""(want) => {
+            const norm = s => (s || '').replace(/\s/g, '');
+            let found = null;
+            for (const el of document.querySelectorAll('button, input[type=button], a')) {
+                if (!el.offsetParent) continue;
+                if (norm(el.innerText || el.value) !== want) continue;
+                found = {disabled: !!el.disabled,
+                         cls: (el.className || '').toString().slice(0, 40)};
+                break;
+            }
+            const busy = [...document.querySelectorAll('img.waiting, .waiting, .loading')]
+                .some(e => e.offsetParent !== null);
+            return {found, busy};
+        }""", label)
+        cur = (st["found"] or {}).get("disabled"), st["busy"]
+        if cur != last:
+            print(f"[分析コード] 『{label}』 disabled={cur[0]} 読込中={cur[1]}"
+                  f" （{time.monotonic() - start:.0f}秒）")
+            last = cur
+        if st["found"] and not st["found"]["disabled"] and not st["busy"]:
+            _NOTES.append(f"『{label}』が押せる状態になった（{time.monotonic() - start:.0f}秒）")
+            print(_NOTES[-1])
+            return True
+        time.sleep(1.0)
+    _NOTES.append(f"『{label}』は {timeout:.0f}秒たっても disabled={last[0] if last else '?'}"
+                  f" 読込中={last[1] if last else '?'}")
+    print(_NOTES[-1])
+    return False
+
+
+def _click_role_button(session, name: str) -> bool:
+    """role=button として名前で押す。Playwright の本物のクリック。"""
+    try:
+        loc = session.page.get_by_role("button", name=name, exact=True)
+        if loc.count() == 0:
+            return False
+        loc.first.click(timeout=8000)
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] role=button『{name}』: {type(e).__name__}")
+        return False
+
+
+def _click_at_text(session, label: str) -> bool:
+    """文字が完全一致する要素の**真ん中を座標でクリック**する。
+
+    セレクタで掴めていても、実際に当たっているのが別の要素（覆っている
+    透明な層など）のことがある。座標なら「画面で見えている場所」を押せる。
+    """
+    box = session.page.evaluate(
+        r"""(want) => {
+        for (const el of document.querySelectorAll('button, a, label, div[role=button], span, input')) {
+            if (!el.offsetParent) continue;
+            const t = ((el.innerText || el.value || '').replace(/\s/g, ''));
+            if (t !== want) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width < 2 || r.height < 2) continue;
+            return {x: r.x + r.width / 2, y: r.y + r.height / 2};
+        }
+        return null;
+    }""", label)
+    if not box:
+        return False
+    try:
+        session.page.mouse.click(box["x"], box["y"])
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] 座標クリック『{label}』: {type(e).__name__}")
+        return False
+
+
+def _click_real(session, label: str) -> bool:
+    """Playwright の**本物のクリック**で押す。
+
+    JS の `el.click()` は `isTrusted=false` の合成イベントで、
+    フレームワークのハンドラやダウンロードの経路が反応しないことがある。
+    実測では、ラジオを JS で押しても3つとも `checked=false` のままで、
+    その結果『ダウンロード』も何も起こさなかった。
+
+    ⚠️ 完全一致。この画面は押してよいものと**マスタを書き換えるもの**が
+       隣り合っている（CSV出力↔CSV取込、ダウンロード↔キャンセル）。
+    """
+    try:
+        loc = session.page.get_by_text(label, exact=True)
+        for i in range(min(loc.count(), 6)):
+            el = loc.nth(i)
+            if el.is_visible():
+                el.click(timeout=8000)
+                return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] 『{label}』の本物クリックに失敗: {type(e).__name__}")
+    return False
+
+
+def _check_radio_real(session, value: str) -> bool | None:
+    """ラジオを本物のクリックで選び、選べたかを読み直して返す。
+
+    見つからなければ None。**選べたことを読み直して確かめる**のは、
+    「全店のつもりで別の範囲を落とす」という静かな取り違えを防ぐため。
+    """
+    sel = f'input[type=radio][value="{value}"]'
+    try:
+        loc = session.page.locator(sel)
+        if loc.count() == 0:
+            return None
+        el = loc.first
+        try:
+            el.check(timeout=8000)
+        except Exception:  # noqa: BLE001
+            # 本体が隠れて label で操作する作りのこともある
+            el.click(timeout=8000, force=True)
+        return bool(el.is_checked())
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] ラジオ『{value}』を押せません: {type(e).__name__}")
+        return None
+
+
+def _click_exact(session, label: str) -> bool:
+    """文字が**完全一致**する見えている要素を押す。
+
+    この画面は `CSV出力`/`CSV取込`、`ダウンロード`/`キャンセル`、
+    `店舗`/`登録` が隣り合っている。部分一致や近傍で押すと
+    **マスタを書き換える側**に当たる。ここは必ず完全一致にすること。
+    """
+    return bool(session.page.evaluate(
+        r"""(want) => {
+        for (const el of document.querySelectorAll(
+                'button, a, label, input[type=button], input[type=submit], div[role=button], span')) {
+            if (!el.offsetParent) continue;
+            const t = ((el.innerText || el.value || '').replace(/\s/g, ''));
+            if (t === want) { el.click(); return true; }
+        }
+        return false;
+    }""", label))
+
+
+def _has_exact(session, label: str) -> bool:
+    """完全一致で見えている要素があるか。"""
+    return bool(session.page.evaluate(
+        r"""(want) => [...document.querySelectorAll('button, a, label, input[type=button], div[role=button], span')]
+              .some(el => el.offsetParent
+                       && (el.innerText || el.value || '').replace(/\s/g, '') === want)""",
+        label))
+
+
+def _grid_is_empty(session) -> bool:
+    """グリッドが「データなし」のままかを見る。
+
+    行数だけでは分からない。**空でも見出しと『データなし』で19行ある**ので、
+    `_wait_for_grid` は満足してしまう（実測でそうだった）。
+    """
+    try:
+        return bool(session.page.evaluate(
+            """() => /データなし|該当するデータ/.test(document.body.innerText || '')"""
+        ))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _dump_screen(session, when: str) -> None:
+    """その時点の押せるもの・入力欄・選択肢を位置つきで出す。
+
+    分析用コード設定は当て推量が続いたので、**1回のランで見られるものは
+    全部見る**。成果物は落とせない（blob storage が 403）ので標準出力に出す。
+    """
+    print(f"――― {when} ―――")
+    try:
+        info = session.page.evaluate(
+            r"""() => {
+            const clip = s => (s || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+            const vis = el => el.offsetParent !== null;
+            const btns = [];
+            for (const el of document.querySelectorAll(
+                    'button, a, input[type=button], input[type=submit], div[role=button], label')) {
+                if (!vis(el)) continue;
+                const t = clip(el.innerText || el.value);
+                if (!t) continue;
+                const r = el.getBoundingClientRect();
+                // 上部のナビ（TOP/販売管理/…）は毎回同じで、**肝心の行を
+                // ログの末尾から押し出す**。実行環境ではログの末尾しか
+                // 読めないので、画面本体だけに絞る。
+                if (r.y < 60) continue;
+                btns.push({t, tag: el.tagName.toLowerCase(),
+                           x: Math.round(r.x), y: Math.round(r.y)});
+            }
+            const inputs = [];
+            for (const el of document.querySelectorAll('input, select, textarea')) {
+                if (!vis(el)) continue;
+                const r = el.getBoundingClientRect();
+                inputs.push({tag: el.tagName.toLowerCase(), type: el.type || '',
+                             val: clip(el.value), ph: clip(el.placeholder),
+                             name: clip(el.name), x: Math.round(r.x), y: Math.round(r.y)});
+            }
+            const dialogs = [...document.querySelectorAll(
+                '[role=dialog], .modal, .dialog, .v-dialog, .popup')]
+                .filter(vis).map(d => clip(d.innerText)).slice(0, 6);
+            return {url: location.href, btns: btns.slice(0, 14),
+                    inputs: inputs.slice(0, 12), dialogs,
+                    empty: /データなし/.test(document.body.innerText || '')};
+        }"""
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"  画面を読めませんでした: {type(e).__name__}: {e}")
+        return
+    print(f"  url={info['url']}  データなし={info['empty']}")
+    print(f"  押せるもの {len(info['btns'])}件:")
+    for b in info["btns"]:
+        print(f"    {b['tag']:<6} x={b['x']:>4} y={b['y']:>4}  {b['t']}")
+    print(f"  入力欄 {len(info['inputs'])}件:")
+    for i in info["inputs"]:
+        print(f"    {i['tag']}/{i['type']:<8} x={i['x']:>4} y={i['y']:>4}"
+              f"  値={i['val']!r} 名={i['name']!r} ヒント={i['ph']!r}")
+    if info["dialogs"]:
+        print(f"  ダイアログらしきもの {len(info['dialogs'])}件:")
+        for d in info["dialogs"]:
+            print(f"    {d}")
+
+
+def analysis_code_summary(rows: list[list[str]]) -> dict | None:
+    """CSVの行から「分析用コードの埋まり具合」を出す。
+
+    **何を入力漏れとみなすかの判断はここだけ**にまとめ、印字と切り離す。
+    店長会資料はコードの上に乗っていて、付け忘れたメニューは消えずに
+    アラカルトに紛れ込むので、ここの判定を間違えると静かに嘘をつく。
+
+    実測の見出し（`画面表示` で落としたCSV）:
+
+        店舗コード | 店舗名 | メニューコード | 名称 | 標準税率10%込 |
+        軽減税率8%込 | 税抜 | 原価 | 部門コード | 部門名称 |
+        グループコード | グループ名称 | 消費税 | ユーザーコード | 分析用コード
+
+    ⚠️ **列は名前で探すこと。** メニュー名を1列目と決め打ちしていたら、
+       そこは `店舗名` で、漏れの一覧に店名が78個並んだ（実際に出した）。
+       どの列も見出しの**完全一致**で引く。部分一致だとタイトル行の
+       「分析用コード設定」に当たって全部ずれる。
+    """
+    def _norm(c: str | None) -> str:
+        return "".join((c or "").split())
+
+    head_i = head = None
+    for i, row in enumerate(rows[:5]):
+        if any(_norm(c) == "分析用コード" for c in row):
+            head_i, head = i, row
+            break
+    if head is None:
+        return None
+
+    def _col(name: str) -> int | None:
+        for j, c in enumerate(head):
+            if _norm(c) == name:
+                return j
+        return None
+
+    col = _col("分析用コード")
+    name_col = _col("名称")
+    store_col = _col("店舗コード")
+    store_name_col = _col("店舗名")
+    if name_col is None:                 # 見出しが変わったときの保険
+        name_col = 1 if len(head) > 1 else 0
+
+    body = [r for r in rows[head_i + 1:] if any((c or "").strip() for c in r)]
+
+    def _at(r: list[str], j: int | None) -> str:
+        return (r[j] or "").strip() if j is not None and len(r) > j else ""
+
+    blank: list[dict] = []
+    by_store: dict[str, int] = {}
+    codes: set[str] = set()
+    for r in body:
+        code = _at(r, col)
+        if code:
+            codes.add(code)
+            continue
+        store = _at(r, store_col)
+        blank.append({
+            "store_code": store.lstrip("0"),
+            "store_name": _at(r, store_name_col),
+            "menu": _at(r, name_col),
+        })
+        by_store[store.lstrip("0")] = by_store.get(store.lstrip("0"), 0) + 1
+
+    return {
+        "header_row": head_i,
+        "col": col,
+        "name_col": name_col,
+        "store_col": store_col,
+        "total": len(body),
+        "filled": len(body) - len(blank),
+        "blank": blank,
+        "by_store": by_store,
+        "codes": sorted(codes, key=lambda c: (len(c), c)),
+    }
+
+
+def _describe_analysis_csv(data: bytes) -> None:
+    """落ちてきたCSVの形だけを出す。
+
+    ⚠️ **中身の金額は出さない。** この画面には単価と原価が載っていて、
+    このリポジトリは公開。ログに出すのは列名・行数・コードの埋まり具合と、
+    コードが空のメニュー名だけにする。
+    """
+    import csv as _csv
+    import io as _io
+
+    text, enc = None, None
+    for cand in ("cp932", "utf-8-sig", "utf-8", "euc_jp"):
+        try:
+            text = data.decode(cand)
+            enc = cand
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        print("[分析コード] 文字コードを判別できませんでした")
+        return
+    rows = list(_csv.reader(_io.StringIO(text)))
+    print(f"[分析コード] 文字コード={enc} / {len(rows)}行")
+    for i, r in enumerate(rows[:3]):
+        print(f"    見出し候補 {i}: {r}")
+
+    got = analysis_code_summary(rows)
+    if got is None:
+        print("[分析コード] 『分析用コード』の列が見出しに見つかりません")
+        return
+    print(f"[分析コード] 分析用コード={got['col']}列 / 名称={got['name_col']}列"
+          f" / 店舗コード={got['store_col']}列")
+    print(f"[分析コード] メニュー {got['total']}行 / コード有り {got['filled']}"
+          f" / 空 {len(got['blank'])}")
+    print(f"[分析コード] 使われているコード {len(got['codes'])}種: {got['codes']}")
+    if got["by_store"]:
+        print("[分析コード] 店ごとのコード未設定:")
+        for code, n in sorted(got["by_store"].items(), key=lambda kv: -kv[1]):
+            print(f"    {code}\t{n}件")
+    for b in got["blank"][:15]:
+        print(f"    コード空: {b['store_code']} {b['menu'][:30]}")
+
+
+def audit_analysis_codes(
+    artifacts: Path,
+    master,
+    warehouse=None,
+    *,
+    store_filter: str = "",
+    store_limit: int | None = None,
+    months: int = 3,
+) -> int:
+    """全店の分析用コードの入力漏れを調べ、あれば赤くする。FWには書き込まない。
+
+    店長会資料はコード1〜28の上に乗っていて、アラカルトは
+
+        アラカルト = 総数 －宴会 －ランチ －食べ飲み －ツアー －単品飲み放題 －テイクアウト
+
+    という引き算で出る。**コードを付け忘れたメニューは消えずにアラカルトへ
+    紛れ込む**ので、どこも空欄にならず資料は完成して見える。だから人が
+    気づけない。ここで赤くするのが唯一の防波堤。
+
+    ⚠️ `全店` でのCSV出力は130店ぶんで、5分待っても落ちてこなかった。
+       1店ずつ `画面表示` で落とす。ログインは1回なので実行時間は許容範囲。
+    ⚠️ この画面は『登録』『CSV取込』でマスタを書き換えられる。触らない。
+    """
+    from .fw_budget import _select_combo
+
+    key = (store_filter or "").strip()
+    per_store: list[dict] = []
+    failures: list[str] = []
+
+    with fw_session(artifacts) as session:
+        _watch_page(session)
+        options = _open_and_wait_combo(session)
+        print(f"[分析コード] 店舗コンボ {len(options)}件")
+
+        active = {s.store_code: s for s in master.active}
+        targets, not_fw = [], []
+        for opt in options:
+            code = opt["value"].lstrip("0")
+            st = active.get(code) or master.find_by_name(opt["name"])
+            if not (st and st.active):
+                continue
+            # ⚠️ FW未連動の店（1766＝uレジ）はFWにメニューが無い。取れなくて
+            #    当たり前なので、**取り漏れとして赤くしない**。黙って飛ばすのも
+            #    違うので、理由を添えて別に数える。カバレッジと同じ扱い。
+            if getattr(st, "pos", "fw") != "fw":
+                not_fw.append(st)
+                continue
+            targets.append((opt, st))
+        for st in not_fw:
+            print(f"  ― {st.store_code} {st.store_name[:14]}  "
+                  f"FW未連動（メニューはFWに無い）ので対象外")
+        if key:
+            targets = [(o, s) for o, s in targets
+                       if s.store_code == key.lstrip("0") or key in s.store_name]
+        if store_limit:
+            targets = targets[:store_limit]
+        print(f"[分析コード] 対象 {len(targets)}店")
+        if not targets:
+            print("::error::[分析コード] 対象の店が1件もありません")
+            return 1
+
+        for opt, st in targets:
+            label = f"{st.store_code} {st.store_name[:14]}"
+            try:
+                if not _select_combo(session, opt["value"]):
+                    raise RuntimeError("店舗コンボから選べない")
+                if not _commit_store(session):
+                    raise RuntimeError("グリッドに中身が出ない")
+                data = _download_analysis_csv(session)
+                if data is None:
+                    raise RuntimeError("CSVが落ちてこない")
+                got = analysis_code_summary(_read_csv_rows(data))
+                if got is None:
+                    raise RuntimeError("『分析用コード』の列が無い")
+            except Exception as e:  # noqa: BLE001
+                print(f"  ✗ {label}  {type(e).__name__}: {str(e)[:60]}")
+                failures.append(st.store_code)
+                continue
+            per_store.append({"store": st, "got": got})
+            n = len(got["blank"])
+            mark = "⚠" if n else "✓"
+            print(f"  {mark} {label}  メニュー {got['total']}件 / 未設定 {n}件")
+
+    # 直近の商品別売上と突き合わせ、**実際に売れているもの**だけを赤にする。
+    # `お冷`・`コピー`・`-` のような売れないメニューまで赤にすると、
+    # 一覧が2701件になって誰も着手しない（実際そうなった）。
+    sold, judged = _sold_menu_keys(
+        warehouse, [p["store"].store_code for p in per_store], months)
+    return _report_analysis_codes(per_store, failures, sold=sold, judged=judged)
+
+
+def _read_csv_rows(data: bytes) -> list[list[str]]:
+    """落ちてきたCSVを行の並びにする。文字コードは総当たりで決める。"""
+    import csv as _csv
+    import io as _io
+
+    for cand in ("cp932", "utf-8-sig", "utf-8", "euc_jp"):
+        try:
+            return list(_csv.reader(_io.StringIO(data.decode(cand))))
+        except UnicodeDecodeError:
+            continue
+    return []
+
+
+def menu_key(name: str) -> str:
+    """メニュー名の突き合わせキー。全角/半角・空白の揺れを吸収する。
+
+    FWのABC側と分析用コード設定側で表記が微妙に違うことがあるので、
+    店名の `store_key` と同じ考え方で寄せる。
+    """
+    import unicodedata
+
+    s = unicodedata.normalize("NFKC", str(name or ""))
+    return "".join(s.split()).casefold()
+
+
+def _sold_menu_keys(warehouse, store_codes, months: int):
+    """直近 months ヶ月に**売れた**メニューの鍵を店ごとに集める。
+
+    返り値は (売れた鍵の集合, 判定できた店の集合)。
+
+    ⚠️ **売上データが1件も無い店を「売れていない」と扱わない。** そうすると
+       ABCが未取得なだけの店が全部「影響なし」になり、静かに見逃す。
+       判定できた店だけを `judged` に入れ、それ以外は要確認として扱う。
+    """
+    if warehouse is None:
+        return set(), set()
+    from datetime import date as _date
+
+    from ..db.warehouse import AggregateQuery
+    from ..model import GRAIN_MONTH, METRIC_PRODUCT_SALES
+
+    today = _date.today()
+    y, m = today.year, today.month
+    for _ in range(max(months, 1)):
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    start = _date(y, m, 1)
+    end = _date(today.year + (today.month == 12), 1 if today.month == 12 else today.month + 1, 1)
+
+    sold: set[tuple[str, str]] = set()
+    judged: set[str] = set()
+    try:
+        for row in warehouse.aggregate(AggregateQuery(
+            date_from=start, date_to=end, grain=GRAIN_MONTH,
+            metrics=[METRIC_PRODUCT_SALES], store_codes=list(store_codes),
+            group_by=("store_code", "product_name"),
+        )):
+            code = str(row.get("store_code") or "")
+            judged.add(code)
+            if (row.get("value") or 0) > 0 and row.get("product_name"):
+                sold.add((code, menu_key(row["product_name"])))
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] 商品別売上を読めませんでした: {type(e).__name__}: {e}")
+        return set(), set()
+    print(f"[分析コード] 直近{months}ヶ月の商品別売上: {len(judged)}店 / {len(sold)}品")
+    return sold, judged
+
+
+def classify_blank(blank: dict, sold: set, judged: set) -> str:
+    """コード未設定のメニュー1件を仕分ける。
+
+    - "売れた"   … 直近に売上がある。**資料の数字が狂っている**ので要対応
+    - "売れてない" … 売上が無い。アラカルトに紛れても影響しない
+    - "判定不能" … その店の商品別売上が無く、判断できない。**見逃さないため
+                   に赤の側に寄せる**（「売れてない」に倒すと静かに見逃す）
+    """
+    code = blank.get("store_code") or ""
+    if code not in judged:
+        return "判定不能"
+    return "売れた" if (code, menu_key(blank.get("menu", ""))) in sold else "売れてない"
+
+
+def _report_analysis_codes(per_store: list[dict], failures: list[str],
+                           *, sold: set | None = None,
+                           judged: set | None = None) -> int:
+    """結果をまとめて出し、赤くするかを決める。
+
+    **赤にするのは「売れているのにコードが無い」ものだけ。** 全部を赤に
+    すると一覧が2701件になり、`お冷` や `コピー` が混じったまま誰も着手
+    しない（実際そうなった）。売れていないメニューはアラカルトに紛れても
+    影響しないので、数だけ出す。
+
+    ⚠️ 商品別売上が無くて**判定できなかった店は赤の側**に寄せる。
+       「売れてない」に倒すと、ABCが未取得なだけの店を静かに見逃す。
+
+    ⚠️ **金額は出さない。** この画面には単価と原価が載っていて、この
+       リポジトリは公開。出すのはメニュー名と件数だけにする。
+    """
+    sold = sold or set()
+    judged = judged or set()
+    print("")
+    print("=== 分析用コードの入力漏れ ===")
+
+    rows: list[tuple] = []          # (店, 要対応, 判定不能, 影響なし, 要対応の名前)
+    for p in per_store:
+        st, got = p["store"], p["got"]
+        buckets: dict[str, list[str]] = {"売れた": [], "判定不能": [], "売れてない": []}
+        for b in got["blank"]:
+            buckets[classify_blank(b, sold, judged)].append(b["menu"])
+        rows.append((st, got, buckets))
+
+    need = [(st, got, bk) for st, got, bk in rows if bk["売れた"] or bk["判定不能"]]
+    # 明細は上位5店だけ。全店ぶん出すとログの末尾が明細で埋まる。
+    # 全体像は下の順位表で見る。
+    ordered = sorted(need, key=lambda r: -(len(r[2]["売れた"]) + len(r[2]["判定不能"])))
+    for st, got, bk in ordered[:5]:
+        head = f"  ⚠ {st.store_code} {st.store_name[:16]:<16} {got['total']}件中 "
+        parts = []
+        if bk["売れた"]:
+            parts.append(f"売れているのに未設定 {len(bk['売れた'])}件")
+        if bk["判定不能"]:
+            parts.append(f"判定不能 {len(bk['判定不能'])}件")
+        if bk["売れてない"]:
+            parts.append(f"（売れていない {len(bk['売れてない'])}件は影響なし）")
+        print(head + " / ".join(parts))
+        for nm in (bk["売れた"] or bk["判定不能"])[:8]:
+            print(f"        {nm[:34]}")
+        rest = len(bk["売れた"] or bk["判定不能"]) - 8
+        if rest > 0:
+            print(f"        …ほか {rest}件")
+
+    clean = [r for r in rows if not (r[2]["売れた"] or r[2]["判定不能"])]
+    if clean:
+        harmless = sum(len(r[2]["売れてない"]) for r in clean)
+        note = f"（売れていない未設定 {harmless}件は影響なし）" if harmless else ""
+        print(f"  ✓ 対応不要 {len(clean)}店: "
+              f"{', '.join(r[0].store_code for r in clean)} {note}")
+
+    # ⚠️ **順位表は明細のあとに置く。** 実行環境ではログの末尾しか読めず、
+    #    明細（1店あたり最大9行）が長いので、先に出すと上位の店が
+    #    押し出されて見えない。実際に1375件中244件ぶんしか読めなかった。
+    ranked = [(st, len(bk["売れた"]), len(bk["判定不能"]), len(bk["売れてない"]))
+              for st, _, bk in rows]
+    ranked.sort(key=lambda r: (-r[1], -r[2]))
+    print("")
+    print("--- 要対応の多い順 ---")
+    for st, n_s, n_u, n_h in ranked:
+        if not (n_s or n_u):
+            continue
+        extra = f" / 判定不能 {n_u}" if n_u else ""
+        print(f"  {st.store_code} {st.store_name[:16]:<16} 要対応 {n_s:>4}件{extra}"
+              f"  （影響なし {n_h}）")
+
+    n_sold = sum(len(bk["売れた"]) for _, _, bk in rows)
+    n_unknown = sum(len(bk["判定不能"]) for _, _, bk in rows)
+    n_harmless = sum(len(bk["売れてない"]) for _, _, bk in rows)
+    total_menu = sum(got["total"] for _, got, _ in rows)
+    print(f"=== 調べた {len(rows)}店 / メニュー {total_menu}件 / 未設定 "
+          f"{n_sold + n_unknown + n_harmless}件 "
+          f"（要対応 {n_sold} / 判定不能 {n_unknown} / 影響なし {n_harmless}）===")
+
+    if failures:
+        print(f"::error::[分析コード] 調べられなかった店 {len(failures)}件: {failures}")
+    if n_sold:
+        print(f"::error::[分析コード] **売れているのに分析用コードが無い**メニューが "
+              f"{n_sold}件あります。このぶんの売上は店長会資料でアラカルトに"
+              f"紛れ込み、宴会・ランチ・ツアー等の数字が実際より小さく出ます")
+    if n_unknown:
+        print(f"::error::[分析コード] 商品別売上が無く判定できないメニューが "
+              f"{n_unknown}件あります（その店のABCが未取得の可能性）")
+    if failures or n_sold or n_unknown:
+        return 1
+    if n_harmless:
+        print(f"売れているメニューの取りこぼしはありません"
+              f"（売れていない未設定 {n_harmless}件は影響なし）。")
+    else:
+        print("分析用コードの入力漏れはありません。")
     return 0

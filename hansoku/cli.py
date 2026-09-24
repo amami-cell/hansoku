@@ -317,24 +317,6 @@ def cmd_fw_stores(args: argparse.Namespace) -> int:
     return list_stores(Path(args.artifacts))
 
 
-def cmd_fw_analysis(args: argparse.Namespace) -> int:
-    from .ingest.fw_analysis import ingest, probe
-
-    if getattr(args, "mode", "probe") == "ingest":
-        settings = load_settings()
-        with get_appdb(settings) as db:
-            db.ensure_schema()
-            active = set(db.active_store_codes())
-            return ingest(
-                Path(args.artifacts),
-                db,
-                active,
-                dry_run=bool(getattr(args, "dry_run", False)),
-                limit=getattr(args, "limit", None),
-            )
-    return probe(Path(args.artifacts))
-
-
 def cmd_fw_budget(args: argparse.Namespace) -> int:
     from .ingest.fw_budget import ingest, probe
 
@@ -612,6 +594,28 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
         )
     if args.mode == "report":
         return report_probe(Path(args.artifacts), args.menu or "損益管理,実績管理業務,月別日別実績")
+    if args.mode == "analysis-code-audit":
+        # 診断＋警報。FWには書き込まない（押すのは CSV出力 とダウンロードだけ）。
+        from .ingest.fw_daily import audit_analysis_codes
+
+        # 商品別売上と突き合わせるので warehouse を開く（読むだけ）。
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return audit_analysis_codes(
+                Path(args.artifacts),
+                master,
+                warehouse,
+                store_filter=args.abc_store or "",
+                store_limit=args.limit,
+            )
+    if args.mode == "analysis-code-probe":
+        # 診断のみ。DBにもFWにも書き込まない（押すのは CSV出力 だけ）。
+        from .ingest.fw_daily import probe_analysis_codes
+
+        return probe_analysis_codes(
+            Path(args.artifacts), StoreMaster.load(args.stores), store=args.abc_store or ""
+        )
     if args.mode in ("monthly", "monthly-dry"):
         settings = load_settings()
         master = StoreMaster.load(args.stores)
@@ -1007,15 +1011,6 @@ def build_parser() -> argparse.ArgumentParser:
     fwstores.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
     fwstores.set_defaults(func=cmd_fw_stores)
 
-    fwanalysis = sub.add_parser(
-        "fw-analysis", help="FW『分析用コード設定』（商品→分析用コード）を調べる/取り込む"
-    )
-    fwanalysis.add_argument("--mode", choices=["probe", "ingest"], default="probe")
-    fwanalysis.add_argument("--dry-run", action="store_true", help="ingest: 保存せず件数だけ")
-    fwanalysis.add_argument("--limit", type=int, default=None, help="ingest: 先頭N店だけ")
-    fwanalysis.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
-    fwanalysis.set_defaults(func=cmd_fw_analysis)
-
     fwbudget = sub.add_parser(
         "fw-budget", help="FW月別予算登録から売上予算を取り込む"
     )
@@ -1042,7 +1037,8 @@ def build_parser() -> argparse.ArgumentParser:
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
                  "abc-dom-probe", "uriage-probe", "monthly-coverage",
                  "abc-detail", "data-audit", "source-audit", "abc-campaign",
-                 "gelato-switch"],
+                 "gelato-switch", "analysis-code-probe",
+                 "analysis-code-audit"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument(
