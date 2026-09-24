@@ -4100,7 +4100,7 @@ def _commit_store(session, timeout: float = 60.0) -> bool:
     return False
 
 
-def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
+def _download_analysis_csv(session, scope: str = "画面表示") -> bytes | None:
     """『CSV出力』→ ダイアログで範囲を選ぶ → 『ダウンロード』。
 
     `CSV出力` はその場で落ちてこない。**ダイアログが開く**（実測）。
@@ -4108,8 +4108,10 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
         画面表示 / 全店 / 店舗選択   ←ラジオ
         ダウンロード | キャンセル
 
-    既定は `全店`。130店ぶん一度に落ちるので、**23店を1店ずつ回さずに済む**。
-    どの店の行かはCSVの中で見分ける。
+    既定は `画面表示`（いま出している1店ぶん）。`全店` は130店ぶんで、
+    押しても5分でCSVが来なかった（押下自体は効いていて、ボタンが
+    無効化される＝処理は走っている）。**まず軽いほうで経路を通す。**
+    1店ずつでも、ログインは1回で23店まわせる。
 
     ⚠️ 押してよいのは `CSV出力` と `ダウンロード` だけ。すぐ隣に
        `CSV取込`(x=530) と `キャンセル`(x=652) があるので**完全一致**で探す。
