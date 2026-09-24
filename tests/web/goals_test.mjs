@@ -197,7 +197,9 @@ await test("部門別・商品・予算達成率の目標が集計できる（�
   const { call } = loadForm(d);
   const ms = `["2026-07","2026-08"]`;
   assert.equal(call(`_metricOverMonths("dept_sales#コース","1160",${ms})`), 600000, "部門別売上＝選んだ区分の合算");
-  assert.equal(call(`_metricOverMonths("dept_qty#コース","1160",${ms})`), 400, "部門別数量＝qtyの合算");
+  // 出数は1日A/V＝Σqty(200+200=400) ÷ Σ暦日(31+31=62) = 6.45 → 6
+  assert.equal(call(`_metricOverMonths("dept_qty#コース","1160",${ms})`), 6, "部門別出数＝1日A/V（合計qty÷暦日）");
+  assert.equal(call(`TARGET_METRICS.find(m=>m.key==="dept_qty").daily`), true, "部門別出数はA/V（daily）指標");
   assert.equal(call(`_metricOverMonths("dept_share#アラカルト","1160",${ms})`), 50, "部門構成比＝区分売上/総売上");
   assert.equal(call(`_metricOverMonths("dept_avg_check#アラカルト","1160",${ms})`), 1250, "部門別客単価＝売上/数量");
   assert.equal(call(`_metricOverMonths("prod_sales#刺身盛合せ","1160",${ms})`), 250000, "商品の売上＝選んだ商品の合算");
