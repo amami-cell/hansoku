@@ -336,7 +336,7 @@ jobs:
             elif [ "${{ inputs.mode }}" = "analysis-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-analysis --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "analysis-dry" ]; then
-              xvfb-run -a python -m hansoku.cli fw-analysis --mode ingest --dry-run --limit 2 --artifacts fw-artifacts
+              xvfb-run -a python -m hansoku.cli fw-analysis --mode ingest --dry-run --limit 3 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "analysis-ingest" ]; then
               xvfb-run -a python -m hansoku.cli fw-analysis --mode ingest --artifacts fw-artifacts
             else
