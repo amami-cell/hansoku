@@ -43,6 +43,8 @@ on:
           - abc-campaign
           - gelato-switch
           - analysis-probe
+          - analysis-dry
+          - analysis-ingest
         default: explore
       runner:
         description: '実行環境: hosted=GitHub提供(無料枠を消費) / self-hosted=自前ランナー(枠を消費しない)'
@@ -333,6 +335,10 @@ jobs:
                 --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "analysis-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-analysis --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "analysis-dry" ]; then
+              xvfb-run -a python -m hansoku.cli fw-analysis --mode ingest --dry-run --limit 2 --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "analysis-ingest" ]; then
+              xvfb-run -a python -m hansoku.cli fw-analysis --mode ingest --artifacts fw-artifacts
             else
               xvfb-run -a python -m hansoku.cli fw-explore $args --artifacts fw-artifacts
             fi

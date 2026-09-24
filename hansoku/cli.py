@@ -318,8 +318,20 @@ def cmd_fw_stores(args: argparse.Namespace) -> int:
 
 
 def cmd_fw_analysis(args: argparse.Namespace) -> int:
-    from .ingest.fw_analysis import probe
+    from .ingest.fw_analysis import ingest, probe
 
+    if getattr(args, "mode", "probe") == "ingest":
+        settings = load_settings()
+        with get_appdb(settings) as db:
+            db.ensure_schema()
+            active = set(db.active_store_codes())
+            return ingest(
+                Path(args.artifacts),
+                db,
+                active,
+                dry_run=bool(getattr(args, "dry_run", False)),
+                limit=getattr(args, "limit", None),
+            )
     return probe(Path(args.artifacts))
 
 
@@ -996,8 +1008,11 @@ def build_parser() -> argparse.ArgumentParser:
     fwstores.set_defaults(func=cmd_fw_stores)
 
     fwanalysis = sub.add_parser(
-        "fw-analysis", help="FW『分析用コード設定』（商品→分析用コード）を調べる"
+        "fw-analysis", help="FW『分析用コード設定』（商品→分析用コード）を調べる/取り込む"
     )
+    fwanalysis.add_argument("--mode", choices=["probe", "ingest"], default="probe")
+    fwanalysis.add_argument("--dry-run", action="store_true", help="ingest: 保存せず件数だけ")
+    fwanalysis.add_argument("--limit", type=int, default=None, help="ingest: 先頭N店だけ")
     fwanalysis.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
     fwanalysis.set_defaults(func=cmd_fw_analysis)
 

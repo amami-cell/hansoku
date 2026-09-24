@@ -201,6 +201,81 @@ def _capture_csv(session, artifacts: Path) -> str | None:
         return None
 
 
+_SELECT_STORE_JS = r"""(code) => {
+    const btn = document.querySelector('.dropdown-btn.enabledbutton');
+    if (btn) btn.click();
+    const li = [...document.querySelectorAll('li.option')]
+        .find(o => (o.getAttribute('value') || '').trim() === code);
+    if (li) { li.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true})); return true; }
+    return false;
+}"""
+
+
+def _store_options(session) -> list[dict]:
+    return session.page.evaluate(
+        """() => [...document.querySelectorAll('li.option')]
+            .map(li => ({code: (li.getAttribute('value')||'').trim(), name: (li.textContent||'').trim()}))
+            .filter(s => s.code)"""
+    )
+
+
+def _wait_grid(session, tries: int = 15) -> bool:
+    for _ in range(tries):
+        time.sleep(1.5)
+        if len(session.page.evaluate(_EXTRACT_JS)) >= 3:
+            return True
+    return False
+
+
+def ingest(artifacts: Path, db, active_codes: set[str], *, dry_run: bool = False, limit: int | None = None) -> int:
+    """イニシエート（active）店の 商品→分析用コード を全店読み取り、Neon に保存。"""
+    with fw_session(artifacts) as session:
+        for label in NAV:
+            if not session.click_text(label):
+                session.snapshot(f"missing_{label}")
+                print(f"⚠ 「{label}」が見つかりませんでした。")
+                return 1
+        time.sleep(2)
+        stores = _store_options(session)
+        # FWコード(0001006) → アプリコード(1006)。active（イニシエート）だけに絞る。
+        targets = []
+        for s in stores:
+            try:
+                app = str(int(s["code"]))
+            except ValueError:
+                continue
+            if app in active_codes:
+                targets.append({"app": app, **s})
+        if limit:
+            targets = targets[:limit]
+        print(f"=== 対象（イニシエート）{len(targets)}店 / FW全体 {len(stores)}店 ===")
+
+        grand_rows = grand_missing = 0
+        for s in targets:
+            if not session.page.evaluate(_SELECT_STORE_JS, s["code"]):
+                print(f"⚠ {s['app']} {s['name']}：店舗選択に失敗。スキップ。")
+                continue
+            _wait_grid(session)
+            rows = _collect_all_rows(session)
+            recs = [
+                {
+                    "product_code": r["cd"],
+                    "product_name": r["name"],
+                    "analysis_code": int(r["code"]) if r["code"] else None,
+                }
+                for r in rows
+                if r["cd"]
+            ]
+            missing = sum(1 for r in recs if r["analysis_code"] is None)
+            if not dry_run and recs:
+                db.replace_analysis_codes(s["app"], recs)
+            grand_rows += len(recs)
+            grand_missing += missing
+            print(f"  {s['app']} {s['name']}: {len(recs)}件 / 未入力 {missing}件 {'(dry-run)' if dry_run else '→ 保存'}")
+        print(f"\n=== 合計 {len(targets)}店 / {grand_rows}件 / 未入力 {grand_missing}件 {'(dry-run・未保存)' if dry_run else '保存済み'} ===")
+    return 0
+
+
 def probe(artifacts: Path) -> int:
     with fw_session(artifacts) as session:
         for label in NAV:

@@ -132,6 +132,44 @@ class AppDb:
             ]
         return sorted({r["store_code"] for r in rows})
 
+    def active_store_codes(self) -> list[str]:
+        """稼働中（イニシエート）の店舗コード一覧。"""
+        return [
+            r["store_code"]
+            for r in self.query("SELECT store_code FROM m_stores WHERE active ORDER BY store_code")
+        ]
+
+    # ── 分析用コード（商品→分析用コード） ────────────────────────────────
+    def replace_analysis_codes(self, store_code: str, rows: Iterable[dict]) -> int:
+        """1店ぶんの 商品→分析用コード を丸ごと入れ替える（消えた商品も反映）。
+        rows: {product_code, product_name, analysis_code(int|None)} の並び。"""
+        rows = [r for r in rows if r.get("product_code")]
+        with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM analysis_codes WHERE store_code = %s", (store_code,))
+            if rows:
+                cur.executemany(
+                    """
+                    INSERT INTO analysis_codes
+                        (store_code, product_code, product_name, analysis_code, updated_at)
+                    VALUES (%s, %s, %s, %s, now())
+                    ON CONFLICT (store_code, product_code) DO UPDATE SET
+                        product_name  = EXCLUDED.product_name,
+                        analysis_code = EXCLUDED.analysis_code,
+                        updated_at    = now()
+                    """,
+                    [
+                        (
+                            store_code,
+                            r["product_code"],
+                            r.get("product_name", ""),
+                            r.get("analysis_code"),
+                        )
+                        for r in rows
+                    ],
+                )
+        self.conn.commit()
+        return len(rows)
+
     def grant(self, email: str, store_code: str, role: str) -> None:
         self.execute(
             """
