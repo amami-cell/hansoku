@@ -232,22 +232,35 @@ def _combo_state(session) -> str:
     )
 
 
-def _select_store(session, code: str, name: str, *, tries: int = 8) -> bool:
+def _select_store(session, code: str, name: str, *, tries: int = 6) -> bool:
     """店舗を選び、コンボの表示（combobox-cont の title）が目的店に変わるまで確認する。
 
-    切替が効かないまま読むと『前店の行を別店コードで保存』する事故になるため、
-    表示が変わったことを必ず確かめる。選択だけでは表（グリッド）が再読込されない
-    ので、選択のあと Enter を送って確定させる（診断で Enter 併用時に新店の行が
-    出ることを確認済み）。ドロップダウンの初期化待ちを兼ねてリトライ。
+    合成イベント（dispatchEvent）だと表示は変わるが Angular のグリッド再読込が
+    走らない。Playwright の実クリックは trusted イベントなので、開いた
+    ドロップダウンの li を実際にクリックして選ぶ。切替が効かないまま読むと
+    『前店の行を別店コードで保存』する事故になるため、表示が目的店に変わった
+    ことを必ず確かめる。
     """
+    page = session.page
     for _ in range(tries):
-        session.page.evaluate(_SELECT_STORE_JS, code)
+        # ドロップダウンを開く（実クリック）。
         try:
-            session.page.keyboard.press("Enter")
+            btn = page.locator(".dropdown-btn.enabledbutton")
+            if btn.count():
+                btn.first.click(timeout=4000, force=True)
         except Exception:
             pass
+        time.sleep(0.5)
+        # 目的の li を実クリック（trusted → Angular の選択＆再読込が走る）。
+        try:
+            li = page.locator(f'li.option[value="{code}"]')
+            if li.count():
+                li.first.click(timeout=4000, force=True)
+        except Exception:
+            # 実クリックが当たらないときだけ合成イベントで粘る。
+            session.page.evaluate(_SELECT_STORE_JS, code)
         for _ in range(4):
-            time.sleep(0.7)
+            time.sleep(0.6)
             title = _combo_state(session)
             if title and (title == name or name in title or title in name):
                 return True
