@@ -64,20 +64,23 @@ _SCROLL_JS = r"""() => {
 }"""
 
 
+def _scroll_grid_top(session) -> None:
+    """グリッド上でホイールを上へ送り、一番上まで戻す（店切替後の残スクロール対策）。"""
+    try:
+        session.page.mouse.move(700, 450)
+        for _ in range(6):
+            session.page.mouse.wheel(0, -20000)
+            time.sleep(0.1)
+    except Exception:
+        pass
+
+
 def _collect_all_rows(session, *, max_steps: int = 500) -> list[dict]:
     """グリッドを最後まで送りながら全行を集める（商品CDで重複排除）。
     仮想スクロールなので、グリッド上にマウスを置いてホイールで送る（container 探索より確実）。"""
     page = session.page
     seen: dict[str, dict] = {}
-    try:
-        page.mouse.move(700, 450)
-        # 店を切り替えた直後はスクロール位置が前店のまま残ることがあるので、
-        # まず一番上まで戻してから下へ送る（先頭行を取りこぼさない）。
-        for _ in range(6):
-            page.mouse.wheel(0, -20000)
-            time.sleep(0.1)
-    except Exception:
-        pass
+    _scroll_grid_top(session)   # 先頭行を取りこぼさない
     stagnant = 0
     for _ in range(max_steps):
         for r in page.evaluate(_EXTRACT_JS):
@@ -233,10 +236,16 @@ def _select_store(session, code: str, name: str, *, tries: int = 8) -> bool:
     """店舗を選び、コンボの表示（combobox-cont の title）が目的店に変わるまで確認する。
 
     切替が効かないまま読むと『前店の行を別店コードで保存』する事故になるため、
-    表示が変わったことを必ず確かめる。ドロップダウンの初期化待ちを兼ねてリトライ。
+    表示が変わったことを必ず確かめる。選択だけでは表（グリッド）が再読込されない
+    ので、選択のあと Enter を送って確定させる（診断で Enter 併用時に新店の行が
+    出ることを確認済み）。ドロップダウンの初期化待ちを兼ねてリトライ。
     """
     for _ in range(tries):
         session.page.evaluate(_SELECT_STORE_JS, code)
+        try:
+            session.page.keyboard.press("Enter")
+        except Exception:
+            pass
         for _ in range(4):
             time.sleep(0.7)
             title = _combo_state(session)
@@ -321,6 +330,7 @@ def ingest(artifacts: Path, db, active_codes: set[str], *, dry_run: bool = False
                 print(f"  {s['app']} {s['name']}: 店舗切替を確認できず（スキップ）")
                 fails += 1
                 continue
+            _scroll_grid_top(session)   # 前店で下まで送った位置が残っていることがある
             # 切替後、前店に無い商品CDが出る＝新しい店の表に再読込された、を待つ。
             if not _wait_grid_change(session, prev_cds):
                 print(f"  {s['app']} {s['name']}: グリッドが出ませんでした（スキップ）")
