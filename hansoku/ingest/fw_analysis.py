@@ -71,6 +71,11 @@ def _collect_all_rows(session, *, max_steps: int = 500) -> list[dict]:
     seen: dict[str, dict] = {}
     try:
         page.mouse.move(700, 450)
+        # 店を切り替えた直後はスクロール位置が前店のまま残ることがあるので、
+        # まず一番上まで戻してから下へ送る（先頭行を取りこぼさない）。
+        for _ in range(6):
+            page.mouse.wheel(0, -20000)
+            time.sleep(0.1)
     except Exception:
         pass
     stagnant = 0
@@ -212,15 +217,32 @@ _SELECT_STORE_JS = r"""(code) => {
 
 
 def _combo_state(session) -> str:
-    """店舗コンボの『いま選ばれている店名』らしき表示文字を拾う（切替が効いたか判定用）。"""
+    """店舗コンボの『いま選ばれている店名』を拾う（切替が効いたか判定用）。
+    選択中の店名は div.combobox-cont の title 属性に入る（診断で確認済み）。"""
     return session.page.evaluate(
         """() => {
+        const c = document.querySelector('.combobox-cont[title]');
+        if (c) return (c.getAttribute('title') || '').trim();
         const b = document.querySelector('.dropdown-btn');
-        if (b && (b.innerText||'').trim()) return (b.innerText||'').trim().slice(0, 60);
-        const sel = document.querySelector('.dropdown-btn .selected, .dropdown-btn span, [class*="combo"] span');
-        return sel ? (sel.innerText||sel.textContent||'').trim().slice(0, 60) : '(取得不可)';
+        return b ? (b.innerText || '').trim().slice(0, 60) : '(取得不可)';
     }"""
     )
+
+
+def _select_store(session, code: str, name: str, *, tries: int = 8) -> bool:
+    """店舗を選び、コンボの表示（combobox-cont の title）が目的店に変わるまで確認する。
+
+    切替が効かないまま読むと『前店の行を別店コードで保存』する事故になるため、
+    表示が変わったことを必ず確かめる。ドロップダウンの初期化待ちを兼ねてリトライ。
+    """
+    for _ in range(tries):
+        session.page.evaluate(_SELECT_STORE_JS, code)
+        for _ in range(4):
+            time.sleep(0.7)
+            title = _combo_state(session)
+            if title and (title == name or name in title or title in name):
+                return True
+    return False
 
 
 def _store_options(session) -> list[dict]:
@@ -266,74 +288,63 @@ def _nav_to_screen(session) -> bool:
     return True
 
 
-def _read_one_store(artifacts: Path, code: str, name: str) -> list[dict] | None:
-    """1店を『新しいセッションの最初の1店』として読む。
-
-    同一セッション内で店を切り替えるとグリッドが再読込されず空になる（実測）。
-    ログインからやり直して毎回『最初の1店』の経路に乗せると確実に全行取れるので、
-    速度より確実さを取り、店ごとにセッションを開き直す。
-    """
-    with fw_session(artifacts) as session:
-        if not _nav_to_screen(session):
-            return None
-        if not session.page.evaluate(_SELECT_STORE_JS, code):
-            print(f"    ⚠ {name}：店舗選択に失敗。")
-            return None
-        # 検索/表示が要る画面に備えて Enter も送る（probe と同じ作法）。
-        try:
-            session.page.keyboard.press("Enter")
-        except Exception:
-            pass
-        if not _wait_grid(session):
-            print(f"    ⚠ {name}：グリッドが出ませんでした。")
-            return None
-        return _collect_all_rows(session)
-
-
 def ingest(artifacts: Path, db, active_codes: set[str], *, dry_run: bool = False, limit: int | None = None) -> int:
     """イニシエート（active）店の 商品→分析用コード を全店読み取り、Neon に保存。
-    店ごとにログインし直し、毎回『最初の1店』として読む（店内切替の再読込不良を避ける）。"""
-    # まず1セッションで店舗一覧（li.option）を取得する。
+
+    1セッション・1ログインで、画面はそのまま店舗コンボだけを切り替えて回す
+    （診断で in-place 切替が効くことを確認済み。再ナビは不要でむしろ再読込を壊す）。
+    切替が効いたかは combobox の表示（title）で必ず確認し、前店の行を別店コードで
+    保存する事故を防ぐ。
+    """
     with fw_session(artifacts) as session:
         if not _nav_to_screen(session):
             return 1
         stores = _store_options(session)
 
-    # FWコード(0001006) → アプリコード(1006)。active（イニシエート）だけに絞る。
-    targets = []
-    for s in stores:
-        try:
-            app = str(int(s["code"]))
-        except ValueError:
-            continue
-        if app in active_codes:
-            targets.append({"app": app, **s})
-    if limit:
-        targets = targets[:limit]
-    print(f"=== 対象（イニシエート）{len(targets)}店 / FW全体 {len(stores)}店 ===")
+        # FWコード(0001006) → アプリコード(1006)。active（イニシエート）だけに絞る。
+        targets = []
+        for s in stores:
+            try:
+                app = str(int(s["code"]))
+            except ValueError:
+                continue
+            if app in active_codes:
+                targets.append({"app": app, **s})
+        if limit:
+            targets = targets[:limit]
+        print(f"=== 対象（イニシエート）{len(targets)}店 / FW全体 {len(stores)}店 ===")
 
-    grand_rows = grand_missing = 0
-    for s in targets:
-        rows = _read_one_store(artifacts, s["code"], s["name"])
-        if rows is None:
-            print(f"  {s['app']} {s['name']}: 取得失敗（スキップ）")
-            continue
-        recs = [
-            {
-                "product_code": r["cd"],
-                "product_name": r["name"],
-                "analysis_code": int(r["code"]) if r["code"] else None,
-            }
-            for r in rows
-            if r["cd"]
-        ]
-        missing = sum(1 for r in recs if r["analysis_code"] is None)
-        if not dry_run and recs:
-            db.replace_analysis_codes(s["app"], recs)
-        grand_rows += len(recs)
-        grand_missing += missing
-        print(f"  {s['app']} {s['name']}: {len(recs)}件 / 未入力 {missing}件 {'(dry-run)' if dry_run else '→ 保存'}")
-    print(f"\n=== 合計 {len(targets)}店 / {grand_rows}件 / 未入力 {grand_missing}件 {'(dry-run・未保存)' if dry_run else '保存済み'} ===")
+        grand_rows = grand_missing = fails = 0
+        prev_cds: set[str] = set()
+        for s in targets:
+            if not _select_store(session, s["code"], s["name"]):
+                print(f"  {s['app']} {s['name']}: 店舗切替を確認できず（スキップ）")
+                fails += 1
+                continue
+            # 切替後、前店に無い商品CDが出る＝新しい店の表に再読込された、を待つ。
+            if not _wait_grid_change(session, prev_cds):
+                print(f"  {s['app']} {s['name']}: グリッドが出ませんでした（スキップ）")
+                fails += 1
+                continue
+            rows = _collect_all_rows(session)
+            recs = [
+                {
+                    "product_code": r["cd"],
+                    "product_name": r["name"],
+                    "analysis_code": int(r["code"]) if r["code"] else None,
+                }
+                for r in rows
+                if r["cd"]
+            ]
+            prev_cds = {r["product_code"] for r in recs}
+            missing = sum(1 for r in recs if r["analysis_code"] is None)
+            if not dry_run and recs:
+                db.replace_analysis_codes(s["app"], recs)
+            grand_rows += len(recs)
+            grand_missing += missing
+            print(f"  {s['app']} {s['name']}: {len(recs)}件 / 未入力 {missing}件 {'(dry-run)' if dry_run else '→ 保存'}")
+        tail = f"／取得失敗 {fails}店" if fails else ""
+        print(f"\n=== 合計 {len(targets)}店 / {grand_rows}件 / 未入力 {grand_missing}件{tail} {'(dry-run・未保存)' if dry_run else '保存済み'} ===")
     return 0
 
 
