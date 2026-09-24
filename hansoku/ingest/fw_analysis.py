@@ -44,33 +44,34 @@ _VISUAL_ROWS_JS = r"""() => {
 }"""
 
 
-def _open_store_combo_and_list(session) -> list:
-    """店舗プルダウンを開いて選択肢（店名）を吸い出す。ng-select/native/EJSコンボに広く対応。"""
-    session.page.evaluate(
-        """() => {
-        // 「店舗」ラベル近傍のコンボ（ng-select / select / .ng-input / combobox）を開く
-        const lab = [...document.querySelectorAll('*')].find(
-            el => el.children.length === 0 && (el.textContent || '').trim() === '店舗' && el.offsetParent);
-        let node = lab ? lab.parentElement : null, trig = null;
-        for (let i = 0; i < 8 && node; i++) {
-            trig = node.querySelector('ng-select,.ng-select,.ng-input,.ng-arrow-wrapper,select,[role="combobox"],input,button');
-            if (trig) break;
-            node = node.parentElement;
-        }
-        if (trig) { trig.click(); trig.dispatchEvent(new MouseEvent('mousedown', {bubbles:true})); }
-    }"""
-    )
-    time.sleep(1.2)
+def _dump_store_control(session) -> dict:
+    """『店舗』ラベル近傍のコントロール構造を吸い出す（正しいセレクタ特定用）。"""
     return session.page.evaluate(
         """() => {
-        const out = [];
-        const sel = 'li.option,[class*="ng-option"],mat-option,option,[role="option"],ul li';
-        for (const o of document.querySelectorAll(sel)) {
-            if (!o.offsetParent) continue;
-            const t = (o.textContent || '').trim();
-            if (t && t.length <= 40 && !t.includes('\\n')) out.push(t);
+        const lab = [...document.querySelectorAll('*')].find(
+            el => el.children.length === 0 && (el.textContent || '').trim() === '店舗' && el.offsetParent);
+        let ancestorHtml = '';
+        if (lab) {
+            let n = lab;
+            for (let i = 0; i < 3 && n.parentElement; i++) n = n.parentElement;
+            ancestorHtml = (n.outerHTML || '').slice(0, 1500);
         }
-        return [...new Set(out)];
+        // 画面上部(top<200px)の入力/コンボ候補を列挙
+        const cand = [];
+        const sel = 'input,select,button,ejs-dropdownlist,ejs-combobox,[class*="dropdown"],[class*="combo"],[class*="ng-select"],[role="combobox"]';
+        for (const el of document.querySelectorAll(sel)) {
+            const r = el.getBoundingClientRect();
+            if (!el.offsetParent || r.top > 220 || r.width === 0) continue;
+            cand.push({
+                tag: el.tagName.toLowerCase(),
+                id: el.id || '',
+                cls: (el.className || '').toString().slice(0, 80),
+                value: (el.value || '').slice(0, 40),
+                text: (el.textContent || '').trim().slice(0, 40),
+                left: Math.round(r.left), top: Math.round(r.top),
+            });
+        }
+        return {ancestorHtml, cand};
     }"""
     )
 
@@ -106,31 +107,17 @@ def probe(artifacts: Path) -> int:
         time.sleep(2)
         session.snapshot("analysis_open")
 
-        stores = _open_store_combo_and_list(session)
-        print(f"\n=== 店舗プルダウン候補 {len(stores)}件 ===")
-        for s in stores[:60]:
-            print(f"  {s}")
+        ctrl = _dump_store_control(session)
+        print("\n=== 店舗ラベル近傍の outerHTML（先頭1500字）===")
+        print(ctrl.get("ancestorHtml", ""))
+        print("\n=== 画面上部の入力/コンボ候補 ===")
+        for c in ctrl.get("cand", []):
+            print(f"  <{c['tag']}> id={c['id']!r} cls={c['cls']!r} value={c['value']!r} text={c['text']!r} @({c['left']},{c['top']})")
 
-        # 実データを見たいので1店選ぶ（門真Largo があれば優先、無ければ先頭）。
-        target = next((s for s in stores if "Largo" in s or "門真" in s), stores[0] if stores else "")
-        picked = _pick_store(session, target) if target else False
-        print(f"\n=== 選択した店舗: {target!r}（picked={picked}）===")
-
-        # TreeGrid の描画を粘って待つ（『時間たったら出てくる』）。
-        rows = []
-        for attempt in range(15):
-            time.sleep(2.5)
-            rows = session.page.evaluate(_VISUAL_ROWS_JS)
-            # コードらしき数字行が複数あればロード完了とみなす
-            datarows = [r for r in rows if r and any(c.replace(",", "").isdigit() and len(c) >= 4 for c in r[:1])]
-            if len(datarows) >= 5:
-                break
-            print(f"  待機中… ({attempt + 1}) 視覚行={len(rows)}")
-        session.snapshot("analysis_grid")
-
-        print(f"\n=== 視覚行 総数: {len(rows)} ===")
-        print("=== 先頭50視覚行（左→右のセル）===")
-        for r in rows[:50]:
+        # 現状の視覚行（店舗未選択でもヘッダは見える）。列構成の確認用。
+        rows = session.page.evaluate(_VISUAL_ROWS_JS)
+        print(f"\n=== 視覚行 総数: {len(rows)}（店舗未選択の可能性あり）===")
+        for r in rows[:20]:
             print("  | ".join(r))
     print(f"\n成果物: {artifacts}")
     return 0
