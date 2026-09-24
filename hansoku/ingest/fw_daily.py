@@ -3993,8 +3993,12 @@ def probe_analysis_codes(artifacts: Path, master, store: str = "") -> int:
     key = (store or "").strip()
     with fw_session(artifacts) as session:
         _open_menu(session, ANALYSIS_CODE_MENU)
-        options = _combo_options(session)
+        options = _wait_combo_options(session)
         print(f"[分析コード] 店舗コンボ {len(options)}件")
+        if not options:
+            print("::error::[分析コード] 店舗コンボが空のままでした")
+            _dump_screen(session, "コンボが空")
+            return 1
 
         # うちの店だけに絞る。FWのコードは0埋めなので lstrip して突き合わせる。
         active = {s.store_code: s for s in master.active}
@@ -4042,6 +4046,25 @@ def probe_analysis_codes(artifacts: Path, master, store: str = "") -> int:
         session.snapshot("analysis_probe_end")
     print(f"\n成果物: {artifacts}")
     return 0
+
+
+def _wait_combo_options(session, timeout: float = 60.0) -> list[dict]:
+    """店舗コンボの選択肢が入るまで待ってから返す。
+
+    メニューを開いた直後に読むと**空のことがある**（実測で 130件 → 0件 と
+    ランによって割れた）。空で先に進むと「うちの店が1件も無い」という
+    見当違いの結論になる。選択肢が出るまで待つ。
+    """
+    start = time.monotonic()
+    options: list[dict] = []
+    while time.monotonic() - start < timeout:
+        options = _combo_options(session)
+        if options:
+            if time.monotonic() - start > 1.0:
+                print(f"[分析コード] コンボの選択肢が出るまで {time.monotonic() - start:.0f}秒")
+            return options
+        time.sleep(1.0)
+    return options
 
 
 def _commit_store(session, timeout: float = 60.0) -> bool:
