@@ -446,6 +446,15 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
         master = StoreMaster.load(args.stores)
         with get_warehouse(settings) as warehouse:
             return report_abc_coverage(warehouse, master, month=args.month)
+    if args.mode == "dept-survey":
+        # 各店の現状の部門別並び（生FW部門）を一覧化。品目区分の設計材料。
+        # 保存済みABC（Neon）だけで走る＝FWログイン不要。
+        from .web.export import survey_departments
+
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return survey_departments(warehouse, master, months_back=args.months)
     if args.mode == "abc-store-ingest":
         from .ingest.fw_daily import ingest_abc_store, ingest_abc_stores
 
@@ -1053,7 +1062,7 @@ def build_parser() -> argparse.ArgumentParser:
                  "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
                  "abc-dom-probe", "uriage-probe", "monthly-coverage",
-                 "abc-detail", "data-audit", "source-audit", "abc-campaign",
+                 "abc-detail", "data-audit", "source-audit", "abc-campaign", "dept-survey",
                  "gelato-switch", "analysis-code-probe",
                  "analysis-code-audit", "analysis-code-ingest"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",

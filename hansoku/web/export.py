@@ -857,6 +857,53 @@ def _build_abc_by_month(
     return departments_monthly, products_monthly, categories_monthly
 
 
+def survey_departments(warehouse, master, *, months_back: int = 3) -> int:
+    """各店の『現状の部門別並び』（チャートと同じ生FW部門）を一覧で出す。
+
+    保存済みABC（Neon）だけで走る＝FWログイン不要。品目区分（store_categories）を
+    どの店から作るかの設計材料。部門数の少ない（＝粗い）店から順に並べる。
+    """
+    from datetime import timedelta
+
+    cats = load_store_categories()          # {code: cfg} 設定済みの店
+    configured = set(cats.keys())
+    to = date.today()
+    frm = to - timedelta(days=months_back * 31 + 5)
+    # raw（生部門の並び）は store_categories に影響されない。品目区分の当たり具合も併記する。
+    dm, _pm, _cm = _build_abc_by_month(warehouse, master, frm, to, cats)
+
+    name_of = {s.store_code: s.store_name for s in master.active}
+    rows = []
+    for s in master.active:
+        code = s.store_code
+        months = dm.get(code) or {}
+        if not months:
+            rows.append({"code": code, "n": -1, "m": None, "depts": [], "total": 0})
+            continue
+        m = sorted(months)[-1]
+        raw = sorted(months[m].get("raw") or [], key=lambda r: -(r.get("sales") or 0))
+        rows.append({"code": code, "n": len(raw), "m": m, "depts": raw,
+                     "total": months[m].get("total_sales") or 0})
+    # 粗い順（部門数が少ない順、データ無しは末尾）。
+    rows.sort(key=lambda r: (r["n"] if r["n"] >= 0 else 9999, -(r["total"] or 0)))
+
+    print(f"=== 各店 現状の部門別並び（直近月・保存済みABC／FW未接続）===")
+    print(f"品目区分 設定済み: {sorted(configured) or '（1160のみ）'}")
+    print(f"※ 部門数が少ない＝粗い（束ね直しの価値が高い）。上から着手候補。\n")
+    for r in rows:
+        nm = name_of.get(r["code"], "")
+        cfgmark = " ✓品目区分あり" if r["code"] in configured else ""
+        if r["n"] < 0:
+            print(f"■ {r['code']} {nm}  … ABCデータなし（FW未接続/未取込）{cfgmark}")
+            continue
+        coarse = " ⚠粗い" if r["n"] <= 4 else ""
+        print(f"■ {r['code']} {nm}  FW部門 {r['n']}件 / {r['m']} / 売上計 {round(r['total']):,}円{coarse}{cfgmark}")
+        for d in r["depts"][:24]:
+            print(f"     {(d.get('name') or '')[:26]:26s} {round(d.get('sales') or 0):>11,}円 / {round(d.get('qty') or 0):>7,}点 → 束ね先:{d.get('bucket')}")
+        print()
+    return 0
+
+
 def build(
     warehouse: Warehouse,
     master: StoreMaster,
