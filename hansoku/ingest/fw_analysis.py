@@ -30,16 +30,20 @@ _EXTRACT_JS = r"""() => {
         if (r.top < 175 || r.width === 0 || r.height === 0) continue;   // ヘッダより下だけ
         const isInput = el.tagName === 'INPUT';
         const txt = clip(isInput ? el.value : el.innerText);
-        all.push({ top: Math.round(r.top), left: Math.round(r.left), txt, isInput });
+        all.push({ top: r.top, left: r.left, txt });
     }
-    const cds = all.filter(a => !a.isInput && /^\d{10,}$/.test(a.txt));
+    const isCode = t => /^([1-9]|1[0-9]|2[0-8])$/.test(t);   // 1〜28 のみ（分析用コード）
+    const cds = all.filter(a => /^\d{10,}$/.test(a.txt));
     const rows = [];
     for (const cd of cds) {
-        const row = all.filter(a => Math.abs(a.top - cd.top) <= 6).sort((a, b) => a.left - b.left);
+        // 同じ行＝縦位置が近い葉（分析用コードは表示位置が数px ずれるので ±12 で拾う）
+        const row = all.filter(a => Math.abs(a.top - cd.top) <= 12).sort((a, b) => a.left - b.left);
+        // 名称：CD の右で最初の「数字始まりでない」テキスト
         let name = '';
         for (const c of row) { if (c.left > cd.left && c.txt && !/^[\d.]/.test(c.txt)) { name = c.txt; break; } }
-        const inputs = row.filter(a => a.isInput);
-        const code = inputs.length ? inputs[inputs.length - 1].txt : '';
+        // 分析用コード：行の右端にある 1〜28 の数字（無ければ空欄＝未入力）
+        let code = '';
+        for (const c of row) { if (isCode(c.txt) && c.left > cd.left) code = c.txt; }
         rows.push({ cd: cd.txt, name, code });
     }
     return rows;
