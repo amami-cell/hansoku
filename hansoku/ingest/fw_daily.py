@@ -48,7 +48,16 @@ def _open_menu(session, labels) -> None:
     for label in labels:
         if not session.click_text(label):
             session.snapshot(f"missing_{label}")
-            session.dump_clickables(f"failed_{label}")
+            items = session.dump_clickables(f"failed_{label}")
+            # ⚠️ **成果物だけに残しても読めない。** 実行環境から
+            # artifacts を落とせないことがあり（blob storage が 403）、
+            # そうなると「進めませんでした」しか分からず、正しいラベルを
+            # 当て推量で探すことになる。画面の選択肢はログにも出す。
+            print(f"[menu] 「{label}」が見つかりません。画面にあるもの {len(items)}件:")
+            for it in items:
+                t = " ".join((it.get("text") or "").split())
+                if t:
+                    print(f"    - {t[:40]}")
             raise FWError(f"「{label}」に進めませんでした")
         session.snapshot(f"opened_{label}")
 
