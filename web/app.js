@@ -132,8 +132,8 @@ const TARGET_METRICS = [
   { key: "budget_rate", label: "予算達成率", unit: "%", higher: true },
   { key: "alacarte_food_avg", label: "フード一品単価（アラカルト）", unit: "円", higher: true },
   { key: "alacarte_drink_avg", label: "ドリンク一品単価（アラカルト）", unit: "円", higher: true },
-  { key: "food_per_cover", label: "フード一人当たり出品数", unit: "点", higher: true, decimal: true },
-  { key: "drink_per_cover", label: "ドリンク一人当たり出杯数", unit: "杯", higher: true, decimal: true },
+  { key: "food_per_cover", label: "フード一人当たり出品数", unit: "点", higher: true, decimal: true, percover: true },
+  { key: "drink_per_cover", label: "ドリンク一人当たり出杯数", unit: "杯", higher: true, decimal: true, percover: true },
 ];
 const HOUR_METRICS = new Set(["hour_sales", "hour_covers", "hour_avg_check"]);
 // 部門を選ぶ指標（部門＝コース/飲み放題/アラカルト/ランチ/食べ放題）と、商品を選ぶ指標。
@@ -606,16 +606,20 @@ function makeGoalRows(container, getCtx, forceEl) {
       const subName = isHour ? (bandObj ? `${bandObj.label}（${bandObj.range}時）の` : "")
         : (isSub && bandSel.value ? `${bandSel.value}の` : "");
       const avTail = mt.daily ? "　※「1日あたり平均(A/V)」で入力・判定します" : "";
+      // 一人当たり出品数/出杯数は、分母＝お通し（席チャージ）の点数＝アラカルト人数。お通しも1品として数える。
+      const coverTail = mt.percover ? "　※お通し（席チャージ）も1品として数えます。人数＝お通しの点数で割った値です" : "";
       const subWhat = kind === "dept" ? "部門" : kind === "prod" ? "商品" : "指標";
       help.textContent = base == null
         ? (sel.value === "sales"
             ? "この販促は対象部門/商品が未設定のため実績が出せません。『店全体の売上』を選ぶか、狙う値を入力してください。"
+            : mt.percover
+              ? "この店はお通し（席チャージ）の記録が無いため、一人当たりは出せません。お通しのある店で使えます。"
             : isHour
               ? `この時間帯（${bandObj ? bandObj.range + "時" : ""}）の直近実績がありません（営業時間外かも）。狙う値を入力してください。`
               : isSub
                 ? `この${subWhat}（${bandSel.value || "―"}）の直近実績がありません。狙う値を入力してください。`
                 : "この指標の直近実績がありません。狙う値を入力してください。")
-        : `直近${subName}${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）${avTail}`;
+        : `直近${subName}${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）${avTail}${coverTail}`;
     };
     row._refresh = refresh;
     sel.addEventListener("change", () => { if (SUB_METRICS.has(sel.value)) bandSel.innerHTML = subOptsHtml(sel.value, null); refresh(); });
@@ -4413,7 +4417,7 @@ function renderTargetReview(c) {
         <thead><tr><th class="tr-l">指標</th><th class="tr-v">目標</th><th class="tr-v">実績</th><th class="tr-a">達成率</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <div class="tr-note">実績は販促期間の確定月で集計（時間帯・部門別出数は期間内の1日平均＝A/V）。達成率は 客数・売上・客単価＝実績/目標、原価率＝目標/実績。${hasHourCum ? "<br>「累計 約◯」＝1日A/V×期間の営業日数の概算（目標・達成率は1日A/Vで判定）。" : ""}</div>
+      <div class="tr-note">実績は販促期間の確定月で集計（時間帯・部門別出数は期間内の1日平均＝A/V）。達成率は 客数・売上・客単価＝実績/目標、原価率＝目標/実績。${hasHourCum ? "<br>「累計 約◯」＝1日A/V×期間の営業日数の概算（目標・達成率は1日A/Vで判定）。" : ""}${set.some(x => x.mt.percover) ? "<br>一人当たり出品数/出杯数＝アラカルトの出品数÷お通し（席チャージ）の点数（お通しも1品として数えます）。" : ""}</div>
     </div></section>`;
 }
 function renderReview(c) {
