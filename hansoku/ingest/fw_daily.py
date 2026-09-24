@@ -3996,8 +3996,7 @@ def probe_analysis_codes(artifacts: Path, master, store: str = "") -> int:
     key = (store or "").strip()
     with fw_session(artifacts) as session:
         _watch_page(session)
-        _open_menu(session, ANALYSIS_CODE_MENU)
-        options = _wait_combo_options(session)
+        options = _open_and_wait_combo(session)
         print(f"[分析コード] 店舗コンボ {len(options)}件")
         if not options:
             print("::error::[分析コード] 店舗コンボが空のままでした")
@@ -4056,6 +4055,30 @@ def probe_analysis_codes(artifacts: Path, master, store: str = "") -> int:
         session.snapshot("analysis_probe_end")
     print(f"\n成果物: {artifacts}")
     return 0
+
+
+def _open_and_wait_combo(session, tries: int = 3) -> list[dict]:
+    """分析用コード設定を開き、店舗コンボが埋まるまで待つ。駄目なら開き直す。
+
+    待つだけでは足りなかった。60秒待っても 0件のまま終わったランがある
+    （直前のランの4分後で、FW側のセッションの影響とみられる）。
+    **開き直して取り直す**。月次で回すものなので、1回の空振りで
+    「対象の店が1件もありません」と言って終わるのは困る。
+    """
+    options: list[dict] = []
+    for i in range(1, tries + 1):
+        if i > 1:
+            print(f"[分析コード] 店舗コンボが空。メニューを開き直す（{i}回目）")
+            try:
+                session.click_text("TOP")
+                session.page.wait_for_timeout(3000)
+            except Exception:  # noqa: BLE001
+                pass
+        _open_menu(session, ANALYSIS_CODE_MENU)
+        options = _wait_combo_options(session, timeout=45.0)
+        if options:
+            return options
+    return options
 
 
 def _wait_combo_options(session, timeout: float = 60.0) -> list[dict]:
@@ -4630,8 +4653,7 @@ def audit_analysis_codes(
 
     with fw_session(artifacts) as session:
         _watch_page(session)
-        _open_menu(session, ANALYSIS_CODE_MENU)
-        options = _wait_combo_options(session)
+        options = _open_and_wait_combo(session)
         print(f"[分析コード] 店舗コンボ {len(options)}件")
 
         active = {s.store_code: s for s in master.active}
