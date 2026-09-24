@@ -53,6 +53,31 @@ def _open_menu(session, labels) -> None:
         session.snapshot(f"opened_{label}")
 
 
+def _wait_for_grid(session, *, timeout: float = 60.0, quiet: float = 3.0) -> int:
+    """表が描き終わるまで待ち、読めた行数を返す。
+
+    画面によっては検索の直後は空で、**しばらくしてから出てくる**
+    （分析用コード設定がそう）。固定の sleep で読むと空の画面を
+    「これが正」として記録してしまい、次のランをまるごと無駄にする。
+    行数が増えなくなってから読む。
+    """
+    start = time.monotonic()
+    last, stable_since = -1, start
+    while time.monotonic() - start < timeout:
+        n = session.page.evaluate(
+            """() => [...document.querySelectorAll('table')]
+                 .filter(t => t.offsetParent)
+                 .reduce((a, t) => a + t.querySelectorAll('tr').length, 0)"""
+        )
+        if n != last:
+            last, stable_since = n, time.monotonic()
+        elif n > 0 and time.monotonic() - stable_since >= quiet:
+            break
+        time.sleep(0.5)
+    print(f"[probe] 表の行 {last}行で落ち着いた（{time.monotonic() - start:.0f}秒待った）")
+    return last
+
+
 def report_probe(artifacts: Path, path_str: str) -> int:
     """カンマ区切りのメニューパスを順にクリックして開き、店舗を選び検索して
     グリッド構造を吸い出す。日別売上/客数がどの画面にあるかを特定する診断。
@@ -75,7 +100,8 @@ def report_probe(artifacts: Path, path_str: str) -> int:
             print(f"[report] 先頭店舗を選ぶ: {options[0]['value']} {options[0]['name']}")
             _select_combo(session, options[0]["value"])
         _click_search(session)
-        time.sleep(1.2)
+        # 固定待ちにしない。描き終わるまで待たないと空を正として記録する。
+        _wait_for_grid(session)
         session.snapshot("after_search")
         print(f"[report] 表示中の月: {_read_month(session)}")
         info = session.page.evaluate(
