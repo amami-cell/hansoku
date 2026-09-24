@@ -4579,6 +4579,52 @@ def analysis_code_summary(rows: list[list[str]]) -> dict | None:
     }
 
 
+def analysis_code_rows(rows: list[list[str]]) -> list[dict]:
+    """CSVの全商品行を {product_code, product_name, analysis_code} に落とす（永続化用）。
+
+    analysis_code は 1〜28 の int、空欄・範囲外は None（＝FW未設定）。
+    メニューコードの無い行（タイトル・空行）は捨てる。列は見出しの完全一致で引く
+    （analysis_code_summary と同じ流儀。部分一致はタイトル行に当たってずれる）。
+    """
+    def _norm(c: str | None) -> str:
+        return "".join((c or "").split())
+
+    head_i = head = None
+    for i, row in enumerate(rows[:5]):
+        if any(_norm(c) == "分析用コード" for c in row):
+            head_i, head = i, row
+            break
+    if head is None:
+        return []
+
+    def _col(name: str) -> int | None:
+        for j, c in enumerate(head):
+            if _norm(c) == name:
+                return j
+        return None
+
+    code_col = _col("分析用コード")
+    menu_col = _col("メニューコード")
+    name_col = _col("名称")
+    if menu_col is None or name_col is None:
+        return []
+
+    def _at(r: list[str], j: int | None) -> str:
+        return (r[j] or "").strip() if j is not None and len(r) > j else ""
+
+    out: list[dict] = []
+    for r in rows[head_i + 1:]:
+        if not any((c or "").strip() for c in r):
+            continue
+        pcode = _at(r, menu_col)
+        if not pcode:
+            continue
+        raw = _at(r, code_col)
+        ac = int(raw) if raw.isdigit() and 1 <= int(raw) <= 28 else None
+        out.append({"product_code": pcode, "product_name": _at(r, name_col), "analysis_code": ac})
+    return out
+
+
 def _describe_analysis_csv(data: bytes) -> None:
     """落ちてきたCSVの形だけを出す。
 
@@ -4711,6 +4757,90 @@ def audit_analysis_codes(
     sold, judged = _sold_menu_keys(
         warehouse, [p["store"].store_code for p in per_store], months)
     return _report_analysis_codes(per_store, failures, sold=sold, judged=judged)
+
+
+def ingest_analysis_codes(
+    artifacts: Path,
+    master,
+    db,
+    *,
+    store_filter: str = "",
+    store_limit: int | None = None,
+    dry_run: bool = False,
+) -> int:
+    """全店の 商品→分析用コード を CSV から読み、Neon の analysis_codes へ保存する。
+
+    監査(audit_analysis_codes)と同じ経路で読むが、こちらは**保存する**
+    （下流の「部門別客数・一人当たり出品数」の分母に使う）。FWには一切書かない
+    （押すのは CSV出力 とダウンロードだけ）。店ごとに丸ごと入れ替えるので、
+    FWで消した商品も反映される。
+
+    ⚠️ `全店` でのCSV出力は落ちてこない。1店ずつ `画面表示` で落とす（audit と同じ）。
+    ⚠️ この画面は『登録』『CSV取込』でマスタを書き換えられる。触らない。
+    """
+    from .fw_budget import _select_combo
+
+    key = (store_filter or "").strip()
+    saved_stores = saved_rows = 0
+    failures: list[str] = []
+
+    with fw_session(artifacts) as session:
+        _watch_page(session)
+        options = _open_and_wait_combo(session)
+        print(f"[分析コード取込] 店舗コンボ {len(options)}件")
+
+        active = {s.store_code: s for s in master.active}
+        targets, not_fw = [], []
+        for opt in options:
+            code = opt["value"].lstrip("0")
+            st = active.get(code) or master.find_by_name(opt["name"])
+            if not (st and st.active):
+                continue
+            if getattr(st, "pos", "fw") != "fw":   # FW未連動店（uレジ等）はメニューが無い
+                not_fw.append(st)
+                continue
+            targets.append((opt, st))
+        for st in not_fw:
+            print(f"  ― {st.store_code} {st.store_name[:14]}  FW未連動のため対象外")
+        if key:
+            targets = [(o, s) for o, s in targets
+                       if s.store_code == key.lstrip("0") or key in s.store_name]
+        if store_limit:
+            targets = targets[:store_limit]
+        print(f"[分析コード取込] 対象 {len(targets)}店")
+        if not targets:
+            print("::error::[分析コード取込] 対象の店が1件もありません")
+            return 1
+
+        for opt, st in targets:
+            label = f"{st.store_code} {st.store_name[:14]}"
+            try:
+                if not _select_combo(session, opt["value"]):
+                    raise RuntimeError("店舗コンボから選べない")
+                if not _commit_store(session):
+                    raise RuntimeError("グリッドに中身が出ない")
+                data = _download_analysis_csv(session)
+                if data is None:
+                    raise RuntimeError("CSVが落ちてこない")
+                recs = analysis_code_rows(_read_csv_rows(data))
+                if not recs:
+                    raise RuntimeError("商品行が読めない")
+            except Exception as e:  # noqa: BLE001
+                print(f"  ✗ {label}  {type(e).__name__}: {str(e)[:60]}")
+                failures.append(st.store_code)
+                continue
+            miss = sum(1 for r in recs if r["analysis_code"] is None)
+            if not dry_run:
+                db.replace_analysis_codes(st.store_code, recs)
+            saved_stores += 1
+            saved_rows += len(recs)
+            print(f"  {'(dry)' if dry_run else '✓'} {label}  "
+                  f"{len(recs)}件 / 未設定 {miss}件 {'' if dry_run else '→保存'}")
+
+    tail = f" / 失敗 {len(failures)}店" if failures else ""
+    state = "(dry-run・未保存)" if dry_run else "保存済み"
+    print(f"[分析コード取込] {saved_stores}店 / {saved_rows}件{tail} {state}")
+    return 1 if failures and saved_stores == 0 else 0
 
 
 def _read_csv_rows(data: bytes) -> list[list[str]]:

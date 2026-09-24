@@ -609,6 +609,23 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 store_filter=args.abc_store or "",
                 store_limit=args.limit,
             )
+    if args.mode == "analysis-code-ingest":
+        # 商品→分析用コードを CSV から読み、Neon に保存する（下流の部門別客数用）。
+        # FWには書かない（押すのは CSV出力 とダウンロードだけ）。
+        from .ingest.fw_daily import ingest_analysis_codes
+
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_appdb(settings) as db:
+            db.ensure_schema()
+            return ingest_analysis_codes(
+                Path(args.artifacts),
+                master,
+                db,
+                store_filter=args.abc_store or "",
+                store_limit=args.limit,
+                dry_run=bool(getattr(args, "dry_run", False)),
+            )
     if args.mode == "analysis-code-probe":
         # 診断のみ。DBにもFWにも書き込まない（押すのは CSV出力 だけ）。
         from .ingest.fw_daily import probe_analysis_codes
@@ -1038,7 +1055,7 @@ def build_parser() -> argparse.ArgumentParser:
                  "abc-dom-probe", "uriage-probe", "monthly-coverage",
                  "abc-detail", "data-audit", "source-audit", "abc-campaign",
                  "gelato-switch", "analysis-code-probe",
-                 "analysis-code-audit"],
+                 "analysis-code-audit", "analysis-code-ingest"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument(
