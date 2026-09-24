@@ -132,6 +132,8 @@ const TARGET_METRICS = [
   { key: "budget_rate", label: "予算達成率", unit: "%", higher: true },
   { key: "alacarte_food_avg", label: "フード一品単価（アラカルト）", unit: "円", higher: true },
   { key: "alacarte_drink_avg", label: "ドリンク一品単価（アラカルト）", unit: "円", higher: true },
+  { key: "food_per_cover", label: "フード一人当たり出品数", unit: "点", higher: true, decimal: true },
+  { key: "drink_per_cover", label: "ドリンク一人当たり出杯数", unit: "杯", higher: true, decimal: true },
 ];
 const HOUR_METRICS = new Set(["hour_sales", "hour_covers", "hour_avg_check"]);
 // 部門を選ぶ指標（部門＝コース/飲み放題/アラカルト/ランチ/食べ放題）と、商品を選ぶ指標。
@@ -298,6 +300,18 @@ function _metricOverMonths(metric, code, months) {
     }
     return (any && q) ? Math.round(s / q) : null;
   }
+  // 一人当たり出品数/出杯数＝アラカルトのフード（ドリンク）出品数 ÷ アラカルト人数
+  // （＝お通し/席チャージの点数 alacarte_covers）。お通しが無い店は null（データなし）。
+  if (base === "food_per_cover" || base === "drink_per_cover") {
+    const fk = base === "food_per_cover" ? "フード" : "ドリンク";
+    let items = 0, cov = 0, any = false;
+    for (const cd of codes) for (const m of months) {
+      const dm = ((DATA.departments_monthly || {})[cd] || {})[m]; if (!dm) continue;
+      const c = dm.alacarte_covers, qp = dm.alacarte_qty || {};
+      if (typeof c === "number" && c > 0) { items += qp[fk] || 0; cov += c; any = true; }
+    }
+    return (any && cov) ? +(items / cov).toFixed(2) : null;
+  }
   let sales = 0, covers = 0, costNum = 0, costDen = 0, sN = 0, cN = 0;
   for (const cd of codes) for (const m of months) {
     const sv = _msales(cd, m), cv = _mcovers(cd, m), cr = _mcost(cd, m);
@@ -462,6 +476,8 @@ const GOAL_CAT_OPTS = [
   { key: "budget_rate", label: "予算達成率" },
   { key: "alacarte_food_avg", label: "フード一品単価（アラカルト）" },
   { key: "alacarte_drink_avg", label: "ドリンク一品単価（アラカルト）" },
+  { key: "food_per_cover", label: "フード一人当たり出品数（アラカルト）" },
+  { key: "drink_per_cover", label: "ドリンク一人当たり出杯数（アラカルト）" },
 ];
 // 選んだ指標の「直近実績」（＝目安の基準）と前年比。売上はこの販促の対象（部門/商品）、
 // 他は店の直近同期間で見る。前年比は率指標（原価率）は差分ポイント、他は％。
@@ -520,7 +536,7 @@ async function saveGoalMap(gkey, map) {
 // getCtx() は「販促風オブジェクト」（stores/bucket/items/start/end/open_ended）を返す。
 function makeGoalRows(container, getCtx, forceEl) {
   const mtByKey = _mtByKey();
-  const fmtVal = (mt, v) => v == null ? "―" : mt.unit === "円" ? money(v) : mt.unit === "%" ? v + "%" : ten(v) + mt.unit;
+  const fmtVal = (mt, v) => v == null ? "―" : mt.decimal ? (+v).toFixed(1) + mt.unit : mt.unit === "円" ? money(v) : mt.unit === "%" ? v + "%" : ten(v) + mt.unit;
   const bandOptsHtml = selBand => {
     const code = (getCtx().stores || [])[0] || "";
     const op = storeBands(code);
@@ -576,7 +592,7 @@ function makeGoalRows(container, getCtx, forceEl) {
       const ref = goalRef(c, effKey());
       const base = ref.base;
       const f = mt.higher ? 1.02 : 0.98;
-      const suggest = base == null ? null : (mt.unit === "%" ? Math.round(base * f * 10) / 10 : Math.round(base * f));
+      const suggest = base == null ? null : ((mt.unit === "%" || mt.decimal) ? Math.round(base * f * 10) / 10 : Math.round(base * f));
       inp.dataset.suggest = suggest == null ? "" : suggest;
       inp.placeholder = suggest == null ? "―（データなし）" : fmtVal(mt, suggest);
       let ratio = "";
@@ -4309,6 +4325,7 @@ function needsReview(c) {
 // 原価率・フード/ドリンク原価率は「低いほど良い」ので達成色を反転（達成=緑）。
 function fmtMetricVal(mt, v) {
   if (v == null) return "―";
+  if (mt.decimal) return (+v).toFixed(1) + mt.unit;
   if (mt.unit === "%") return (+v).toFixed(1) + "%";
   if (mt.unit === "人") return ten(v) + "人";
   if (mt.key === "sales" || mt.key === "hour_sales" || mt.key === "dept_sales" || mt.key === "prod_sales") return man(v) + "円";

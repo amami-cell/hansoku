@@ -577,7 +577,6 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
     alacarte_qty = {"フード": 0.0, "ドリンク": 0.0}
     # お通し／席チャージの点数＝アラカルト人数の近似（一人当たり出品数の分母）。
     cover_qty = 0.0
-    cover_names: list[str] = []
     raw_list = []
     for name, d in depts.items():
         bucket = dept_bucket(name)
@@ -597,8 +596,6 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
             alacarte_qty[key] += d["qty"]
         if is_cover_charge(name):
             cover_qty += d["qty"]
-            if name not in cover_names:
-                cover_names.append(name)
         raw_list.append(
             {
                 "name": name,
@@ -636,7 +633,6 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
         "alacarte_qty": {k: round(v) for k, v in alacarte_qty.items()},
         # お通し／席チャージの合計点数＝アラカルト人数の近似（0なら該当なし）。
         "alacarte_covers": round(cover_qty),
-        "_cover_names": cover_names,
         "raw": raw_list,
     }
 
@@ -1051,24 +1047,6 @@ def build(
         m = max(months)
         departments[code] = months[m]
         abc_month[code] = m
-    # 【一時診断】お通し／席チャージの検出状況を店ごとにログ出力（実データで有無・命名を確認する用）。
-    # 確認後にこのブロックと _cover_names 出力は削除する。
-    _cover_seen: dict[str, tuple[int, list[str]]] = {}
-    for code, months in departments_monthly.items():
-        for m2, dep in months.items():
-            cov = dep.get("alacarte_covers") or 0
-            names = dep.get("_cover_names") or []
-            if cov or names:
-                prev = _cover_seen.get(code, (0, []))
-                merged = prev[1] + [n for n in names if n not in prev[1]]
-                _cover_seen[code] = (max(prev[0], cov), merged)
-    print(f"[cover-charge診断] お通し/席チャージ検出: {len(_cover_seen)}店")
-    for code, (cov, names) in sorted(_cover_seen.items()):
-        print(f"[cover-charge診断]   {code}: 最大covers={cov} 品名={names}")
-    # 出力JSONには診断用の _cover_names は載せない（alacarte_covers は残す）。
-    for months in departments_monthly.values():
-        for dep in months.values():
-            dep.pop("_cover_names", None)
     for code, months in products_monthly.items():
         if not months:
             continue
