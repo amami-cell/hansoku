@@ -4022,37 +4022,73 @@ def probe_analysis_codes(artifacts: Path, master, store: str = "") -> int:
         opt, st = target
         print(f"[分析コード] 対象: {opt['value']} {st.store_code} {st.store_name}")
 
-        _dump_screen(session, "メニューを開いた直後")
-
         if not _select_combo(session, opt["value"]):
-            print("[分析コード] 店舗コンボからは選べませんでした")
-        rows = _wait_for_grid(session)
-        print(f"[分析コード] コンボで選んだあとの表の行 {rows}")
-        _dump_screen(session, "コンボで店を選んだあと")
+            print("[分析コード] 店舗コンボから選べませんでした")
+            _dump_screen(session, "コンボで選べなかった")
+            return 1
 
-        # コンボだけでは「データなし」のままだった。画面にある『店舗』が
-        # 実際の店選びなのかを確かめる。**『登録』『CSV取込』は押さない。**
-        if _grid_is_empty(session):
-            print("[分析コード] まだ中身が出ない。『店舗』を押してみる")
-            hit = session.page.evaluate(
-                """() => {
-                for (const el of document.querySelectorAll(
-                        'button, a, input[type=button], div[role=button], span, label')) {
-                    if (!el.offsetParent) continue;
-                    const t = ((el.innerText || el.value || '').replace(/\\s/g, ''));
-                    // 完全一致。『CSV取込』や『登録』に当てない。
-                    if (t === '店舗') { el.click(); return true; }
-                }
-                return false;
-            }"""
-            )
-            print(f"[分析コード] 『店舗』を押せた: {hit}")
-            session.page.wait_for_timeout(4000)
-            _dump_screen(session, "『店舗』を押したあと")
+        if not _commit_store(session):
+            print("::error::[分析コード] 店を選んでも中身が出ませんでした")
+            _dump_screen(session, "中身が出ないまま")
+            return 1
+        print("[分析コード] グリッドに中身が出た")
 
+        data = _download_analysis_csv(session)
+        if data is None:
+            _dump_screen(session, "CSV出力が押せない")
+            return 1
+        print(f"[分析コード] CSVを取得: {len(data)} バイト")
+        _describe_analysis_csv(data)
         session.snapshot("analysis_probe_end")
     print(f"\n成果物: {artifacts}")
     return 0
+
+
+def _commit_store(session, timeout: float = 60.0) -> bool:
+    """店を選んだあと、グリッドに中身が出るまで押して待つ。
+
+    コンボに値を入れただけでは読み込みが走らない（欄には店名が入るのに
+    『データなし』のまま）。**『店舗』はボタンではなく入力欄のラベル**で、
+    これを押すと読み込みが走る、というのが実測。
+
+    ⚠️ 完全一致で探す。この画面には『登録』が隣（x=990 y=112）にあり、
+       押すとマスタを書き換えてしまう。
+    """
+    clicked = session.page.evaluate(
+        r"""() => {
+        for (const el of document.querySelectorAll('label, button, a, span, div')) {
+            if (!el.offsetParent) continue;
+            if ((el.innerText || '').replace(/\s/g, '') === '店舗') { el.click(); return true; }
+        }
+        return false;
+    }"""
+    )
+    if not clicked:
+        print("[分析コード] 『店舗』が押せませんでした")
+        return False
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        if not _grid_is_empty(session):
+            print(f"[分析コード] 『店舗』を押して {time.monotonic() - start:.0f}秒で出た")
+            return True
+        time.sleep(1.0)
+    return False
+
+
+def _download_analysis_csv(session) -> bytes | None:
+    """『CSV出力』を押してCSVを受け取る。
+
+    ⚠️ **押してよいのは『CSV出力』だけ。** 隣に『CSV取込』があり、
+       部分一致で探すとそちらに当たる。当たったらマスタを壊す。
+    """
+    try:
+        with session.page.expect_download(timeout=120000) as dl:
+            session.page.get_by_text("CSV出力", exact=True).first.click(timeout=8000)
+        return open(dl.value.path(), "rb").read()
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] CSV出力を押せませんでした: {type(e).__name__}: {e}")
+        session.snapshot("analysis_csv_failed")
+        return None
 
 
 def _grid_is_empty(session) -> bool:
