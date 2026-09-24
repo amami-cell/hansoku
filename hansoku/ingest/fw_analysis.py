@@ -435,66 +435,75 @@ def probe(artifacts: Path) -> int:
         for r in missing[:40]:
             print(f"  未入力 CD={r['cd']} 名称={r['name']}")
 
-        # ── 別店（非デフォルト）への切替が本当に効くかを診断する ───────────────
-        # 実測で 1006 以外は 0件。1006 は既定表示なだけで、選択自体は効いて
-        # いない疑いが強い。コンボの表示・ドロップダウンのHTML・選択前後の
-        # 行数を採って、直せる不良か（表示待ちだけか／選択が効かないか）見る。
-        print("\n=== 店舗切替の診断 ===")
-        other = next(
-            (s for s in stores if not s["code"].endswith("1006")
-             and s["code"] not in (target["code"],)),
-            None,
-        )
-        print(f"  現在のコンボ表示: {_combo_state(session)!r}")
-        _dump_store_control(session)  # 03..: ancestorHtml を成果物に残す
-        ctrl = _dump_store_control(session)
-        print(f"  店舗コントロールHTML(先頭700): {ctrl.get('ancestorHtml','')[:700]}")
+        # ── 店を切り替えても表が再読込されない。何が『表示』を起こすのか探す ──
+        # trusted 実クリックでも title は変わるが行は出ない＝選択とは別に
+        # 表示/検索のトリガーが要る（既定店だけ入場時に自動表示される）。
+        # 画面のボタン一覧を採り、それらしきボタンを押して行が出るか試す。
+        print("\n=== 店舗切替の診断（表示トリガー探索）===")
+        other = next((s for s in stores if not s["code"].endswith("1006")), None)
         if other:
             print(f"  → 切替先: {other['code']}:{other['name']}")
-            opened = session.page.evaluate(
-                """() => { const b = document.querySelector('.dropdown-btn.enabledbutton');
-                   if (b) { b.click(); return true; } return false; }"""
+            # trusted 実クリックで店を選ぶ（title は変わるはず）。
+            try:
+                session.page.locator(".dropdown-btn.enabledbutton").first.click(timeout=4000, force=True)
+                time.sleep(0.5)
+                session.page.locator(f'li.option[value="{other["code"]}"]').first.click(timeout=4000, force=True)
+            except Exception as e:
+                print(f"  実クリック失敗: {e}")
+            time.sleep(1.5)
+            print(f"  選択直後: コンボ表示={_combo_state(session)!r} / グリッド行数={len(session.page.evaluate(_EXTRACT_JS))}")
+
+            # 画面の全ボタン/リンクを列挙（表示・検索・再表示・絞込・実行・更新 を探す）。
+            btns = session.page.evaluate(
+                """() => {
+                const out = [];
+                for (const el of document.querySelectorAll('button, a, input[type=button], input[type=submit], [role=button]')) {
+                    if (!el.offsetParent) continue;
+                    const t = (el.innerText || el.value || '').trim();
+                    const r = el.getBoundingClientRect();
+                    if (r.width === 0 || r.height === 0) continue;
+                    out.push({t: t.slice(0,24), tag: el.tagName.toLowerCase(),
+                              cls: (el.className||'').toString().slice(0,40),
+                              dis: !!el.disabled, x: Math.round(r.x), y: Math.round(r.y)});
+                }
+                return out;
+            }"""
             )
-            time.sleep(1.0)
-            vis = session.page.evaluate(
-                """(code) => {
-                   const lis = [...document.querySelectorAll('li.option')];
-                   const t = lis.find(o => (o.getAttribute('value')||'').trim() === code);
-                   const info = o => o ? ({visible: !!o.offsetParent,
-                       rect: (r => ({x:Math.round(r.x),y:Math.round(r.y),w:Math.round(r.width),h:Math.round(r.height)}))(o.getBoundingClientRect()),
-                       html: (o.outerHTML||'').slice(0,160)}) : null;
-                   return {count: lis.length, target: info(t),
-                           first3: lis.slice(0,3).map(o => (o.getAttribute('value')||'')+':'+(o.textContent||'').trim())};
+            print(f"  画面のボタン/リンク {len(btns)}個:")
+            for b in btns[:40]:
+                print(f"    {b}")
+
+            # それらしきボタンを順に押して、行が出るか見る。
+            for label in ("表示", "再表示", "検索", "絞込", "絞り込み", "実行", "更新", "決定", "OK"):
+                hit = session.page.evaluate(
+                    """(label) => {
+                    const el = [...document.querySelectorAll('button, a, input[type=button], input[type=submit], [role=button]')]
+                        .find(e => e.offsetParent && !e.disabled && ((e.innerText||e.value||'').trim() === label));
+                    if (!el) return false;
+                    el.click(); return true;
                 }""",
-                other["code"],
-            )
-            print(f"  ドロップダウン開けた: {opened} / li数: {vis['count']} / 先頭3: {vis['first3']}")
-            print(f"  対象li: {vis['target']}")
-            # 3通りの当て方を順に試し、都度コンボ表示と行数を見る。
-            for how in ("dispatch", "native", "mousedown"):
-                session.page.evaluate(
-                    """([code, how]) => {
-                       const b = document.querySelector('.dropdown-btn.enabledbutton'); if (b) b.click();
-                       const li = [...document.querySelectorAll('li.option')].find(o => (o.getAttribute('value')||'').trim() === code);
-                       if (!li) return false;
-                       if (how === 'native') { li.click(); }
-                       else if (how === 'mousedown') {
-                         for (const t of ['mousedown','mouseup','click'])
-                           li.dispatchEvent(new MouseEvent(t, {bubbles:true, cancelable:true, view:window}));
-                       } else { li.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true})); }
-                       return true;
-                    }""",
-                    [other["code"], how],
+                    label,
                 )
-                try:
-                    session.page.keyboard.press("Enter")
-                except Exception:
-                    pass
-                time.sleep(4.0)
+                if not hit:
+                    continue
+                time.sleep(3.0)
                 n = len(session.page.evaluate(_EXTRACT_JS))
-                print(f"    [{how}] 選択後 コンボ表示: {_combo_state(session)!r} / グリッド行数: {n}")
+                print(f"    ボタン「{label}」押下後 → グリッド行数: {n}")
                 if n >= 3:
+                    print(f"    ★ 表示トリガーは「{label}」")
                     break
+
+            # ボタンで駄目でも、単に生成に時間がかかるだけかもしれない。最大60秒待つ。
+            appeared = False
+            for i in range(20):
+                time.sleep(3.0)
+                n = len(session.page.evaluate(_EXTRACT_JS))
+                if n >= 3:
+                    print(f"    （待機 {(i+1)*3}秒で {n} 行出現）")
+                    appeared = True
+                    break
+            if not appeared:
+                print("    60秒待っても行は出ず（ボタン押下も効かず）")
             session.snapshot("analysis_other_store")
     print(f"\n成果物: {artifacts}")
     return 0
