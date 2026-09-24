@@ -214,6 +214,22 @@ await test("部門別・商品・予算達成率の目標が集計できる（�
   assert.equal(call(`subKind("prod_sales")`), "prod", "商品指標は商品ピッカー");
 });
 
+await test("お通しの無い店は 全体客数−セット系−TO でアラカルト客数を推定して一人当たりを出す", () => {
+  const d = { ...base,
+    covers: { "1200": { "2026-07": 200, "2026-08": 200 } },
+    departments_monthly: { "1200": {
+      "2026-07": { total_sales: 900000, buckets: [ { name: "コース", sales: 1, qty: 50 }, { name: "ランチ", sales: 1, qty: 30 }, { name: "食べ放題", sales: 1, qty: 10 }, { name: "飲み放題", sales: 1, qty: 20 } ], alacarte_qty: { "フード": 300, "ドリンク": 200 }, takeout_qty: 5 },
+      "2026-08": { total_sales: 900000, buckets: [ { name: "コース", sales: 1, qty: 50 }, { name: "ランチ", sales: 1, qty: 30 }, { name: "食べ放題", sales: 1, qty: 10 }, { name: "飲み放題", sales: 1, qty: 20 } ], alacarte_qty: { "フード": 300, "ドリンク": 200 }, takeout_qty: 5 },
+    } },
+  };
+  const { call } = loadForm(d);
+  const ms = `["2026-07","2026-08"]`;
+  // フード客数＝200−50−30−10−5=105、フード一人当たり=(300×2)/(105×2)=2.857→2.86
+  assert.equal(call(`_metricOverMonths("food_per_cover","1200",${ms})`), 2.86, "お通し無し：フードは全体−コース・ランチ・食放・TO で割る");
+  // ドリンク客数＝200−20−5=175、ドリンク一人当たり=(200×2)/(175×2)=1.142→1.14
+  assert.equal(call(`_metricOverMonths("drink_per_cover","1200",${ms})`), 1.14, "お通し無し：ドリンクは全体−飲放・TO で割る");
+});
+
 console.log("目標の変更ログ（誰がいつ）");
 
 await test("設定者・日付が達成サマリーの目標欄に出る", () => {

@@ -194,6 +194,22 @@ const monthsBetween = (a, b) => (a && b && b >= a) ? monthRange(a, b) : (a ? [a]
 const _msales = (code, m) => (((DATA.monthly || {})[code] || {})[m] || {}).sales;
 const _mcovers = (code, m) => ((DATA.covers || {})[code] || {})[m];
 const _mcost = (code, m) => ((DATA.cost_rate || {})[code] || {})[m];
+// アラカルト客数（一人当たりの分母）。お通し（席チャージ）がある店はその点数＝アラカルト人数。
+// 無い店は「全体客数−セット系の人数」で推定：フード＝全体−コース−ランチ−食べ放題、
+// ドリンク＝全体−飲み放題（セット系は1人1つなので数量＝人数として使う）。0以下は不成立で null。
+function _bucketQty(dm, name) { const b = ((dm && dm.buckets) || []).find(x => x.name === name); return b ? (b.qty || 0) : 0; }
+function alacarteCovers(dm, code, m, kind) {
+  if (!dm) return null;
+  const otoshi = dm.alacarte_covers;
+  if (typeof otoshi === "number" && otoshi > 0) return otoshi;   // お通しがあればそれが人数
+  const total = _mcovers(code, m);
+  if (typeof total !== "number" || total <= 0) return null;
+  const to = dm.takeout_qty || 0;   // テイクアウトはどちらの分母からも引く
+  const est = kind === "drink"
+    ? total - _bucketQty(dm, "飲み放題") - to
+    : total - _bucketQty(dm, "コース") - _bucketQty(dm, "ランチ") - _bucketQty(dm, "食べ放題") - to;
+  return est > 0 ? est : null;
+}
 // 原価率（損益）が出ない理由。export の cost_status（{code:{status,months,latest}}）から。
 // 「―」を素で出さず、なぜ出ないか（新レジ未接続／新店・反映待ち／FW未反映／直近のみ）を添える。
 const COST_REASON = {
@@ -304,10 +320,11 @@ function _metricOverMonths(metric, code, months) {
   // （＝お通し/席チャージの点数 alacarte_covers）。お通しが無い店は null（データなし）。
   if (base === "food_per_cover" || base === "drink_per_cover") {
     const fk = base === "food_per_cover" ? "フード" : "ドリンク";
+    const kind = base === "food_per_cover" ? "food" : "drink";
     let items = 0, cov = 0, any = false;
     for (const cd of codes) for (const m of months) {
       const dm = ((DATA.departments_monthly || {})[cd] || {})[m]; if (!dm) continue;
-      const c = dm.alacarte_covers, qp = dm.alacarte_qty || {};
+      const c = alacarteCovers(dm, cd, m, kind), qp = dm.alacarte_qty || {};
       if (typeof c === "number" && c > 0) { items += qp[fk] || 0; cov += c; any = true; }
     }
     return (any && cov) ? +(items / cov).toFixed(2) : null;
@@ -606,14 +623,16 @@ function makeGoalRows(container, getCtx, forceEl) {
       const subName = isHour ? (bandObj ? `${bandObj.label}（${bandObj.range}時）の` : "")
         : (isSub && bandSel.value ? `${bandSel.value}の` : "");
       const avTail = mt.daily ? "　※「1日あたり平均(A/V)」で入力・判定します" : "";
-      // 一人当たり出品数/出杯数は、分母＝お通し（席チャージ）の点数＝アラカルト人数。お通しも1品として数える。
-      const coverTail = mt.percover ? "　※お通し（席チャージ）も1品として数えます。人数＝お通しの点数で割った値です" : "";
+      // 一人当たり出品数/出杯数の注釈。分母＝アラカルト客数（お通しの点数、無い店は全体客数−セット系）。
+      const coverTail = mt.percover
+        ? "　※一人当たり＝アラカルト出品数÷アラカルト客数。客数＝お通しの点数（お通しの無い店は 全体客数−コース・ランチ・食べ放題・テイクアウト〈ドリンクは飲み放題・テイクアウト〉）。お通しも1品として数えます"
+        : "";
       const subWhat = kind === "dept" ? "部門" : kind === "prod" ? "商品" : "指標";
       help.textContent = base == null
         ? (sel.value === "sales"
             ? "この販促は対象部門/商品が未設定のため実績が出せません。『店全体の売上』を選ぶか、狙う値を入力してください。"
             : mt.percover
-              ? "この店はお通し（席チャージ）の記録が無いため、一人当たりは出せません。お通しのある店で使えます。"
+              ? "アラカルト客数が算出できません（客数データが不足）。狙う値を入力してください。"
             : isHour
               ? `この時間帯（${bandObj ? bandObj.range + "時" : ""}）の直近実績がありません（営業時間外かも）。狙う値を入力してください。`
               : isSub
@@ -4417,7 +4436,7 @@ function renderTargetReview(c) {
         <thead><tr><th class="tr-l">指標</th><th class="tr-v">目標</th><th class="tr-v">実績</th><th class="tr-a">達成率</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <div class="tr-note">実績は販促期間の確定月で集計（時間帯・部門別出数は期間内の1日平均＝A/V）。達成率は 客数・売上・客単価＝実績/目標、原価率＝目標/実績。${hasHourCum ? "<br>「累計 約◯」＝1日A/V×期間の営業日数の概算（目標・達成率は1日A/Vで判定）。" : ""}${set.some(x => x.mt.percover) ? "<br>一人当たり出品数/出杯数＝アラカルトの出品数÷お通し（席チャージ）の点数（お通しも1品として数えます）。" : ""}</div>
+      <div class="tr-note">実績は販促期間の確定月で集計（時間帯・部門別出数は期間内の1日平均＝A/V）。達成率は 客数・売上・客単価＝実績/目標、原価率＝目標/実績。${hasHourCum ? "<br>「累計 約◯」＝1日A/V×期間の営業日数の概算（目標・達成率は1日A/Vで判定）。" : ""}${set.some(x => x.mt.percover) ? "<br>一人当たり出品数/出杯数＝アラカルト出品数÷アラカルト客数（客数＝お通しの点数、無い店は 全体客数−コース・ランチ・食べ放題・テイクアウト〈ドリンクは飲み放題・テイクアウト〉。お通しも1品として数えます）。" : ""}</div>
     </div></section>`;
 }
 function renderReview(c) {

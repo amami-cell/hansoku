@@ -156,6 +156,15 @@ def is_cover_charge(name: str) -> bool:
     return any(w in name for w in _COVER_CHARGE_WORDS)
 
 
+# テイクアウト（持ち帰り）を表す語。アラカルト客数の分母から差し引く（店内一品注文の人数に寄せる）。
+_TAKEOUT_WORDS: Final = ("テイクアウト", "ﾃｲｸｱｳﾄ", "お持ち帰り", "持ち帰り", "持帰り", "持ち帰", "持帰")
+
+
+def is_takeout(name: str) -> bool:
+    """テイクアウト（持ち帰り）商品か。"""
+    return any(w in name for w in _TAKEOUT_WORDS)
+
+
 @dataclass(frozen=True)
 class ActualRow:
     """``f_actuals`` の1行。"""
