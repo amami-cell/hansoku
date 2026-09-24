@@ -3830,7 +3830,18 @@ function campDeptMix(c) {
 function campGelatoCompo(c) {
   if (c.bucket !== "ジェラート") return "";
   const code = (c.stores || [])[0]; if (!code) return "";
-  const months = monthRange(String(c.start).slice(0, 7), String(c.end).slice(0, 7));
+  const hasGelato = m => prodsInCat(code, m, "ジェラート").length > 0;
+  let months = monthRange(String(c.start).slice(0, 7), String(c.end).slice(0, 7));
+  // この回がまだ始まったばかり（期間内にデータのある月が無い）ときは、
+  // 直近でデータのある月に切り替えて「直近の実績」を必ず出す（0円ゆえ振り返りが空にならないよう）。
+  let fallback = false;
+  if (!months.some(hasGelato)) {
+    const recent = [];
+    for (let m = CURRENT_MONTH, i = 0; i < 6 && recent.length < 2; i++, m = monthMinus(m, 1)) {
+      if (hasGelato(m)) recent.push(m);
+    }
+    if (recent.length) { months = recent.slice().reverse(); fallback = true; }
+  }
   const flav = {}; let single = 0, dbl = 0, tri = 0;
   const excluded = n =>
     /^TOジェラート/.test(n) || /^TO(シングル|ダブル|トリプル)/.test(n) ||
@@ -3860,9 +3871,12 @@ function campGelatoCompo(c) {
     return `<li><span class="fw-pn">${hot ? "★ " : ""}${esc(n)}</span>` +
       `<span class="fw-pv"><span class="fw-pq">${ten(q)}点</span><span class="fw-pp">${pct}%</span></span></li>`;
   }).join("");
+  const per = fallback
+    ? `直近の実績（${months[0]}〜${months[months.length - 1]}）　※この回（${c.start}〜${c.end}）はまだ実績なし`
+    : `${c.start}〜${c.end}`;
   return `<section class="block">
     <div class="bhead"><h2>TOジェラート 出品数構成比</h2>
-      <span class="bnote">${esc(c.start)}〜${esc(c.end)}／ジェラートは0円のため出品数(点数)で見る。総スクープ＝シングル×1＋ダブル×2＋トリプル×3。★＝この回の販促2品</span></div>
+      <span class="bnote">${esc(per)}／ジェラートは0円のため出品数(点数)で見る。総スクープ＝シングル×1＋ダブル×2＋トリプル×3。★＝この回の販促2品</span></div>
     <div class="panel">
       <div class="cactual-sum">総出品数(スクープ) <b>${ten(scoops)}</b>　容器内訳: 単${ten(single)}／双${ten(dbl)}／三${ten(tri)}</div>
       <ul class="fw-list">${rows}</ul>
