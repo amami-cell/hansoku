@@ -522,6 +522,9 @@ const goalRefValue = (c, key) => goalRef(c, key).base;
 // 最初に出す目標カテゴリ。対象部門/商品の売上が出せない起票直後は「店全体の売上」を既定にして、
 // いきなり〈データなし〉の空欄で始まらないようにする（実績が見える状態から書き始められる）。
 function defaultGoalKey(c) {
+  // ジェラート販促は0円商品（売上が付かない）。円ではなく点数(出数)で目標を持つ。
+  // 部門=ジェラートの1日A/V出数を既定にし、薄字＝直近ベース（×102%）が出るようにする。
+  if (c && c.bucket === "ジェラート") return "dept_qty#ジェラート";
   try { return goalRef(c, "sales").base != null ? "sales" : "store_sales"; }
   catch (e) { return "sales"; }
 }

@@ -311,6 +311,14 @@ await test("複製起票：複製元の目標が初期値として引き継が�
   assert.ok(html.includes("昨年の秋パフェ"), "販促名も複製される");
 });
 
+await test("ジェラート販促の目標は既定で点数(部門別出数)", () => {
+  const { call } = loadForm(base);
+  const gel = call(`defaultGoalKey({bucket:"ジェラート",stores:["1160"],start:"2026-09-01",end:"2026-10-31"})`);
+  assert.equal(gel, "dept_qty#ジェラート", "0円ジェラートは円でなく点数(出数)を既定に");
+  const other = call(`defaultGoalKey({bucket:"コース",stores:["1160"],start:"2026-09-01",end:"2026-10-31"})`);
+  assert.ok(other === "sales" || other === "store_sales", "ジェラート以外は従来どおり売上が既定");
+});
+
 await test("目標未入力の販促だけならスコアボードは非表示", () => {
   const { call } = loadForm({ ...base, campaigns: [
     { id: "x", stores: ["1160"], title: "目標なし", kind: "osusume", start: "2026-11-01", end: "2026-12-31" } ] });
