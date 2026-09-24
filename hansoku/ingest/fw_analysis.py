@@ -107,17 +107,50 @@ def probe(artifacts: Path) -> int:
         time.sleep(2)
         session.snapshot("analysis_open")
 
-        ctrl = _dump_store_control(session)
-        print("\n=== 店舗ラベル近傍の outerHTML（先頭1500字）===")
-        print(ctrl.get("ancestorHtml", ""))
-        print("\n=== 画面上部の入力/コンボ候補 ===")
-        for c in ctrl.get("cand", []):
-            print(f"  <{c['tag']}> id={c['id']!r} cls={c['cls']!r} value={c['value']!r} text={c['text']!r} @({c['left']},{c['top']})")
+        # 店舗一覧は ul.options > li.option[value=店コード] にある（開かなくても読める）。
+        stores = session.page.evaluate(
+            """() => [...document.querySelectorAll('li.option')]
+                .map(li => ({code: (li.getAttribute('value')||'').trim(), name: (li.textContent||'').trim()}))
+                .filter(s => s.code)"""
+        )
+        print(f"\n=== 店舗一覧 {len(stores)}件（コード:店名）===")
+        for s in stores[:40]:
+            print(f"  {s['code']}:{s['name']}")
 
-        # 現状の視覚行（店舗未選択でもヘッダは見える）。列構成の確認用。
-        rows = session.page.evaluate(_VISUAL_ROWS_JS)
-        print(f"\n=== 視覚行 総数: {len(rows)}（店舗未選択の可能性あり）===")
-        for r in rows[:20]:
+        # 1店で抽出を確認（すさび湯 0001006）。ドロップダウンを開いて li を選ぶ。
+        target = next((s for s in stores if s["code"].endswith("1006")), stores[0] if stores else None)
+        if not target:
+            print("⚠ 店舗が取れませんでした。")
+            return 1
+        print(f"\n=== 選択: {target['code']}:{target['name']} ===")
+        session.page.evaluate(
+            """(code) => {
+            const btn = document.querySelector('.dropdown-btn.enabledbutton');
+            if (btn) btn.click();
+            const li = [...document.querySelectorAll('li.option')].find(o => (o.getAttribute('value')||'').trim() === code);
+            if (li) li.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));
+            return !!li;
+        }""",
+            target["code"],
+        )
+        # 検索/表示が要る場合に備えて Enter も送る
+        try:
+            session.page.keyboard.press("Enter")
+        except Exception:
+            pass
+
+        rows = []
+        for attempt in range(15):
+            time.sleep(2.5)
+            rows = session.page.evaluate(_VISUAL_ROWS_JS)
+            data = [r for r in rows if r and r[0].replace(",", "").isdigit() and len(r[0]) >= 4]
+            if len(data) >= 3:
+                break
+            print(f"  待機中… ({attempt + 1}) 視覚行={len(rows)}")
+        session.snapshot("analysis_grid")
+        print(f"\n=== 視覚行 総数: {len(rows)} ===")
+        print("=== 先頭60視覚行（コード｜名称｜…｜分析用コード）===")
+        for r in rows[:60]:
             print("  | ".join(r))
     print(f"\n成果物: {artifacts}")
     return 0
