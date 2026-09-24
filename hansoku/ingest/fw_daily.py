@@ -4148,30 +4148,93 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
     _NOTES.append(f"ラジオの状態: {states}")
     print(_NOTES[-1])
 
-    # ⚠️ expect_page を expect_download の外に巻かないこと。sync API の
-    #    `expect_*` は with を抜けるときにイベントを待つので、**ダウンロードが
-    #    成功しても popup 待ちで例外になり、取れたCSVを捨てる**。
-    #    落ちてこなかったときだけ、別タブが開いていないかを後から見る。
-    try:
-        with session.page.expect_download(timeout=180000) as dl:
-            if not (_click_real(session, "ダウンロード")
-                    or _click_exact(session, "ダウンロード")):
-                raise RuntimeError("『ダウンロード』が押せませんでした")
-        data = open(dl.value.path(), "rb").read()
-        print(f"[分析コード] 範囲={scope} / 名前={dl.value.suggested_filename}")
-        return data
-    except Exception as e:  # noqa: BLE001
+    # ブラウザでは普通にCSVが落ちる（利用者に確認済み）。つまり押し方の問題。
+    # 当て方を3通り順に試し、**どれが効いたかを残す**。効いた1つだけを
+    # 本番に残せるように、毎回この記録を見る。
+    #
+    # 1) role=button で名前指定（いちばん素直）
+    # 2) 画面に見えている座標を直接クリック（当たる場所が確実）
+    # 3) JSのclick（合成イベント。効かない実績があるが最後の砦）
+    #
+    # ⚠️ 3通りとも『ダウンロード』の完全一致だけを狙う。すぐ隣に
+    #    『キャンセル』(x=652) がある。
+    ways = (
+        ("role=button", lambda: _click_role_button(session, "ダウンロード")),
+        ("座標", lambda: _click_at_text(session, "ダウンロード")),
+        ("JS", lambda: _click_exact(session, "ダウンロード")),
+    )
+    for name, press in ways:
+        if not _has_exact(session, "ダウンロード"):
+            _NOTES.append(f"{name}: ダイアログがもう無い（前の押下が効いた可能性）")
+            print(_NOTES[-1])
+            break
         try:
-            extra = [p.url for p in session.page.context.pages]
-        except Exception:  # noqa: BLE001
-            extra = []
-        _NOTES.append(f"ダウンロード失敗: {type(e).__name__}: {str(e)[:160]}")
-        _NOTES.append(f"開いているページ: {extra}")
-        print(_NOTES[-2])
-        print(_NOTES[-1])
-        session.snapshot("analysis_csv_failed")
-        _dump_screen(session, "ダウンロードできない")
-        return None
+            # 1回あたりは短く。落ちないと分かったら次の当て方へ回す。
+            with session.page.expect_download(timeout=45000) as dl:
+                ok = press()
+                if not ok:
+                    raise RuntimeError("押せなかった")
+            data = open(dl.value.path(), "rb").read()
+            _NOTES.append(f"✅ 『ダウンロード』は {name} で効いた"
+                          f" / 名前={dl.value.suggested_filename} / {len(data)}バイト")
+            print(_NOTES[-1])
+            return data
+        except Exception as e:  # noqa: BLE001
+            still = _has_exact(session, "ダウンロード")
+            _NOTES.append(f"{name}: 駄目（{type(e).__name__}）"
+                          f" / ダイアログはまだ開いている={still}")
+            print(_NOTES[-1])
+
+    try:
+        extra = [pg.url for pg in session.page.context.pages]
+    except Exception:  # noqa: BLE001
+        extra = []
+    _NOTES.append(f"開いているページ: {extra}")
+    print(_NOTES[-1])
+    session.snapshot("analysis_csv_failed")
+    _dump_screen(session, "ダウンロードできない")
+    return None
+
+
+def _click_role_button(session, name: str) -> bool:
+    """role=button として名前で押す。Playwright の本物のクリック。"""
+    try:
+        loc = session.page.get_by_role("button", name=name, exact=True)
+        if loc.count() == 0:
+            return False
+        loc.first.click(timeout=8000)
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] role=button『{name}』: {type(e).__name__}")
+        return False
+
+
+def _click_at_text(session, label: str) -> bool:
+    """文字が完全一致する要素の**真ん中を座標でクリック**する。
+
+    セレクタで掴めていても、実際に当たっているのが別の要素（覆っている
+    透明な層など）のことがある。座標なら「画面で見えている場所」を押せる。
+    """
+    box = session.page.evaluate(
+        r"""(want) => {
+        for (const el of document.querySelectorAll('button, a, label, div[role=button], span, input')) {
+            if (!el.offsetParent) continue;
+            const t = ((el.innerText || el.value || '').replace(/\s/g, ''));
+            if (t !== want) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width < 2 || r.height < 2) continue;
+            return {x: r.x + r.width / 2, y: r.y + r.height / 2};
+        }
+        return null;
+    }""", label)
+    if not box:
+        return False
+    try:
+        session.page.mouse.click(box["x"], box["y"])
+        return True
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] 座標クリック『{label}』: {type(e).__name__}")
+        return False
 
 
 def _click_real(session, label: str) -> bool:
