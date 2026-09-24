@@ -1054,24 +1054,6 @@ def build(
         m = max(months)
         departments[code] = months[m]
         abc_month[code] = m
-    # 【一時診断】アラカルト客数の推定（全体客数−セット系−TO）を、お通しのある店で突き合わせる。
-    # お通し点数 ≈ 推定 なら推定式は妥当。確認後にこのブロックは削除する。
-    def _bq(dep, nm):
-        b = next((x for x in dep.get("buckets", []) if x["name"] == nm), None)
-        return (b or {}).get("qty", 0)
-    print("[アラカルト客数診断] code: 全体客数 コース ランチ 食放 飲放 TO お通し | 推定(F/D)")
-    for code in sorted(departments):
-        dep = departments[code]
-        m = abc_month.get(code)
-        tot = (covers.get(code, {}) or {}).get(m)
-        if tot is None:
-            continue
-        course, lunch, tabe, nomi = _bq(dep, "コース"), _bq(dep, "ランチ"), _bq(dep, "食べ放題"), _bq(dep, "飲み放題")
-        to = dep.get("takeout_qty", 0)
-        oto = dep.get("alacarte_covers", 0)
-        food_est = tot - course - lunch - tabe - to
-        drink_est = tot - nomi - to
-        print(f"[アラカルト客数診断]   {code}: {tot} {course} {lunch} {tabe} {nomi} {to} {oto} | F={food_est} D={drink_est}")
     for code, months in products_monthly.items():
         if not months:
             continue
