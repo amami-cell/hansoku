@@ -4119,10 +4119,37 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
         _dump_screen(session, "ダイアログが出ない")
         return None
 
-    if not _click_exact(session, scope):
-        print(f"[分析コード] 範囲『{scope}』を選べませんでした（既定のまま進みます）")
-    time.sleep(0.5)
+    # ラベルを押してもラジオが選ばれないことがある（for が張られていない）。
+    # **input を直接押して、選ばれたかを読み直す。** ここを確かめないと
+    # 「全店のつもりで画面表示ぶんだけ落とす」という静かな取り違えになる。
+    picked = session.page.evaluate(
+        r"""(want) => {
+        for (const el of document.querySelectorAll('input[type=radio]')) {
+            if (!el.offsetParent) continue;
+            if ((el.value || '').replace(/\s/g, '') === want) {
+                el.click();
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+                return el.checked;
+            }
+        }
+        return null;
+    }""", scope)
+    if picked is None:
+        print(f"[分析コード] 範囲『{scope}』のラジオが見つかりません（既定のまま進みます）")
+    else:
+        print(f"[分析コード] 範囲『{scope}』を選んだ: checked={picked}")
+    time.sleep(0.8)
+    states = session.page.evaluate(
+        r"""() => [...document.querySelectorAll('input[type=radio]')]
+              .filter(e => e.offsetParent)
+              .map(e => `${e.value}=${e.checked}`)"""
+    )
+    print(f"[分析コード] ラジオの状態: {states}")
 
+    # ⚠️ expect_page を expect_download の外に巻かないこと。sync API の
+    #    `expect_*` は with を抜けるときにイベントを待つので、**ダウンロードが
+    #    成功しても popup 待ちで例外になり、取れたCSVを捨てる**。
+    #    落ちてこなかったときだけ、別タブが開いていないかを後から見る。
     try:
         with session.page.expect_download(timeout=180000) as dl:
             if not _click_exact(session, "ダウンロード"):
@@ -4131,7 +4158,12 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
         print(f"[分析コード] 範囲={scope} / 名前={dl.value.suggested_filename}")
         return data
     except Exception as e:  # noqa: BLE001
+        try:
+            extra = [p.url for p in session.page.context.pages]
+        except Exception:  # noqa: BLE001
+            extra = []
         print(f"[分析コード] ダウンロードできませんでした: {type(e).__name__}: {e}")
+        print(f"[分析コード] 開いているページ: {extra}")
         session.snapshot("analysis_csv_failed")
         _dump_screen(session, "ダウンロードできない")
         return None
