@@ -17,6 +17,72 @@ from .fw_browser import fw_session
 
 NAV = ("マスタ管理", "販売マスタ", "分析用コード設定")
 
+# グリッドの見えている行を {商品CD, 名称, 分析用コード} で吸い出す。分析用コードは行内の
+# input 値（空欄＝未入力）。EJS TreeGrid は固定列/スクロール列が別描画なので、CD セルと
+# 同じ縦位置(top±6px)の葉を1行に束ねる。
+_EXTRACT_JS = r"""() => {
+    const clip = s => (s || '').replace(/\s+/g, ' ').trim();
+    const all = [];
+    for (const el of document.querySelectorAll('td, div, span, input')) {
+        if (!el.offsetParent) continue;
+        if (el.children && el.children.length) continue;
+        const r = el.getBoundingClientRect();
+        if (r.top < 175 || r.width === 0 || r.height === 0) continue;   // ヘッダより下だけ
+        const isInput = el.tagName === 'INPUT';
+        const txt = clip(isInput ? el.value : el.innerText);
+        all.push({ top: Math.round(r.top), left: Math.round(r.left), txt, isInput });
+    }
+    const cds = all.filter(a => !a.isInput && /^\d{10,}$/.test(a.txt));
+    const rows = [];
+    for (const cd of cds) {
+        const row = all.filter(a => Math.abs(a.top - cd.top) <= 6).sort((a, b) => a.left - b.left);
+        let name = '';
+        for (const c of row) { if (c.left > cd.left && c.txt && !/^[\d.]/.test(c.txt)) { name = c.txt; break; } }
+        const inputs = row.filter(a => a.isInput);
+        const code = inputs.length ? inputs[inputs.length - 1].txt : '';
+        rows.push({ cd: cd.txt, name, code });
+    }
+    return rows;
+}"""
+
+# グリッド本体を1画面ぶん下へ送る。実際に動いたら true。
+_SCROLL_JS = r"""() => {
+    const cands = [...document.querySelectorAll('div, table, tbody')].filter(el => {
+        const r = el.getBoundingClientRect();
+        return el.scrollHeight > el.clientHeight + 20 && el.clientHeight > 120 && r.top > 120;
+    });
+    if (!cands.length) return false;
+    cands.sort((a, b) => b.clientHeight - a.clientHeight);
+    const el = cands[0];
+    const before = el.scrollTop;
+    el.scrollTop = before + Math.round(el.clientHeight * 0.85);
+    return el.scrollTop > before;
+}"""
+
+
+def _collect_all_rows(session, *, max_steps: int = 300) -> list[dict]:
+    """グリッドを最後まで送りながら全行を集める（商品CDで重複排除）。"""
+    seen: dict[str, dict] = {}
+    stagnant = 0
+    for _ in range(max_steps):
+        for r in session.page.evaluate(_EXTRACT_JS):
+            if r["cd"] and r["cd"] not in seen:
+                seen[r["cd"]] = r
+        before = len(seen)
+        moved = session.page.evaluate(_SCROLL_JS)
+        time.sleep(0.5)
+        for r in session.page.evaluate(_EXTRACT_JS):
+            if r["cd"] and r["cd"] not in seen:
+                seen[r["cd"]] = r
+        # 動かない or 増えない が続いたら終了（最下部に到達）。
+        if not moved or len(seen) == before:
+            stagnant += 1
+            if stagnant >= 3:
+                break
+        else:
+            stagnant = 0
+    return list(seen.values())
+
 # EJS TreeGrid は固定列とスクロール列を別テーブルに描くため、DOMの葉を画面上の縦位置(top)で
 # まとめて1視覚行に復元する（fw_daily の _VISUAL_ROWS_JS と同手法。input値も拾う）。
 _VISUAL_ROWS_JS = r"""() => {
@@ -139,18 +205,26 @@ def probe(artifacts: Path) -> int:
         except Exception:
             pass
 
-        rows = []
+        # 描画待ち（最初の数行が出るまで）。
         for attempt in range(15):
-            time.sleep(2.5)
-            rows = session.page.evaluate(_VISUAL_ROWS_JS)
-            data = [r for r in rows if r and r[0].replace(",", "").isdigit() and len(r[0]) >= 4]
-            if len(data) >= 3:
+            time.sleep(2.0)
+            if len(session.page.evaluate(_EXTRACT_JS)) >= 3:
                 break
-            print(f"  待機中… ({attempt + 1}) 視覚行={len(rows)}")
+            print(f"  待機中… ({attempt + 1})")
+        # 最後までスクロールして全行を集める。
+        rows = _collect_all_rows(session)
         session.snapshot("analysis_grid")
-        print(f"\n=== 視覚行 総数: {len(rows)} ===")
-        print("=== 先頭60視覚行（コード｜名称｜…｜分析用コード）===")
-        for r in rows[:60]:
-            print("  | ".join(r))
+        missing = [r for r in rows if not r["code"]]
+        codes = {}
+        for r in rows:
+            codes[r["code"] or "(空欄)"] = codes.get(r["code"] or "(空欄)", 0) + 1
+        print(f"\n=== 取得 総行数: {len(rows)} ===")
+        print(f"=== 分析用コード分布: {dict(sorted(codes.items(), key=lambda x: str(x[0])))}")
+        print(f"=== 分析用コード未入力: {len(missing)}件 ===")
+        for r in missing[:30]:
+            print(f"  未入力 CD={r['cd']} 名称={r['name']}")
+        print("=== サンプル 先頭20行（CD｜名称｜コード）===")
+        for r in rows[:20]:
+            print(f"  {r['cd']} | {r['name']} | {r['code'] or '(空欄)'}")
     print(f"\n成果物: {artifacts}")
     return 0
