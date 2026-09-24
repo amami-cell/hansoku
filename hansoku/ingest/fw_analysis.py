@@ -243,68 +243,85 @@ def _wait_grid_change(session, prev_cds: set[str], tries: int = 20) -> bool:
     return len(session.page.evaluate(_EXTRACT_JS)) >= 3
 
 
-def _open_screen(session) -> bool:
-    """TOP から 分析用コード設定 を開き直す（店ごとに新しいグリッドから始めるため）。"""
-    session.click_text("TOP")
-    time.sleep(1)
+def _nav_to_screen(session) -> bool:
+    """ログイン直後の画面から 分析用コード設定 まで開く。"""
     for label in NAV:
         if not session.click_text(label):
+            session.snapshot(f"missing_{label}")
+            print(f"⚠ 「{label}」が見つかりませんでした。")
             return False
-    time.sleep(1.5)
+    time.sleep(2)
     return True
+
+
+def _read_one_store(artifacts: Path, code: str, name: str) -> list[dict] | None:
+    """1店を『新しいセッションの最初の1店』として読む。
+
+    同一セッション内で店を切り替えるとグリッドが再読込されず空になる（実測）。
+    ログインからやり直して毎回『最初の1店』の経路に乗せると確実に全行取れるので、
+    速度より確実さを取り、店ごとにセッションを開き直す。
+    """
+    with fw_session(artifacts) as session:
+        if not _nav_to_screen(session):
+            return None
+        if not session.page.evaluate(_SELECT_STORE_JS, code):
+            print(f"    ⚠ {name}：店舗選択に失敗。")
+            return None
+        # 検索/表示が要る画面に備えて Enter も送る（probe と同じ作法）。
+        try:
+            session.page.keyboard.press("Enter")
+        except Exception:
+            pass
+        if not _wait_grid(session):
+            print(f"    ⚠ {name}：グリッドが出ませんでした。")
+            return None
+        return _collect_all_rows(session)
 
 
 def ingest(artifacts: Path, db, active_codes: set[str], *, dry_run: bool = False, limit: int | None = None) -> int:
     """イニシエート（active）店の 商品→分析用コード を全店読み取り、Neon に保存。
-    店ごとに画面を開き直す（店内切替だと再読込されないことがあるため）。"""
+    店ごとにログインし直し、毎回『最初の1店』として読む（店内切替の再読込不良を避ける）。"""
+    # まず1セッションで店舗一覧（li.option）を取得する。
     with fw_session(artifacts) as session:
-        for label in NAV:
-            if not session.click_text(label):
-                session.snapshot(f"missing_{label}")
-                print(f"⚠ 「{label}」が見つかりませんでした。")
-                return 1
-        time.sleep(2)
+        if not _nav_to_screen(session):
+            return 1
         stores = _store_options(session)
-        # FWコード(0001006) → アプリコード(1006)。active（イニシエート）だけに絞る。
-        targets = []
-        for s in stores:
-            try:
-                app = str(int(s["code"]))
-            except ValueError:
-                continue
-            if app in active_codes:
-                targets.append({"app": app, **s})
-        if limit:
-            targets = targets[:limit]
-        print(f"=== 対象（イニシエート）{len(targets)}店 / FW全体 {len(stores)}店 ===")
 
-        grand_rows = grand_missing = 0
-        for i, s in enumerate(targets):
-            # 2店目以降は画面を開き直してから店を選ぶ（新しいグリッドから読む）。
-            if i > 0 and not _open_screen(session):
-                print(f"⚠ {s['app']} {s['name']}：画面の開き直しに失敗。スキップ。")
-                continue
-            if not session.page.evaluate(_SELECT_STORE_JS, s["code"]):
-                print(f"⚠ {s['app']} {s['name']}：店舗選択に失敗。スキップ。")
-                continue
-            _wait_grid(session)
-            rows = _collect_all_rows(session)
-            recs = [
-                {
-                    "product_code": r["cd"],
-                    "product_name": r["name"],
-                    "analysis_code": int(r["code"]) if r["code"] else None,
-                }
-                for r in rows
-                if r["cd"]
-            ]
-            missing = sum(1 for r in recs if r["analysis_code"] is None)
-            if not dry_run and recs:
-                db.replace_analysis_codes(s["app"], recs)
-            grand_rows += len(recs)
-            grand_missing += missing
-            print(f"  {s['app']} {s['name']}: {len(recs)}件 / 未入力 {missing}件 {'(dry-run)' if dry_run else '→ 保存'}")
-        print(f"\n=== 合計 {len(targets)}店 / {grand_rows}件 / 未入力 {grand_missing}件 {'(dry-run・未保存)' if dry_run else '保存済み'} ===")
+    # FWコード(0001006) → アプリコード(1006)。active（イニシエート）だけに絞る。
+    targets = []
+    for s in stores:
+        try:
+            app = str(int(s["code"]))
+        except ValueError:
+            continue
+        if app in active_codes:
+            targets.append({"app": app, **s})
+    if limit:
+        targets = targets[:limit]
+    print(f"=== 対象（イニシエート）{len(targets)}店 / FW全体 {len(stores)}店 ===")
+
+    grand_rows = grand_missing = 0
+    for s in targets:
+        rows = _read_one_store(artifacts, s["code"], s["name"])
+        if rows is None:
+            print(f"  {s['app']} {s['name']}: 取得失敗（スキップ）")
+            continue
+        recs = [
+            {
+                "product_code": r["cd"],
+                "product_name": r["name"],
+                "analysis_code": int(r["code"]) if r["code"] else None,
+            }
+            for r in rows
+            if r["cd"]
+        ]
+        missing = sum(1 for r in recs if r["analysis_code"] is None)
+        if not dry_run and recs:
+            db.replace_analysis_codes(s["app"], recs)
+        grand_rows += len(recs)
+        grand_missing += missing
+        print(f"  {s['app']} {s['name']}: {len(recs)}件 / 未入力 {missing}件 {'(dry-run)' if dry_run else '→ 保存'}")
+    print(f"\n=== 合計 {len(targets)}店 / {grand_rows}件 / 未入力 {grand_missing}件 {'(dry-run・未保存)' if dry_run else '保存済み'} ===")
     return 0
 
 
