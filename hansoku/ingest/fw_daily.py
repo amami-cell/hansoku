@@ -95,7 +95,24 @@ def report_probe(artifacts: Path, path_str: str) -> int:
     labels = [s.strip() for s in path_str.split(",") if s.strip()]
     last_label = labels[-1] if labels else path_str
     with fw_session(artifacts) as session:
-        _open_menu(session, labels)
+        # 1段ずつ押して、**そのたびに画面の項目を出す**。
+        # まとめて `_open_menu` で開くと、失敗した段の画面しか見られない。
+        # 同じ名前の項目が2か所にあると（販売管理はナビとマスタ管理の下の
+        # 両方にある）、狙いと違うほうを押しても気づけない。位置(x,y)まで
+        # 出すのは、どちらを押したのかを見分けるため。
+        for i, label in enumerate(labels, 1):
+            ok = session.click_text(label)
+            items = session.dump_clickables(f"step{i}_{label}")
+            print(f"[probe] {i}. 「{label}」 {'押せた' if ok else '押せなかった'}"
+                  f" → いま画面にある項目 {len(items)}件")
+            for it in items:
+                t = " ".join((it.get("text") or "").split())
+                if t:
+                    print(f"    {it.get('tag',''):<6} x={it.get('x',0):>4} y={it.get('y',0):>4}"
+                          f"  {t[:38]}")
+            if not ok:
+                session.snapshot(f"missing_{label}")
+                raise FWError(f"「{label}」に進めませんでした")
         items = session.dump_clickables("report_screen")
         print(f"[report] 「{last_label}」の操作要素 {len(items)}件")
         print("[report] クリック要素テキスト一覧:")
