@@ -4602,9 +4602,11 @@ def _describe_analysis_csv(data: bytes) -> None:
 def audit_analysis_codes(
     artifacts: Path,
     master,
+    warehouse=None,
     *,
     store_filter: str = "",
     store_limit: int | None = None,
+    months: int = 3,
 ) -> int:
     """全店の分析用コードの入力漏れを調べ、あれば赤くする。FWには書き込まない。
 
@@ -4633,12 +4635,22 @@ def audit_analysis_codes(
         print(f"[分析コード] 店舗コンボ {len(options)}件")
 
         active = {s.store_code: s for s in master.active}
-        targets = []
+        targets, not_fw = [], []
         for opt in options:
             code = opt["value"].lstrip("0")
             st = active.get(code) or master.find_by_name(opt["name"])
-            if st and st.active:
-                targets.append((opt, st))
+            if not (st and st.active):
+                continue
+            # ⚠️ FW未連動の店（1766＝uレジ）はFWにメニューが無い。取れなくて
+            #    当たり前なので、**取り漏れとして赤くしない**。黙って飛ばすのも
+            #    違うので、理由を添えて別に数える。カバレッジと同じ扱い。
+            if getattr(st, "pos", "fw") != "fw":
+                not_fw.append(st)
+                continue
+            targets.append((opt, st))
+        for st in not_fw:
+            print(f"  ― {st.store_code} {st.store_name[:14]}  "
+                  f"FW未連動（メニューはFWに無い）ので対象外")
         if key:
             targets = [(o, s) for o, s in targets
                        if s.store_code == key.lstrip("0") or key in s.store_name]
@@ -4671,7 +4683,12 @@ def audit_analysis_codes(
             mark = "⚠" if n else "✓"
             print(f"  {mark} {label}  メニュー {got['total']}件 / 未設定 {n}件")
 
-    return _report_analysis_codes(per_store, failures)
+    # 直近の商品別売上と突き合わせ、**実際に売れているもの**だけを赤にする。
+    # `お冷`・`コピー`・`-` のような売れないメニューまで赤にすると、
+    # 一覧が2701件になって誰も着手しない（実際そうなった）。
+    sold, judged = _sold_menu_keys(
+        warehouse, [p["store"].store_code for p in per_store], months)
+    return _report_analysis_codes(per_store, failures, sold=sold, judged=judged)
 
 
 def _read_csv_rows(data: bytes) -> list[list[str]]:
@@ -4687,42 +4704,151 @@ def _read_csv_rows(data: bytes) -> list[list[str]]:
     return []
 
 
-def _report_analysis_codes(per_store: list[dict], failures: list[str]) -> int:
+def menu_key(name: str) -> str:
+    """メニュー名の突き合わせキー。全角/半角・空白の揺れを吸収する。
+
+    FWのABC側と分析用コード設定側で表記が微妙に違うことがあるので、
+    店名の `store_key` と同じ考え方で寄せる。
+    """
+    import unicodedata
+
+    s = unicodedata.normalize("NFKC", str(name or ""))
+    return "".join(s.split()).casefold()
+
+
+def _sold_menu_keys(warehouse, store_codes, months: int):
+    """直近 months ヶ月に**売れた**メニューの鍵を店ごとに集める。
+
+    返り値は (売れた鍵の集合, 判定できた店の集合)。
+
+    ⚠️ **売上データが1件も無い店を「売れていない」と扱わない。** そうすると
+       ABCが未取得なだけの店が全部「影響なし」になり、静かに見逃す。
+       判定できた店だけを `judged` に入れ、それ以外は要確認として扱う。
+    """
+    if warehouse is None:
+        return set(), set()
+    from datetime import date as _date
+
+    from ..db.warehouse import AggregateQuery
+    from ..model import GRAIN_MONTH, METRIC_PRODUCT_SALES
+
+    today = _date.today()
+    y, m = today.year, today.month
+    for _ in range(max(months, 1)):
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    start = _date(y, m, 1)
+    end = _date(today.year + (today.month == 12), 1 if today.month == 12 else today.month + 1, 1)
+
+    sold: set[tuple[str, str]] = set()
+    judged: set[str] = set()
+    try:
+        for row in warehouse.aggregate(AggregateQuery(
+            date_from=start, date_to=end, grain=GRAIN_MONTH,
+            metrics=[METRIC_PRODUCT_SALES], store_codes=list(store_codes),
+            group_by=("store_code", "product_name"),
+        )):
+            code = str(row.get("store_code") or "")
+            judged.add(code)
+            if (row.get("value") or 0) > 0 and row.get("product_name"):
+                sold.add((code, menu_key(row["product_name"])))
+    except Exception as e:  # noqa: BLE001
+        print(f"[分析コード] 商品別売上を読めませんでした: {type(e).__name__}: {e}")
+        return set(), set()
+    print(f"[分析コード] 直近{months}ヶ月の商品別売上: {len(judged)}店 / {len(sold)}品")
+    return sold, judged
+
+
+def classify_blank(blank: dict, sold: set, judged: set) -> str:
+    """コード未設定のメニュー1件を仕分ける。
+
+    - "売れた"   … 直近に売上がある。**資料の数字が狂っている**ので要対応
+    - "売れてない" … 売上が無い。アラカルトに紛れても影響しない
+    - "判定不能" … その店の商品別売上が無く、判断できない。**見逃さないため
+                   に赤の側に寄せる**（「売れてない」に倒すと静かに見逃す）
+    """
+    code = blank.get("store_code") or ""
+    if code not in judged:
+        return "判定不能"
+    return "売れた" if (code, menu_key(blank.get("menu", ""))) in sold else "売れてない"
+
+
+def _report_analysis_codes(per_store: list[dict], failures: list[str],
+                           *, sold: set | None = None,
+                           judged: set | None = None) -> int:
     """結果をまとめて出し、赤くするかを決める。
+
+    **赤にするのは「売れているのにコードが無い」ものだけ。** 全部を赤に
+    すると一覧が2701件になり、`お冷` や `コピー` が混じったまま誰も着手
+    しない（実際そうなった）。売れていないメニューはアラカルトに紛れても
+    影響しないので、数だけ出す。
+
+    ⚠️ 商品別売上が無くて**判定できなかった店は赤の側**に寄せる。
+       「売れてない」に倒すと、ABCが未取得なだけの店を静かに見逃す。
 
     ⚠️ **金額は出さない。** この画面には単価と原価が載っていて、この
        リポジトリは公開。出すのはメニュー名と件数だけにする。
     """
+    sold = sold or set()
+    judged = judged or set()
     print("")
     print("=== 分析用コードの入力漏れ ===")
-    total_menu = sum(p["got"]["total"] for p in per_store)
-    gaps = [p for p in per_store if p["got"]["blank"]]
-    total_gap = sum(len(p["got"]["blank"]) for p in per_store)
 
-    for p in sorted(gaps, key=lambda p: -len(p["got"]["blank"])):
+    rows: list[tuple] = []          # (店, 要対応, 判定不能, 影響なし, 要対応の名前)
+    for p in per_store:
         st, got = p["store"], p["got"]
-        print(f"  ⚠ {st.store_code} {st.store_name[:16]:<16} "
-              f"{got['total']}件中 {len(got['blank'])}件が未設定")
-        for b in got["blank"][:5]:
-            print(f"        {b['menu'][:34]}")
-        if len(got["blank"]) > 5:
-            print(f"        …ほか {len(got['blank']) - 5}件")
+        buckets: dict[str, list[str]] = {"売れた": [], "判定不能": [], "売れてない": []}
+        for b in got["blank"]:
+            buckets[classify_blank(b, sold, judged)].append(b["menu"])
+        rows.append((st, got, buckets))
 
-    ok = [p for p in per_store if not p["got"]["blank"]]
-    if ok:
-        print(f"  ✓ 漏れ無し {len(ok)}店: "
-              f"{', '.join(p['store'].store_code for p in ok)}")
+    need = [(st, got, bk) for st, got, bk in rows if bk["売れた"] or bk["判定不能"]]
+    for st, got, bk in sorted(need, key=lambda r: -(len(r[2]["売れた"]) + len(r[2]["判定不能"]))):
+        head = f"  ⚠ {st.store_code} {st.store_name[:16]:<16} {got['total']}件中 "
+        parts = []
+        if bk["売れた"]:
+            parts.append(f"売れているのに未設定 {len(bk['売れた'])}件")
+        if bk["判定不能"]:
+            parts.append(f"判定不能 {len(bk['判定不能'])}件")
+        if bk["売れてない"]:
+            parts.append(f"（売れていない {len(bk['売れてない'])}件は影響なし）")
+        print(head + " / ".join(parts))
+        for nm in (bk["売れた"] or bk["判定不能"])[:8]:
+            print(f"        {nm[:34]}")
+        rest = len(bk["売れた"] or bk["判定不能"]) - 8
+        if rest > 0:
+            print(f"        …ほか {rest}件")
 
-    print(f"=== 調べた {len(per_store)}店 / メニュー {total_menu}件 / "
-          f"未設定 {total_gap}件（{len(gaps)}店）===")
+    clean = [r for r in rows if not (r[2]["売れた"] or r[2]["判定不能"])]
+    if clean:
+        harmless = sum(len(r[2]["売れてない"]) for r in clean)
+        note = f"（売れていない未設定 {harmless}件は影響なし）" if harmless else ""
+        print(f"  ✓ 対応不要 {len(clean)}店: "
+              f"{', '.join(r[0].store_code for r in clean)} {note}")
+
+    n_sold = sum(len(bk["売れた"]) for _, _, bk in rows)
+    n_unknown = sum(len(bk["判定不能"]) for _, _, bk in rows)
+    n_harmless = sum(len(bk["売れてない"]) for _, _, bk in rows)
+    total_menu = sum(got["total"] for _, got, _ in rows)
+    print(f"=== 調べた {len(rows)}店 / メニュー {total_menu}件 / 未設定 "
+          f"{n_sold + n_unknown + n_harmless}件 "
+          f"（要対応 {n_sold} / 判定不能 {n_unknown} / 影響なし {n_harmless}）===")
 
     if failures:
         print(f"::error::[分析コード] 調べられなかった店 {len(failures)}件: {failures}")
-    if total_gap:
-        # 資料は完成して見えるので、ここで赤くしないと誰も気づけない。
-        print(f"::error::[分析コード] 分析用コードが未設定のメニューが {total_gap}件 "
-              f"あります。店長会資料ではこのぶんがアラカルトに紛れ込みます")
-    if failures or total_gap:
+    if n_sold:
+        print(f"::error::[分析コード] **売れているのに分析用コードが無い**メニューが "
+              f"{n_sold}件あります。このぶんの売上は店長会資料でアラカルトに"
+              f"紛れ込み、宴会・ランチ・ツアー等の数字が実際より小さく出ます")
+    if n_unknown:
+        print(f"::error::[分析コード] 商品別売上が無く判定できないメニューが "
+              f"{n_unknown}件あります（その店のABCが未取得の可能性）")
+    if failures or n_sold or n_unknown:
         return 1
-    print("分析用コードの入力漏れはありません。")
+    if n_harmless:
+        print(f"売れているメニューの取りこぼしはありません"
+              f"（売れていない未設定 {n_harmless}件は影響なし）。")
+    else:
+        print("分析用コードの入力漏れはありません。")
     return 0

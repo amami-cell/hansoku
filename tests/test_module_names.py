@@ -77,3 +77,24 @@ def _undefined_names(path: pathlib.Path) -> list[str]:
 def test_使っている名前が全部ある():
     # ⚠️ ここが落ちたら、編集で定義を消したか綴りを間違えている。
     assert _undefined_names(SRC) == []
+
+
+def _duplicate_defs(path: pathlib.Path) -> list[str]:
+    """モジュール直下で同じ名前を2回定義していないか。
+
+    範囲指定の編集を誤って**ブロックごと二重化**し、古い定義が後ろに残って
+    そちらが勝った。テストは全部通り、本番だけ古い挙動になる。名前は
+    存在するので `_undefined_names` では捕まらない。
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    seen: dict[str, int] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            seen[node.name] = seen.get(node.name, 0) + 1
+    return sorted(n for n, c in seen.items() if c > 1)
+
+
+def test_同じ名前を二度定義していない():
+    # ⚠️ ここが落ちたら、編集でブロックを二重化している。
+    #    **後ろの定義が勝つ**ので、直したつもりの変更が効かない。
+    assert _duplicate_defs(SRC) == []

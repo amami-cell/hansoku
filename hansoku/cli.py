@@ -598,12 +598,17 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
         # 診断＋警報。FWには書き込まない（押すのは CSV出力 とダウンロードだけ）。
         from .ingest.fw_daily import audit_analysis_codes
 
-        return audit_analysis_codes(
-            Path(args.artifacts),
-            StoreMaster.load(args.stores),
-            store_filter=args.abc_store or "",
-            store_limit=args.limit,
-        )
+        # 商品別売上と突き合わせるので warehouse を開く（読むだけ）。
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_warehouse(settings) as warehouse:
+            return audit_analysis_codes(
+                Path(args.artifacts),
+                master,
+                warehouse,
+                store_filter=args.abc_store or "",
+                store_limit=args.limit,
+            )
     if args.mode == "analysis-code-probe":
         # 診断のみ。DBにもFWにも書き込まない（押すのは CSV出力 だけ）。
         from .ingest.fw_daily import probe_analysis_codes
