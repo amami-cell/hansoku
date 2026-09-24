@@ -42,6 +42,7 @@ on:
           - manager-dl-probe
           - abc-campaign
           - gelato-switch
+          - analysis-probe
         default: explore
       runner:
         description: '実行環境: hosted=GitHub提供(無料枠を消費) / self-hosted=自前ランナー(枠を消費しない)'
@@ -330,6 +331,8 @@ jobs:
               xvfb-run -a python -m hansoku.cli fw-daily --mode abc-dom-probe \
                 --abc-store "${{ inputs.abc_store }}" \
                 --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "analysis-probe" ]; then
+              xvfb-run -a python -m hansoku.cli fw-analysis --artifacts fw-artifacts
             else
               xvfb-run -a python -m hansoku.cli fw-explore $args --artifacts fw-artifacts
             fi

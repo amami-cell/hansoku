@@ -317,6 +317,12 @@ def cmd_fw_stores(args: argparse.Namespace) -> int:
     return list_stores(Path(args.artifacts))
 
 
+def cmd_fw_analysis(args: argparse.Namespace) -> int:
+    from .ingest.fw_analysis import probe
+
+    return probe(Path(args.artifacts))
+
+
 def cmd_fw_budget(args: argparse.Namespace) -> int:
     from .ingest.fw_budget import ingest, probe
 
@@ -988,6 +994,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fwstores.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
     fwstores.set_defaults(func=cmd_fw_stores)
+
+    fwanalysis = sub.add_parser(
+        "fw-analysis", help="FW『分析用コード設定』（商品→分析用コード）を調べる"
+    )
+    fwanalysis.add_argument("--artifacts", default=".local/fw-artifacts", help="記録の保存先")
+    fwanalysis.set_defaults(func=cmd_fw_analysis)
 
     fwbudget = sub.add_parser(
         "fw-budget", help="FW月別予算登録から売上予算を取り込む"
