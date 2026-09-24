@@ -546,11 +546,14 @@ function makeGoalRows(container, getCtx, forceEl) {
     const def = selBand || (list.find(b => b.key === "dinner") || list[0] || {}).key;
     return list.map(b => `<option value="${b.key}"${b.key === def ? " selected" : ""}>${esc(b.label)}（${esc(b.range)}）</option>`).join("");
   };
-  // 部門/商品の選択肢（名前の一覧から）。無ければ「（データなし）」。
+  // 部門/商品の選択肢（名前の一覧から）。保存済みの選択が一覧に無ければ（商品が上位50から
+  // 外れた・その月に部門が無い等）末尾に足して選択を保持する（勝手に別の値へすり替えない）。
   const listOptsHtml = (names, selName) => {
-    if (!names.length) return `<option value="">（データなし）</option>`;
-    const def = (selName && names.includes(selName)) ? selName : names[0];
-    return names.map(n => `<option value="${esc(n)}"${n === def ? " selected" : ""}>${esc(n)}</option>`).join("");
+    let list = names.slice();
+    if (selName && !list.includes(selName)) list = list.concat(selName);
+    if (!list.length) return `<option value="">（データなし）</option>`;
+    const def = (selName && list.includes(selName)) ? selName : list[0];
+    return list.map(n => `<option value="${esc(n)}"${n === def ? " selected" : ""}>${esc(n)}</option>`).join("");
   };
   // 指標に応じた「もう1段の選択肢」（時間帯／部門／商品）。
   const subOptsHtml = (base, selVal) => {
