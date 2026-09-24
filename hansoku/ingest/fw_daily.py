@@ -3995,6 +3995,7 @@ def probe_analysis_codes(artifacts: Path, master, store: str = "") -> int:
 
     key = (store or "").strip()
     with fw_session(artifacts) as session:
+        _watch_page(session)
         _open_menu(session, ANALYSIS_CODE_MENU)
         options = _wait_combo_options(session)
         print(f"[分析コード] 店舗コンボ {len(options)}件")
@@ -4047,7 +4048,7 @@ def probe_analysis_codes(artifacts: Path, master, store: str = "") -> int:
             print("")
             print("=== 結論 ===")
             print("  経路とグリッド表示までは通った。CSVのダウンロードだけが未完。")
-            for line in _NOTES:
+            for line in _NOTES[-25:]:
                 print(f"  {line}")
             return 1
         print(f"[分析コード] CSVを取得: {len(data)} バイト")
@@ -4194,6 +4195,39 @@ def _download_analysis_csv(session, scope: str = "全店") -> bytes | None:
     session.snapshot("analysis_csv_failed")
     _dump_screen(session, "ダウンロードできない")
     return None
+
+
+def _watch_page(session) -> None:
+    """画面が出す合図を拾う。**押したのに何も起きない**の原因を掴むため。
+
+    ⚠️ いちばん効くのはこれ。**Playwright は `alert` / `confirm` を
+       既定で自動的に却下する。** 「この内容でよろしいですか？」のような
+       確認が出ていると、黙って消されて処理が止まる。押したのに
+       ダイアログが開いたまま、という症状はこれで説明がつく。
+       受け入れる側に倒す（読み取りの画面なので、確認に「はい」で進んで
+       困るものは無い。押しているのは『ダウンロード』だけ）。
+    """
+    page = session.page
+
+    def _on_dialog(d):
+        _NOTES.append(f"画面の確認ダイアログ: {d.type} / {d.message[:80]!r} → 受け入れる")
+        print(_NOTES[-1])
+        try:
+            d.accept()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_console(m):
+        if m.type in ("error", "warning"):
+            _NOTES.append(f"コンソール {m.type}: {m.text[:120]}")
+
+    def _on_failed(r):
+        _NOTES.append(f"通信が失敗: {r.url[:90]}")
+
+    page.on("dialog", _on_dialog)
+    page.on("console", _on_console)
+    page.on("requestfailed", _on_failed)
+    page.on("download", lambda d: _NOTES.append(f"download事象: {d.suggested_filename}"))
 
 
 def _click_role_button(session, name: str) -> bool:
