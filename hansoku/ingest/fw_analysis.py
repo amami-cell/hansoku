@@ -243,8 +243,20 @@ def _wait_grid_change(session, prev_cds: set[str], tries: int = 20) -> bool:
     return len(session.page.evaluate(_EXTRACT_JS)) >= 3
 
 
+def _open_screen(session) -> bool:
+    """TOP から 分析用コード設定 を開き直す（店ごとに新しいグリッドから始めるため）。"""
+    session.click_text("TOP")
+    time.sleep(1)
+    for label in NAV:
+        if not session.click_text(label):
+            return False
+    time.sleep(1.5)
+    return True
+
+
 def ingest(artifacts: Path, db, active_codes: set[str], *, dry_run: bool = False, limit: int | None = None) -> int:
-    """イニシエート（active）店の 商品→分析用コード を全店読み取り、Neon に保存。"""
+    """イニシエート（active）店の 商品→分析用コード を全店読み取り、Neon に保存。
+    店ごとに画面を開き直す（店内切替だと再読込されないことがあるため）。"""
     with fw_session(artifacts) as session:
         for label in NAV:
             if not session.click_text(label):
@@ -267,20 +279,16 @@ def ingest(artifacts: Path, db, active_codes: set[str], *, dry_run: bool = False
         print(f"=== 対象（イニシエート）{len(targets)}店 / FW全体 {len(stores)}店 ===")
 
         grand_rows = grand_missing = 0
-        prev_cds: set[str] = set()
-        first = True
-        for s in targets:
+        for i, s in enumerate(targets):
+            # 2店目以降は画面を開き直してから店を選ぶ（新しいグリッドから読む）。
+            if i > 0 and not _open_screen(session):
+                print(f"⚠ {s['app']} {s['name']}：画面の開き直しに失敗。スキップ。")
+                continue
             if not session.page.evaluate(_SELECT_STORE_JS, s["code"]):
                 print(f"⚠ {s['app']} {s['name']}：店舗選択に失敗。スキップ。")
                 continue
-            # 店切替はグリッドが前店から変わるまで待つ（初回は描画待ち）。
-            if first:
-                _wait_grid(session)
-                first = False
-            else:
-                _wait_grid_change(session, prev_cds)
+            _wait_grid(session)
             rows = _collect_all_rows(session)
-            prev_cds = {r["cd"] for r in rows if r["cd"]}
             recs = [
                 {
                     "product_code": r["cd"],
