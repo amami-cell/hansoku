@@ -64,24 +64,32 @@ _SCROLL_JS = r"""() => {
 }"""
 
 
-def _collect_all_rows(session, *, max_steps: int = 300) -> list[dict]:
-    """グリッドを最後まで送りながら全行を集める（商品CDで重複排除）。"""
+def _collect_all_rows(session, *, max_steps: int = 500) -> list[dict]:
+    """グリッドを最後まで送りながら全行を集める（商品CDで重複排除）。
+    仮想スクロールなので、グリッド上にマウスを置いてホイールで送る（container 探索より確実）。"""
+    page = session.page
     seen: dict[str, dict] = {}
+    try:
+        page.mouse.move(700, 450)
+    except Exception:
+        pass
     stagnant = 0
     for _ in range(max_steps):
-        for r in session.page.evaluate(_EXTRACT_JS):
+        for r in page.evaluate(_EXTRACT_JS):
             if r["cd"] and r["cd"] not in seen:
                 seen[r["cd"]] = r
         before = len(seen)
-        moved = session.page.evaluate(_SCROLL_JS)
-        time.sleep(0.5)
-        for r in session.page.evaluate(_EXTRACT_JS):
+        try:
+            page.mouse.wheel(0, 1600)
+        except Exception:
+            page.evaluate(_SCROLL_JS)
+        time.sleep(0.35)
+        for r in page.evaluate(_EXTRACT_JS):
             if r["cd"] and r["cd"] not in seen:
                 seen[r["cd"]] = r
-        # 動かない or 増えない が続いたら終了（最下部に到達）。
-        if not moved or len(seen) == before:
+        if len(seen) == before:
             stagnant += 1
-            if stagnant >= 3:
+            if stagnant >= 6:
                 break
         else:
             stagnant = 0
@@ -244,22 +252,17 @@ def probe(artifacts: Path) -> int:
                 break
             print(f"  待機中… ({attempt + 1})")
 
-        # 全行を確実に取るため CSV出力 を試す。
-        csv_text = _capture_csv(session, artifacts)
-        if csv_text is not None:
-            lines = [ln for ln in csv_text.splitlines() if ln.strip()]
-            print(f"\n=== CSV出力 取得成功：{len(lines)}行 ===")
-            print("=== CSVヘッダ＋先頭8行 ===")
-            for ln in lines[:9]:
-                print("  " + ln[:300])
-        else:
-            print("\n=== CSV出力は不可。グリッド読取にフォールバック ===")
-
-        # 参考：グリッド読取（未入力検出の確認用。仮想スクロールのため一部のみ）。
+        # ホイールで最後まで送りながら全行を集める。
         rows = _collect_all_rows(session)
+        session.snapshot("analysis_grid")
         missing = [r for r in rows if not r["code"]]
-        print(f"\n=== グリッド読取 {len(rows)}行 / 未入力 {len(missing)}件（参考）===")
-        for r in missing[:20]:
+        codes: dict[str, int] = {}
+        for r in rows:
+            codes[r["code"] or "(空欄)"] = codes.get(r["code"] or "(空欄)", 0) + 1
+        print(f"\n=== 取得 総行数: {len(rows)} ===")
+        print(f"=== 分析用コード分布: {dict(sorted(codes.items(), key=lambda x: str(x[0])))}")
+        print(f"=== 分析用コード未入力: {len(missing)}件 ===")
+        for r in missing[:40]:
             print(f"  未入力 CD={r['cd']} 名称={r['name']}")
     print(f"\n成果物: {artifacts}")
     return 0
