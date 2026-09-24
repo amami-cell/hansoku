@@ -3966,3 +3966,174 @@ def probe(artifacts: Path) -> int:
         _dump_inputs_grouped(session)
     print(f"\n成果物: {artifacts}")
     return 0
+
+
+# ── 分析用コード設定（マスタ管理→販売マスタ）─────────────────────────────
+#
+# 店長会資料は分析用コード1〜28の上に乗っている。アラカルトの数字が
+#   アラカルト客数 = 総客数 －宴会 －ランチ －食べ飲み －ツアー －単品飲み放題 －テイクアウト
+# という**引き算**で出るので、コードを付け忘れたメニューは消えずに
+# **アラカルトに紛れ込む**。どこも空欄にならないので資料は完成して見える。
+#
+# ⚠️ この画面は**マスタを書き換えられる**。`登録` と `CSV取込` には
+#    絶対に触らないこと。押してよいのは `CSV出力` だけ。
+ANALYSIS_CODE_MENU = ("マスタ管理", "販売マスタ", "分析用コード設定")
+
+
+def probe_analysis_codes(artifacts: Path, master, store: str = "") -> int:
+    """分析用コード設定の画面を1店だけ見る診断。DBにもFWにも書き込まない。
+
+    見たいのは3つ。
+      ① 130件ある店舗コンボのうち、うちの店がどの value で引けるか
+      ② 店を選んだあと、何をすればグリッドに中身が出るのか
+      ③ `CSV出力` が本当にダウンロードとして落ちてくるか、列は何か
+    """
+    from .fw_budget import _combo_options, _select_combo
+
+    key = (store or "").strip()
+    with fw_session(artifacts) as session:
+        _open_menu(session, ANALYSIS_CODE_MENU)
+        options = _combo_options(session)
+        print(f"[分析コード] 店舗コンボ {len(options)}件")
+
+        # うちの店だけに絞る。FWのコードは0埋めなので lstrip して突き合わせる。
+        active = {s.store_code: s for s in master.active}
+        mine = []
+        for opt in options:
+            code = opt["value"].lstrip("0")
+            st = active.get(code) or master.find_by_name(opt["name"])
+            if st and st.active:
+                mine.append((opt, st))
+        print(f"[分析コード] マスタと一致した稼働店 {len(mine)}件")
+        for opt, st in mine[:30]:
+            print(f"    {opt['value']}\t{st.store_code}\t{st.store_name}")
+        if not mine:
+            print("::error::[分析コード] うちの店が1件も引けませんでした")
+            return 1
+
+        target = mine[0]
+        if key:
+            hit = [(o, s) for o, s in mine
+                   if s.store_code == key.lstrip("0") or key in s.store_name]
+            if not hit:
+                print(f"::error::[分析コード] 店舗が見つかりません: {store}")
+                return 1
+            target = hit[0]
+        opt, st = target
+        print(f"[分析コード] 対象: {opt['value']} {st.store_code} {st.store_name}")
+
+        if not _select_combo(session, opt["value"]):
+            print("::error::[分析コード] 店舗を選べませんでした")
+            return 1
+        # この画面に検索ボタンは無い（ボタンは 店舗/登録/キャンセル/CSV取込/CSV出力）。
+        # 店を選んだだけで出るのか確かめたいので、待ってから行数を見る。
+        rows = _wait_for_grid(session)
+        session.snapshot("analysis_after_select")
+        print(f"[分析コード] 店を選んだあとの表の行 {rows}")
+
+        _dump_grid_tables(session)
+
+        # ⚠️ 押すのは CSV出力 だけ。`CSV取込` は取り違えると**マスタを壊す**ので
+        #    完全一致で探す。部分一致にすると「CSV取込」にも当たる。
+        try:
+            with session.page.expect_download(timeout=120000) as dl:
+                session.page.get_by_text("CSV出力", exact=True).first.click(timeout=8000)
+            data = open(dl.value.path(), "rb").read()
+        except Exception as e:  # noqa: BLE001
+            print(f"[分析コード] CSV出力を押せませんでした: {type(e).__name__}: {e}")
+            session.snapshot("analysis_csv_failed")
+            session.dump_clickables("analysis_csv_failed")
+            return 1
+
+        print(f"[分析コード] CSVを取得: {len(data)} バイト / 名前={dl.value.suggested_filename}")
+        _describe_analysis_csv(data)
+    print(f"\n成果物: {artifacts}")
+    return 0
+
+
+def analysis_code_summary(rows: list[list[str]]) -> dict | None:
+    """CSVの行から「分析用コードの埋まり具合」を出す。
+
+    **何を入力漏れとみなすかの判断はここだけ**にまとめ、印字と切り離す。
+    店長会資料はコードの上に乗っていて、付け忘れたメニューは消えずに
+    アラカルトに紛れ込むので、ここの判定を間違えると静かに嘘をつく。
+
+    見出し行はCSVの先頭とは限らない（実測では1〜2行目に分かれていた）ので、
+    先頭の数行から「分析用コード」の欄を探して見出しの位置を決める。
+
+    ⚠️ **部分一致で探さないこと。** タイトル行の「分析用コード設定」にも
+    当たってしまい、そこを見出しと誤認する。すると列位置が全部ずれ、
+    アラートが静かに嘘をつく（テストで実際に踏んだ）。空白を落として
+    **完全一致**で探し、見つからなければ当て推量せず None を返す。
+    """
+    def _norm(c: str | None) -> str:
+        return "".join((c or "").split())
+
+    head_i = col = None
+    for i, row in enumerate(rows[:5]):
+        for j, cell in enumerate(row):
+            if _norm(cell) == "分析用コード":
+                head_i, col = i, j
+                break
+        if col is not None:
+            break
+    if col is None:
+        return None
+
+    body = [r for r in rows[head_i + 1:] if any((c or "").strip() for c in r)]
+    name_col = 1 if len(rows[head_i]) > 1 else 0
+
+    def _code(r: list[str]) -> str:
+        return (r[col] or "").strip() if len(r) > col else ""
+
+    def _name(r: list[str]) -> str:
+        return (r[name_col] or "").strip() if len(r) > name_col else ""
+
+    blank = [_name(r) for r in body if not _code(r)]
+    codes = sorted({_code(r) for r in body if _code(r)})
+    return {
+        "header_row": head_i,
+        "col": col,
+        "total": len(body),
+        "filled": len(body) - len(blank),
+        "blank": blank,
+        "codes": codes,
+    }
+
+
+def _describe_analysis_csv(data: bytes) -> None:
+    """落ちてきたCSVの形だけを出す。
+
+    ⚠️ **中身の金額は出さない。** この画面には単価と原価が載っていて、
+    このリポジトリは公開。ログに出すのは列名・行数・コードの埋まり具合と、
+    コードが空のメニュー名だけにする。
+    """
+    import csv as _csv
+    import io as _io
+
+    text, enc = None, None
+    for cand in ("cp932", "utf-8-sig", "utf-8", "euc_jp"):
+        try:
+            text = data.decode(cand)
+            enc = cand
+            break
+        except UnicodeDecodeError:
+            continue
+    if text is None:
+        print("[分析コード] 文字コードを判別できませんでした")
+        return
+    rows = list(_csv.reader(_io.StringIO(text)))
+    print(f"[分析コード] 文字コード={enc} / {len(rows)}行")
+    for i, r in enumerate(rows[:3]):
+        print(f"    見出し候補 {i}: {r}")
+
+    got = analysis_code_summary(rows)
+    if got is None:
+        print("[分析コード] 『分析用コード』の列が見出しに見つかりません")
+        return
+    print(f"[分析コード] 『分析用コード』は {got['header_row']}行目の {got['col']}列目")
+    print(f"[分析コード] メニュー {got['total']}行 / コード有り {got['filled']}"
+          f" / 空 {len(got['blank'])}")
+    print(f"[分析コード] 使われているコード {len(got['codes'])}種: {got['codes'][:40]}")
+    for nm in got["blank"][:10]:
+        print(f"    コード空: {nm[:30]}")

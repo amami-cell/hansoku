@@ -594,6 +594,13 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
         )
     if args.mode == "report":
         return report_probe(Path(args.artifacts), args.menu or "損益管理,実績管理業務,月別日別実績")
+    if args.mode == "analysis-code-probe":
+        # 診断のみ。DBにもFWにも書き込まない（押すのは CSV出力 だけ）。
+        from .ingest.fw_daily import probe_analysis_codes
+
+        return probe_analysis_codes(
+            Path(args.artifacts), StoreMaster.load(args.stores), store=args.abc_store or ""
+        )
     if args.mode in ("monthly", "monthly-dry"):
         settings = load_settings()
         master = StoreMaster.load(args.stores)
@@ -1015,7 +1022,7 @@ def build_parser() -> argparse.ArgumentParser:
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
                  "abc-dom-probe", "uriage-probe", "monthly-coverage",
                  "abc-detail", "data-audit", "source-audit", "abc-campaign",
-                 "gelato-switch"],
+                 "gelato-switch", "analysis-code-probe"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument(

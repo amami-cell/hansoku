@@ -42,6 +42,7 @@ on:
           - manager-dl-probe
           - abc-campaign
           - gelato-switch
+          - analysis-code-probe
         default: explore
       runner:
         description: '実行環境: hosted=GitHub提供(無料枠を消費) / self-hosted=自前ランナー(枠を消費しない)'
@@ -326,6 +327,11 @@ jobs:
               python -m hansoku.cli fw-daily --mode abc-coverage \
                 --month "${{ inputs.abc_ingest_month }}" \
                 --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "analysis-code-probe" ]; then
+              # 分析用コード設定の画面を1店だけ見る診断。DB書込なし。
+              # ⚠️ この画面の『登録』『CSV取込』はマスタを書き換える。触らない。
+              xvfb-run -a python -m hansoku.cli fw-daily --mode analysis-code-probe \
+                --abc-store "${{ inputs.abc_store }}" --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "abc-dom-probe" ]; then
               xvfb-run -a python -m hansoku.cli fw-daily --mode abc-dom-probe \
                 --abc-store "${{ inputs.abc_store }}" \
