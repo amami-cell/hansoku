@@ -46,6 +46,7 @@ on:
           - analysis-code-probe
           - analysis-code-audit
           - analysis-code-ingest
+          - analysis-dept-report
         default: explore
       runner:
         description: '実行環境: hosted=GitHub提供(無料枠を消費) / self-hosted=自前ランナー(枠を消費しない)'
@@ -351,6 +352,11 @@ jobs:
               # FWには書かない（押すのは CSV出力 とダウンロードだけ）。
               # ⚠️ この画面の『登録』『CSV取込』はマスタを書き換える。触らない。
               xvfb-run -a python -m hansoku.cli fw-daily --mode analysis-code-ingest \
+                --abc-store "${{ inputs.code_store }}" --artifacts fw-artifacts
+            elif [ "${{ inputs.mode }}" = "analysis-dept-report" ]; then
+              # 分析用コードCSVから 部門→商品 を印字（区分の中身の検算用）。DB書込なし。
+              # ⚠️ この画面の『登録』『CSV取込』はマスタを書き換える。触らない。
+              xvfb-run -a python -m hansoku.cli fw-daily --mode analysis-dept-report \
                 --abc-store "${{ inputs.code_store }}" --artifacts fw-artifacts
             elif [ "${{ inputs.mode }}" = "analysis-code-probe" ]; then
               # 分析用コード設定の画面を1店だけ見る診断。DB書込なし。

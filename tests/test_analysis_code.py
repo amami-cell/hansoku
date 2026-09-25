@@ -13,6 +13,7 @@
 #    なり、第1引数に self が入って TypeError になる（この回で2度踏んだ）。
 from hansoku.ingest.fw_daily import (
     _report_analysis_codes,
+    analysis_code_dept_rows,
     analysis_code_rows,
     analysis_code_summary,
     classify_blank,
@@ -251,3 +252,36 @@ class Test永続化用に商品行を取り出す:
 
     def test_見出しが無ければ空(self):
         assert analysis_code_rows([["店舗コード", "名称"], ["0001006", "からあげ"]]) == []
+
+
+# ── 検算用：CSV行 → {menu, dept_code, dept_name, ...}（商品→部門の対応） ──
+DCODE_COL, DNAME_COL, GNAME_COL = 8, 9, 11   # HEAD の 部門コード/部門名称/グループ名称
+
+
+def _drow(menu: str, dcode: str, dname: str, ac: str = "", gname: str = "") -> list[str]:
+    r = [""] * len(HEAD)
+    r[STORE_COL] = "0001015"
+    r[MENU_COL] = "M" + menu
+    r[NAME_COL] = menu
+    r[DCODE_COL] = dcode
+    r[DNAME_COL] = dname
+    r[GNAME_COL] = gname
+    r[CODE_COL] = ac
+    return r
+
+
+class Test商品と部門の対応:
+    def test_名称と部門名称を同じ行から取る(self):
+        # FWのABCは商品と部門が別ビューで紐付かない。分析用コードCSVだけが
+        # 名称と部門名称を同じ行に持つ＝唯一の「商品→部門」対応表。
+        rows = analysis_code_dept_rows([HEAD, _drow("肉寿司", "12", "肉寿司", "3", "寿司")])
+        assert rows == [{"menu": "肉寿司", "dept_code": "12", "dept_name": "肉寿司",
+                         "group_name": "寿司", "analysis_code": 3}]
+
+    def test_メニューコードの無い行は捨てる(self):
+        rows = analysis_code_dept_rows([HEAD, _drow("見出し", "1", "寿司"), []])
+        r2 = [c for c in [HEAD, _drow("寿司10種", "1", "寿司")]]
+        assert len(analysis_code_dept_rows(r2)) == 1 and len(rows) == 1
+
+    def test_見出しが無ければ空(self):
+        assert analysis_code_dept_rows([["店舗コード", "名称"]]) == []

@@ -636,6 +636,17 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 store_limit=args.limit,
                 dry_run=bool(getattr(args, "dry_run", False)),
             )
+    if args.mode == "analysis-dept-report":
+        # 分析用コードCSVから 部門→商品 を印字（区分の中身の検算用）。
+        # DBにもFWにも書き込まない（押すのは CSV出力 とダウンロードだけ）。
+        from .ingest.fw_daily import report_analysis_departments
+
+        return report_analysis_departments(
+            Path(args.artifacts),
+            StoreMaster.load(args.stores),
+            store_filter=args.abc_store or "",
+            store_limit=args.limit,
+        )
     if args.mode == "analysis-code-probe":
         # 診断のみ。DBにもFWにも書き込まない（押すのは CSV出力 だけ）。
         from .ingest.fw_daily import probe_analysis_codes
@@ -1065,7 +1076,8 @@ def build_parser() -> argparse.ArgumentParser:
                  "abc-dom-probe", "uriage-probe", "monthly-coverage",
                  "abc-detail", "data-audit", "source-audit", "abc-campaign", "dept-survey",
                  "gelato-switch", "analysis-code-probe",
-                 "analysis-code-audit", "analysis-code-ingest"],
+                 "analysis-code-audit", "analysis-code-ingest",
+                 "analysis-dept-report"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument(

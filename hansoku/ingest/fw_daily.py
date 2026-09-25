@@ -4625,6 +4625,148 @@ def analysis_code_rows(rows: list[list[str]]) -> list[dict]:
     return out
 
 
+def analysis_code_dept_rows(rows: list[list[str]]) -> list[dict]:
+    """CSVの全商品行を {menu, dept_code, dept_name, group_name, analysis_code} に落とす。
+
+    ⚠️ FWのABC（部門別グリッド）は商品と部門が別ビューで、商品→部門の紐付けを持たない。
+       一方この『分析用コード』CSVには 名称 と 部門名称 が同じ行にある＝これが唯一の
+       「どの商品がどの部門か」の対応表。区分の検算（商品→部門→品目区分）に使う。
+       列は見出しの完全一致で引く（部分一致はタイトル行に当たってずれる）。
+    """
+    def _norm(c: str | None) -> str:
+        return "".join((c or "").split())
+
+    head_i = head = None
+    for i, row in enumerate(rows[:5]):
+        if any(_norm(c) == "分析用コード" for c in row):
+            head_i, head = i, row
+            break
+    if head is None:
+        return []
+
+    def _col(name: str) -> int | None:
+        for j, c in enumerate(head):
+            if _norm(c) == name:
+                return j
+        return None
+
+    menu_col = _col("メニューコード")
+    name_col = _col("名称")
+    dcode_col = _col("部門コード")
+    dname_col = _col("部門名称")
+    gname_col = _col("グループ名称")
+    ac_col = _col("分析用コード")
+    if menu_col is None or name_col is None:
+        return []
+
+    def _at(r: list[str], j: int | None) -> str:
+        return (r[j] or "").strip() if j is not None and len(r) > j else ""
+
+    out: list[dict] = []
+    for r in rows[head_i + 1:]:
+        if not any((c or "").strip() for c in r):
+            continue
+        if not _at(r, menu_col):
+            continue
+        raw = _at(r, ac_col)
+        ac = int(raw) if raw.isdigit() and 1 <= int(raw) <= 28 else None
+        out.append({
+            "menu": _at(r, name_col),
+            "dept_code": _at(r, dcode_col),
+            "dept_name": _at(r, dname_col),
+            "group_name": _at(r, gname_col),
+            "analysis_code": ac,
+        })
+    return out
+
+
+def report_analysis_departments(
+    artifacts: Path,
+    master,
+    *,
+    store_filter: str = "",
+    store_limit: int | None = None,
+) -> int:
+    """『分析用コード』CSVから、店ごとに 部門名称 → 所属商品 の一覧を印字する。
+
+    「どの部門にどの商品が入っているか（＝品目区分の中身が正しいか）」を目で検算する道具。
+    FWには一切書かない（押すのは CSV出力 とダウンロードだけ）。保存もしない。
+    store_filter に店コード or 店名の一部を渡すと1店だけに絞れる（code_store 入力）。
+    """
+    from .fw_budget import _select_combo
+
+    key = (store_filter or "").strip()
+
+    with fw_session(artifacts) as session:
+        _watch_page(session)
+        options = _open_and_wait_combo(session)
+        print(f"[部門別商品] 店舗コンボ {len(options)}件")
+
+        active = {s.store_code: s for s in master.active}
+        targets, not_fw = [], []
+        for opt in options:
+            code = opt["value"].lstrip("0")
+            st = active.get(code) or master.find_by_name(opt["name"])
+            if not (st and st.active):
+                continue
+            if getattr(st, "pos", "fw") != "fw":
+                not_fw.append(st)
+                continue
+            targets.append((opt, st))
+        if key:
+            targets = [(o, s) for o, s in targets
+                       if s.store_code == key.lstrip("0") or key in s.store_name]
+        if store_limit:
+            targets = targets[:store_limit]
+        print(f"[部門別商品] 対象 {len(targets)}店")
+        if not targets:
+            print("::error::[部門別商品] 対象の店が1件もありません")
+            return 1
+
+        failures: list[str] = []
+        for opt, st in targets:
+            label = f"{st.store_code} {st.store_name[:14]}"
+            try:
+                if not _select_combo(session, opt["value"]):
+                    raise RuntimeError("店舗コンボから選べない")
+                if not _commit_store(session):
+                    raise RuntimeError("グリッドに中身が出ない")
+                data = _download_analysis_csv(session)
+                if data is None:
+                    raise RuntimeError("CSVが落ちてこない")
+                recs = analysis_code_dept_rows(_read_csv_rows(data))
+                if not recs:
+                    raise RuntimeError("商品行が読めない")
+            except Exception as e:  # noqa: BLE001
+                print(f"  ✗ {label}  {type(e).__name__}: {str(e)[:60]}")
+                failures.append(st.store_code)
+                continue
+
+            # 部門名称（見出しの "NN:名前" に寄せる）でまとめる。
+            by_dept: dict[str, list[dict]] = {}
+            for r in recs:
+                dc, dn = r.get("dept_code") or "", r.get("dept_name") or "（部門なし）"
+                head = f"{dc}:{dn}" if dc else dn
+                by_dept.setdefault(head, []).append(r)
+            # 部門コードの数値順（見出しの並びに近い）。
+            def _dk(h: str):
+                pre = h.split(":", 1)[0]
+                return (0, int(pre)) if pre.isdigit() else (1, h)
+            print(f"\n■ {label}  分析用コードCSV {len(recs)}品 / 部門 {len(by_dept)}件")
+            for head in sorted(by_dept, key=_dk):
+                items = by_dept[head]
+                print(f"  ● {head}（{len(items)}品）")
+                for r in sorted(items, key=lambda x: x["menu"]):
+                    ac = r.get("analysis_code")
+                    tag = f"  [分析{ac}]" if ac else ""
+                    grp = f"  〈{r['group_name']}〉" if r.get("group_name") else ""
+                    print(f"      - {r['menu']}{grp}{tag}")
+
+    tail = f" / 失敗 {len(failures)}店" if failures else ""
+    print(f"[部門別商品] 完了{tail}")
+    return 1 if failures else 0
+
+
 def _describe_analysis_csv(data: bytes) -> None:
     """落ちてきたCSVの形だけを出す。
 
