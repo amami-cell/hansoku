@@ -91,6 +91,20 @@ def classify_category(name: str, rules: dict, group: str | None = None) -> str:
     name_cat = (rules.get("name_category") or {}).get(name or "")
     if name_cat:
         return name_cat
+    # 部門＝区分（1:1）。FWの部門をそのまま品目区分にする店（すさび湯系）。
+    # 部門名（見出しの "NN:名前" の名前部分）が区分名。dept_merge で統合、dept_rename で改名、
+    # dept_other でオペ部門を その他 へ。部門ベース(classify_by:department)で使う。
+    if rules.get("dept_as_category"):
+        base = _group_label(group) if group else _group_label(name)
+        base = re.sub(r"^【[^】]*】", "", base).strip()   # 店タグ【ｽｻﾋﾞﾊﾟﾅ】等も落として区分名を揃える
+        if not base:
+            return rules.get("other", "その他")
+        if base in set(rules.get("dept_other") or []):
+            return rules.get("other", "その他")
+        merge = rules.get("dept_merge") or {}
+        if base in merge:
+            return merge[base]
+        return (rules.get("dept_rename") or {}).get(base, base)
     gmap = rules.get("groups") or {}
     if group:
         label = _group_label(group)
@@ -116,7 +130,19 @@ def _categories_from_departments(depts: list[dict], rules: dict) -> list[dict]:
     classify_by: department を付けた店で使う。
     """
     other = rules.get("other", "その他")
-    order = list(dict.fromkeys([c["name"] for c in rules.get("categories", [])] + [other]))
+    # 部門＝区分（1:1）の店は、並びをFW部門コード順（"NN:" の数値）にする＝現場の並びに合わせる。
+    if rules.get("dept_as_category"):
+        def _dcode(nm: str) -> int:
+            m = re.match(r"^\s*(\d+)", nm or "")
+            return int(m.group(1)) if m else 9999
+        seen: list[str] = []
+        for d in sorted(depts, key=lambda x: _dcode(x.get("name") or "")):
+            cat = classify_category(d.get("name") or "", rules, d.get("name") or "")
+            if cat != other and cat not in seen:
+                seen.append(cat)
+        order = seen + [other]
+    else:
+        order = list(dict.fromkeys([c["name"] for c in rules.get("categories", [])] + [other]))
     agg: dict[str, dict] = {}
     for d in depts:
         nm = d.get("name") or ""

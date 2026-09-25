@@ -2997,6 +2997,16 @@ const groupLabel = g => (g || "").replace(/^\s*\d+\s*[:：]\s*/, "").trim();
 function classifyCat(name, code, group) {
   const r = catRules(code);
   if (!r) return null;
+  // 部門＝区分（1:1）。FWの部門をそのまま区分にする店（すさび湯系など）。
+  // 部門名（"NN:名前" の名前部分）が区分名。dept_merge で統合・dept_rename で改名・
+  // dept_other で オペ部門→その他（export 側 classify_category と同じ挙動）。
+  if (r.dept_as_category) {
+    const base = groupLabel(group || name).replace(/^【[^】]*】/, "").trim();
+    if (!base) return r.other || "その他";
+    if ((r.dept_other || []).includes(base)) return r.other || "その他";
+    if ((r.dept_merge || {})[base]) return r.dept_merge[base];
+    return (r.dept_rename || {})[base] || base;
+  }
   // 内訳（全商品に出ない0円の選択商品）は素の風味名では区分を当てられないので、
   // FW自身の区分見出し（groups マップ）を商品名より優先する。
   const gmap = r.groups || {};
