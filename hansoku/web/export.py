@@ -107,6 +107,35 @@ def classify_category(name: str, rules: dict, group: str | None = None) -> str:
     return rules.get("other", "その他")
 
 
+def _categories_from_departments(depts: list[dict], rules: dict) -> list[dict]:
+    """1店・1ヶ月ぶんの『生FW部門』を品目区分に束ねる（部門ベース）。
+
+    商品にFW区分見出し(group)が付いていない店では、商品名だけでは区分を当てられず
+    大量が『その他』へ落ちる。詳細な部門を持つ店（寿司酒場など）は、部門そのものは
+    見出しの語で確実に束ねられるので、部門合計から品目区分を作る。
+    classify_by: department を付けた店で使う。
+    """
+    other = rules.get("other", "その他")
+    order = list(dict.fromkeys([c["name"] for c in rules.get("categories", [])] + [other]))
+    agg: dict[str, dict] = {}
+    for d in depts:
+        nm = d.get("name") or ""
+        cat = classify_category(nm, rules, nm)   # 部門名を name と group の両方に渡す
+        a = agg.setdefault(cat, {"sales": 0.0, "qty": 0.0, "count": 0})
+        a["sales"] += d.get("sales") or 0
+        a["qty"] += d.get("qty") or 0
+        a["count"] += 1
+    total = sum(a["sales"] for a in agg.values()) or 1.0
+    out = []
+    for name in order:
+        if name not in agg:
+            continue
+        a = agg[name]
+        out.append({"name": name, "sales": round(a["sales"]), "qty": round(a["qty"]),
+                    "count": a["count"], "share": round(a["sales"] / total, 4)})
+    return out
+
+
 def _categories_for_month(items: list[dict], rules: dict, total_sales: float) -> list[dict]:
     """1店・1ヶ月ぶんの商品リストを品目区分に束ねる。売上・構成比・品目数を持つ。
 
@@ -843,8 +872,13 @@ def _build_abc_by_month(
             items.sort(key=lambda p: p["sales"], reverse=True)
             # 品目区分（店ごとのルールがある店だけ）。全商品で束ねてから売れ筋を切る。
             if rules:
-                total = sum(p["sales"] for p in items)
-                cats = _categories_for_month(items, rules, total)
+                if rules.get("classify_by") == "department":
+                    # 部門ベース：商品にgroupが無い店でも、部門合計から確実に束ねる。
+                    dep_raw = ((departments_monthly.get(code, {}) or {}).get(m, {}) or {}).get("raw") or []
+                    cats = _categories_from_departments(dep_raw, rules)
+                else:
+                    total = sum(p["sales"] for p in items)
+                    cats = _categories_for_month(items, rules, total)
                 if cats:
                     categories_monthly.setdefault(code, {})[m] = cats
             # 売れ筋 top-N に加え、内訳（FW区分見出し付き＝選択商品）・内訳を畳んだ親

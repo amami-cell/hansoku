@@ -136,6 +136,9 @@ stores:
   "1006": &sasabi
     name: すさび湯系
     other: その他
+    # 商品にFW区分見出し(group)が付かない店があるため、部門合計から品目区分を束ねる
+    # （部門は見出しの語で確実に束ねられる。商品名だけだと大量が『その他』へ落ちる）。
+    classify_by: department
     categories:
       - { name: コース,             keywords: [コース] }
       - { name: 飲み放題,           keywords: [飲み放題, 飲放, 飲み放] }
