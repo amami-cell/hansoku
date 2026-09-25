@@ -3002,8 +3002,10 @@ function classifyCat(name, code, group) {
   const gmap = r.groups || {};
   if (group) { const lb = groupLabel(group); if (gmap[lb]) return gmap[lb]; }
   const nm = name || "";
+  // キーワードは商品名だけでなく FW区分見出し（部門名）にも当てる（export 側と同じ）。
+  const lbl = group ? groupLabel(group) : "";
   for (const c of (r.categories || [])) {
-    for (const kw of (c.keywords || [])) { if (kw && nm.includes(kw)) return c.name; }
+    for (const kw of (c.keywords || [])) { if (kw && (nm.includes(kw) || (lbl && lbl.includes(kw)))) return c.name; }
   }
   return r.other || "その他";
 }

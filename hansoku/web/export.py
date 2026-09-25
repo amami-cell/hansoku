@@ -97,9 +97,12 @@ def classify_category(name: str, rules: dict, group: str | None = None) -> str:
         if label in gmap:
             return gmap[label]
     nm = name or ""
+    # キーワードは商品名だけでなく FW区分見出し（部門名）にも当てる。詳細部門を持つ店
+    # （寿司/焼き物/ビール… と部門が既に意味を持つ店）を、部門見出しの語で束ねられる。
+    lbl = _group_label(group) if group else ""
     for cat in rules.get("categories", []):
         for kw in cat.get("keywords", []):
-            if kw and kw in nm:
+            if kw and (kw in nm or (lbl and kw in lbl)):
                 return cat["name"]
     return rules.get("other", "その他")
 
@@ -869,8 +872,8 @@ def survey_departments(warehouse, master, *, months_back: int = 3) -> int:
     configured = set(cats.keys())
     to = date.today()
     frm = to - timedelta(days=months_back * 31 + 5)
-    # raw（生部門の並び）は store_categories に影響されない。品目区分の当たり具合も併記する。
-    dm, _pm, _cm = _build_abc_by_month(warehouse, master, frm, to, cats)
+    # dm=生部門, cm=品目区分（store_categories適用後の並び）。
+    dm, _pm, cm = _build_abc_by_month(warehouse, master, frm, to, cats)
 
     name_of = {s.store_code: s.store_name for s in master.active}
     rows = []
@@ -887,19 +890,36 @@ def survey_departments(warehouse, master, *, months_back: int = 3) -> int:
     # 粗い順（部門数が少ない順、データ無しは末尾）。
     rows.sort(key=lambda r: (r["n"] if r["n"] >= 0 else 9999, -(r["total"] or 0)))
 
-    print(f"=== 各店 現状の部門別並び（直近月・保存済みABC／FW未接続）===")
-    print(f"品目区分 設定済み: {sorted(configured) or '（1160のみ）'}")
-    print(f"※ 部門数が少ない＝粗い（束ね直しの価値が高い）。上から着手候補。\n")
+    print("=== 各店 現状の部門別並び（直近月・保存済みABC／FW未接続）===")
+    print(f"品目区分 設定済み: {sorted(configured)}")
+    print("※ 設定済みの店は『品目区分（束ね直し後）』も併記。その他が多い店は要調整。\n")
     for r in rows:
-        nm = name_of.get(r["code"], "")
-        cfgmark = " ✓品目区分あり" if r["code"] in configured else ""
+        code, nm = r["code"], name_of.get(r["code"], "")
+        cfgd = code in configured
+        cfgmark = " ✓品目区分あり" if cfgd else ""
         if r["n"] < 0:
-            print(f"■ {r['code']} {nm}  … ABCデータなし（FW未接続/未取込）{cfgmark}")
+            print(f"■ {code} {nm}  … ABCデータなし（FW未接続/未取込）{cfgmark}")
             continue
         coarse = " ⚠粗い" if r["n"] <= 4 else ""
-        print(f"■ {r['code']} {nm}  FW部門 {r['n']}件 / {r['m']} / 売上計 {round(r['total']):,}円{coarse}{cfgmark}")
-        for d in r["depts"][:24]:
-            print(f"     {(d.get('name') or '')[:26]:26s} {round(d.get('sales') or 0):>11,}円 / {round(d.get('qty') or 0):>7,}点 → 束ね先:{d.get('bucket')}")
+        print(f"■ {code} {nm}  FW部門 {r['n']}件 / {r['m']} / 売上計 {round(r['total']):,}円{coarse}{cfgmark}")
+        if cfgd:
+            # 束ね直し後の並び（＝新しいチャートの部門別並び）。
+            result = (cm.get(code, {}) or {}).get(r["m"]) or []
+            tot = sum(x.get("sales") or 0 for x in result) or 1
+            print("   ▼ 品目区分（束ね直し後の並び）:")
+            for x in result:
+                print(f"     {(x.get('name') or '')[:16]:16s} {round(x.get('sales') or 0):>11,}円 / 構成比 {round((x.get('sales') or 0)/tot*100):>3}% / {x.get('count') or 0}品")
+            # 『その他』に落ちた生部門を洗い出す（調整の材料）。
+            other = (cats.get(code) or {}).get("other", "その他")
+            miss = [d for d in r["depts"]
+                    if classify_category("", cats[code], d.get("name")) == other]
+            if miss:
+                print(f"   ▲ 『{other}』に落ちた部門 {len(miss)}件（要調整候補）:")
+                for d in miss[:12]:
+                    print(f"       {(d.get('name') or '')[:26]:26s} {round(d.get('sales') or 0):>11,}円")
+        else:
+            for d in r["depts"][:24]:
+                print(f"     {(d.get('name') or '')[:26]:26s} {round(d.get('sales') or 0):>11,}円 / {round(d.get('qty') or 0):>7,}点 → 束ね先:{d.get('bucket')}")
         print()
     return 0
 
