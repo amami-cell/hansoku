@@ -906,8 +906,8 @@ def survey_departments(warehouse, master, *, months_back: int = 3) -> int:
     configured = set(cats.keys())
     to = date.today()
     frm = to - timedelta(days=months_back * 31 + 5)
-    # dm=生部門, cm=品目区分（store_categories適用後の並び）。
-    dm, _pm, cm = _build_abc_by_month(warehouse, master, frm, to, cats)
+    # dm=生部門, pm=商品別, cm=品目区分（store_categories適用後の並び）。
+    dm, pm, cm = _build_abc_by_month(warehouse, master, frm, to, cats)
 
     name_of = {s.store_code: s.store_name for s in master.active}
     rows = []
@@ -951,6 +951,16 @@ def survey_departments(warehouse, master, *, months_back: int = 3) -> int:
                 print(f"   ▲ 『{other}』に落ちた部門 {len(miss)}件（要調整候補）:")
                 for d in miss[:12]:
                     print(f"       {(d.get('name') or '')[:26]:26s} {round(d.get('sales') or 0):>11,}円")
+            # 商品詳細（売れ筋・上位）。この店タイプは商品が部門に紐づかないので、区分別ではなく
+            # 店の売れ筋商品を上位で出す（メニュー内容の確認用）。
+            prods = sorted(((pm.get(code, {}) or {}).get(r["m"]) or []),
+                           key=lambda p: -(p.get("sales") or 0))
+            if prods:
+                print(f"   ▽ 商品詳細（売れ筋 上位{min(20, len(prods))}／全{len(prods)}品）:")
+                for p in prods[:20]:
+                    q = f" / {round(p.get('qty') or 0):>6,}点" if p.get("qty") else ""
+                    grp = f"  ［部門:{_group_label(p.get('group'))}］" if p.get("group") else "  ［部門なし］"
+                    print(f"       {(p.get('name') or '')[:26]:26s} {round(p.get('sales') or 0):>10,}円{q}{grp}")
         else:
             for d in r["depts"][:24]:
                 print(f"     {(d.get('name') or '')[:26]:26s} {round(d.get('sales') or 0):>11,}円 / {round(d.get('qty') or 0):>7,}点 → 束ね先:{d.get('bucket')}")
