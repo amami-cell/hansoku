@@ -894,7 +894,7 @@ def _build_abc_by_month(
     return departments_monthly, products_monthly, categories_monthly
 
 
-def survey_departments(warehouse, master, *, months_back: int = 3) -> int:
+def survey_departments(warehouse, master, *, months_back: int = 3, full_store: str = "") -> int:
     """各店の『現状の部門別並び』（チャートと同じ生FW部門）を一覧で出す。
 
     保存済みABC（Neon）だけで走る＝FWログイン不要。品目区分（store_categories）を
@@ -967,9 +967,14 @@ def survey_departments(warehouse, master, *, months_back: int = 3) -> int:
             # 店の売れ筋商品を上位で出す（メニュー内容の確認用）。
             prods = sorted(((pm.get(code, {}) or {}).get(r["m"]) or []),
                            key=lambda p: -(p.get("sales") or 0))
+            full = bool(full_store) and (code == full_store)
+            cap = len(prods) if full else 20
             if prods:
-                print(f"   ▽ 商品詳細（売れ筋 上位{min(20, len(prods))}／全{len(prods)}品）:")
-                for p in prods[:20]:
+                if full:
+                    print(f"   ▽ 商品詳細（全{len(prods)}品・売れ筋順／全品表示）:")
+                else:
+                    print(f"   ▽ 商品詳細（売れ筋 上位{min(20, len(prods))}／全{len(prods)}品）:")
+                for p in prods[:cap]:
                     q = f" / {round(p.get('qty') or 0):>6,}点" if p.get("qty") else ""
                     grp = f"  ［部門:{_group_label(p.get('group'))}］" if p.get("group") else "  ［部門なし］"
                     print(f"       {(p.get('name') or '')[:26]:26s} {round(p.get('sales') or 0):>10,}円{q}{grp}")

@@ -454,7 +454,8 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
         settings = load_settings()
         master = StoreMaster.load(args.stores)
         with get_warehouse(settings) as warehouse:
-            return survey_departments(warehouse, master, months_back=args.months)
+            return survey_departments(warehouse, master, months_back=args.months,
+                                       full_store=args.abc_store or "")
     if args.mode == "abc-store-ingest":
         from .ingest.fw_daily import ingest_abc_store, ingest_abc_stores
 
