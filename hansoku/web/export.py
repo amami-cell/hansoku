@@ -152,11 +152,15 @@ def _categories_from_departments(depts: list[dict], rules: dict) -> list[dict]:
         a["qty"] += d.get("qty") or 0
         a["count"] += 1
     total = sum(a["sales"] for a in agg.values()) or 1.0
+    # 0円区分（飲み放題用・センベロ用・コース内訳用などの“空”部門）は非表示にする（HQ 2026-09・②A）。
+    hide_zero = bool(rules.get("dept_as_category"))
     out = []
     for name in order:
         if name not in agg:
             continue
         a = agg[name]
+        if hide_zero and round(a["sales"]) <= 0:
+            continue
         out.append({"name": name, "sales": round(a["sales"]), "qty": round(a["qty"]),
                     "count": a["count"], "share": round(a["sales"] / total, 4)})
     return out

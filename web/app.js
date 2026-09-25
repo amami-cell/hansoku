@@ -3049,6 +3049,7 @@ function deptsInCat(code, m, cat) {
   const raw = (dm && dm.raw) || [];
   return raw
     .filter(d => classifyCat(cleanDeptName(d.name), code, d.name) === cat)
+    .filter(d => (d.sales || 0) > 0)   // 0円の“飲み放題用/コース用”部門は隠す（HQ 2026-09・②A）
     .map(d => ({ name: cleanDeptName(d.name), sales: d.sales || 0, qty: d.qty || 0, dept: true }));
 }
 const prodsInCat = (code, m, cat) => {

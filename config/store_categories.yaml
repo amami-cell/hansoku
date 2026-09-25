@@ -142,9 +142,10 @@ stores:
     other: その他
     classify_by: department
     dept_as_category: true
+    # ※テイクアウト・サービスタイム(→タイムサービス) は独立区分にするため ここには入れない（HQ 2026-09）。
     dept_other: [＊コメント, コメント, ◆サブ, サブ, サブメニュー, サブメニュー用,
                  フードサブ, ドリンクサブ, 他部門, その他部門, その他, 持ち帰り, 持帰り,
-                 テイクアウト, サービス, サービスタイム, サービス品, 出前, Fその他]
+                 サービス, サービス品, 出前, Fその他]
   "1097": { <<: *fwdept, name: ARATA }
   "1111": { <<: *fwdept, name: ちゃーちゃん }
   "1131": { <<: *fwdept, name: CRAFTMAN UMAMI }
@@ -164,7 +165,7 @@ stores:
     <<: *fwdept
     name: すさび湯系
     dept_merge: { 肉寿司: 寿司 }
-    dept_rename: { 盛り合わせ: 寿司盛り合わせ }
+    dept_rename: { 盛り合わせ: 寿司盛り合わせ, サービスタイム: タイムサービス }
   "1015": { <<: *sasabi, name: すさび湯 歌舞伎町 }
   "1169": { <<: *sasabi, name: すさび湯三宮店 }
   "1712": { <<: *sasabi, name: すさび湯京都烏丸 }
