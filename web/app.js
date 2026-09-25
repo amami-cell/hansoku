@@ -3030,7 +3030,22 @@ function catsAtM(code, m) {
   }));
 }
 const catAtM = (code, m, cat) => catsAtM(code, m).find(c => c.name === cat) || null;
-const prodsInCat = (code, m, cat) => prodsAtM(code, m).filter(p => classifyCat(p.name, code, p.group) === cat);
+// FW部門名から表示用の名前（先頭 "NN:" と 店タグ【…】を落とす）。
+const cleanDeptName = n => (n || "").replace(/^\s*\d+\s*[:：]\s*/, "").replace(/^【[^】]*】/, "").trim();
+// 部門ベースの店（classify_by=department）の「区分の中身」＝その区分に属するFW部門。
+// 商品にFW区分見出し(group)が付かない店でも、部門は確実に束ねられるので中身が出る。
+function deptsInCat(code, m, cat) {
+  const dm = ((DATA.departments_monthly || {})[code] || {})[m];
+  const raw = (dm && dm.raw) || [];
+  return raw
+    .filter(d => classifyCat(cleanDeptName(d.name), code, d.name) === cat)
+    .map(d => ({ name: cleanDeptName(d.name), sales: d.sales || 0, qty: d.qty || 0, dept: true }));
+}
+const prodsInCat = (code, m, cat) => {
+  const r = catRules(code);
+  if (r && r.classify_by === "department") return deptsInCat(code, m, cat);
+  return prodsAtM(code, m).filter(p => classifyCat(p.name, code, p.group) === cat);
+};
 
 // ── 構成比セルを押すと出る「小ウインドウ」（複数可・ドラッグ移動・×で閉じる）──────
 // 中身＝その区分×月の商品内訳（各商品の売上＝税抜 と、区分内の売上構成比%）。
@@ -3253,7 +3268,7 @@ function panelContent(d) {
             : (c.sales ? Math.round((p.sales || 0) / c.sales * 100) : 0);
           // 販促マークは「販促の対象商品」か「販促のある区分の“限定/おすすめ”商品」だけ。
           // GM(定番＝6か月連続)には付けない。
-          const pOn = hits.items.has(p.name) || (on && isLimitedProduct(d.code, d.m, p.name));
+          const pOn = !p.dept && (hits.items.has(p.name) || (on && isLimitedProduct(d.code, d.m, p.name)));
           const q = (p.qty != null) ? ` <span class="fw-pq">${ten(p.qty)}点</span>` : "";
           html += `<li class="fw-subrow${pOn ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${pOn ? ' <span class="fw-pbadge">販促</span>' : ""}${subToggleCtrl(d.code, d.m, p)}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${ppct}%</span></span></li>`;
           html += subRowsHtml(d.code, d.m, p, col, hits);
@@ -3278,7 +3293,7 @@ function panelContent(d) {
       : (tot ? Math.round((p.sales || 0) / tot * 100) : 0);
     const qty = (p.qty != null) ? ` <span class="fw-pq">${ten(p.qty)}点</span>` : "";
     // 販促マーク：対象商品か、販促のある区分の“限定/おすすめ”商品だけ（GMは付けない）。
-    const on = hits.items.has(p.name) || (catOn && isLimitedProduct(d.code, d.m, p.name));
+    const on = !p.dept && (hits.items.has(p.name) || (catOn && isLimitedProduct(d.code, d.m, p.name)));
     return `<li class="${on ? "promo" : ""}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${on ? ' <span class="fw-pbadge">販促</span>' : ""}${subToggleCtrl(d.code, d.m, p)}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`
       + subRowsHtml(d.code, d.m, p, null, hits);
   }).join("") : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
