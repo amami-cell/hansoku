@@ -943,6 +943,18 @@ def survey_departments(warehouse, master, *, months_back: int = 3) -> int:
             print("   ▼ 品目区分（束ね直し後の並び）:")
             for x in result:
                 print(f"     {(x.get('name') or '')[:16]:16s} {round(x.get('sales') or 0):>11,}円 / 構成比 {round((x.get('sales') or 0)/tot*100):>3}% / {x.get('count') or 0}品")
+            # 区分の中身（各区分にどの生FW部門が入っているか）。ドリルダウンで見える並び。
+            by_cat: dict[str, list[dict]] = {}
+            for d in r["depts"]:
+                c = classify_category("", cats[code], d.get("name"))
+                by_cat.setdefault(c, []).append(d)
+            print("   ▽ 区分の中身（各区分に入っている部門）:")
+            for x in result:
+                cn = x.get("name") or ""
+                members = sorted(by_cat.get(cn, []), key=lambda d: -(d.get("sales") or 0))
+                print(f"     ● {cn}（{len(members)}部門 / {round(x.get('sales') or 0):,}円）")
+                for d in members:
+                    print(f"         - {(d.get('name') or '')[:28]:28s} {round(d.get('sales') or 0):>11,}円")
             # 『その他』に落ちた生部門を洗い出す（調整の材料）。
             other = (cats.get(code) or {}).get("other", "その他")
             miss = [d for d in r["depts"]
