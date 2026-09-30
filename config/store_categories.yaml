@@ -137,8 +137,8 @@ stores:
   #   ⚠ 金額が発生しているのに その他 に落ちる部門があれば、勝手に埋めず要相談。
   #   ※部門合計で束ねるため「白飯だけ別区分へ」等の“商品単位”の移動は不可。
   #   除外: 1160 ルクア(FW部門が2つだけ＝商品名ベースが必要)／1766 ぎふや福岡(FW未連動)。
-  "1069": &fwdept
-    name: ひよこ飯店
+  "1097": &fwdept
+    name: ARATA
     other: その他
     classify_by: department
     dept_as_category: true
@@ -146,19 +146,22 @@ stores:
     dept_other: [＊コメント, コメント, ◆サブ, サブ, サブメニュー, サブメニュー用,
                  フードサブ, ドリンクサブ, 他部門, その他部門, その他, 持ち帰り, 持帰り,
                  サービス, サービス品, 出前, Fその他]
-  "1097": { <<: *fwdept, name: ARATA }
-  "1111": { <<: *fwdept, name: ちゃーちゃん }
   "1131": { <<: *fwdept, name: CRAFTMAN UMAMI }
-  "1137": { <<: *fwdept, name: 料理と酒 たいだい }
-  "1151": { <<: *fwdept, name: NagaGutsu }
   "1154": { <<: *fwdept, name: 熊の鳥焼 }
   "1162": { <<: *fwdept, name: 味のたぬきや }
   "1163": { <<: *fwdept, name: フレンチ酒場GOLD }
-  "1168": { <<: *fwdept, name: GOLD京都ポルタ店 }
   "1713": { <<: *fwdept, name: 門真Largo }
   "1729": { <<: *fwdept, name: フレンチ酒場GOLDお初 }
   "1739": { <<: *fwdept, name: "ぎふや 天満橋店" }
   "2004": { <<: *fwdept, name: んだんだ }
+
+  # ── ABCの部門グリッドが出ない5店：完備の商品売上を『商品→部門』(分析用コードCSV)で
+  #    束ね直して品目区分を作る（dept_from_products）。商品→部門は analysis-code-ingest で保存。
+  "1069": { <<: *fwdept, name: ひよこ飯店,        dept_from_products: true }
+  "1111": { <<: *fwdept, name: ちゃーちゃん,       dept_from_products: true }
+  "1137": { <<: *fwdept, name: "料理と酒 たいだい", dept_from_products: true }
+  "1151": { <<: *fwdept, name: NagaGutsu,        dept_from_products: true }
+  "1168": { <<: *fwdept, name: GOLD京都ポルタ店,   dept_from_products: true }
 
   # ── すさび湯系（7店）：FW部門1:1 ＋ 肉寿司→寿司統合・盛り合わせ→寿司盛り合わせ改名 ──
   "1006": &sasabi

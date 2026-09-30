@@ -4606,6 +4606,8 @@ def analysis_code_rows(rows: list[list[str]]) -> list[dict]:
     code_col = _col("分析用コード")
     menu_col = _col("メニューコード")
     name_col = _col("名称")
+    dcode_col = _col("部門コード")
+    dname_col = _col("部門名称")
     if menu_col is None or name_col is None:
         return []
 
@@ -4621,7 +4623,12 @@ def analysis_code_rows(rows: list[list[str]]) -> list[dict]:
             continue
         raw = _at(r, code_col)
         ac = int(raw) if raw.isdigit() and 1 <= int(raw) <= 28 else None
-        out.append({"product_code": pcode, "product_name": _at(r, name_col), "analysis_code": ac})
+        # 部門は "NN:名前"（例 "13:冷菜"）で持つ。ABC部門が取れない店の品目区分を
+        # 商品売上×この部門で束ね直すために保存する。無ければ空。
+        dcode, dname = _at(r, dcode_col), _at(r, dname_col)
+        dept = f"{dcode}:{dname}" if dcode and dname else dname
+        out.append({"product_code": pcode, "product_name": _at(r, name_col),
+                    "analysis_code": ac, "dept_name": dept})
     return out
 
 

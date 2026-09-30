@@ -453,9 +453,11 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
 
         settings = load_settings()
         master = StoreMaster.load(args.stores)
+        product_depts = _load_product_depts(settings)
         with get_warehouse(settings) as warehouse:
             return survey_departments(warehouse, master, months_back=args.months,
-                                       full_store=args.abc_store or "")
+                                       full_store=args.abc_store or "",
+                                       product_depts=product_depts)
     if args.mode == "abc-store-ingest":
         from .ingest.fw_daily import ingest_abc_store, ingest_abc_stores
 
@@ -720,11 +722,33 @@ def cmd_schedule_lint(args: argparse.Namespace) -> int:
     return report_schedule_lint(master, args.path)
 
 
+def _load_product_depts(settings) -> dict:
+    """dept_from_products の店だけ、appdb から 商品→部門 を読む（無ければ空）。
+
+    ABCの部門グリッドが出ない店の品目区分を、商品売上×分析用コードCSVの部門で
+    束ね直すための元データ。appdb（分析用コード）が無い環境では静かに空を返す。
+    """
+    from .web.export import load_store_categories
+
+    cats = load_store_categories()
+    codes = [c for c, r in cats.items() if (r or {}).get("dept_from_products")]
+    if not codes:
+        return {}
+    try:
+        with get_appdb(settings) as db:
+            db.ensure_schema()
+            return db.product_departments(codes)
+    except Exception as e:  # noqa: BLE001
+        print(f"[export] 商品→部門の読込みをスキップ（{type(e).__name__}）")
+        return {}
+
+
 def cmd_export_web(args: argparse.Namespace) -> int:
     from .web.export import build, load_creatives, load_schedule, write
 
     settings = load_settings()
     master = StoreMaster.load(args.stores)
+    product_depts = _load_product_depts(settings)
     campaigns = load_schedule(master)
     creatives = load_creatives(master, campaigns)
     # 目標と要因メモは dashboard.json に焼き込まない。
@@ -741,6 +765,7 @@ def cmd_export_web(args: argparse.Namespace) -> int:
             date_to=args.date_to,
             campaigns=campaigns,
             creatives=creatives,
+            product_depts=product_depts,
         )
     path = write(payload, Path(args.out))
     print(f"書き出し完了: {path}")

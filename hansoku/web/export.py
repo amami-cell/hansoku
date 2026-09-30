@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -628,6 +629,45 @@ NET_DIVISOR = 1.10
 NET_ADJUST_METRICS = frozenset({METRIC_SALES, METRIC_DEPT_SALES, METRIC_PRODUCT_SALES})
 
 
+def _pd_norm(s: str | None) -> str:
+    """商品名の突合キー（全半角・空白・大小の揺れを吸収）。"""
+    return unicodedata.normalize("NFKC", s or "").replace(" ", "").replace("　", "").lower()
+
+
+def _departments_from_products(items: list[dict], name_to_dept: dict[str, str]) -> dict[str, dict]:
+    """商品リストを『商品→部門(NN:名前)』で束ね直し、{部門名:{sales,qty,rate}} を作る。
+
+    ABCの部門グリッドが出ない店（1069/1111/1137/1151/1168 等）で、完備している
+    商品別売上を FW分析用コードCSVの部門で束ねて『疑似・部門合計』を作るための関数。
+    商品名はABC側が途中で切れることがあるので、正規化の完全一致→長い名前どうしの
+    前方一致で引く。引けない商品は部門に入れない（構成比は引けた分の比率になる）。
+    """
+    idx: dict[str, str] = {}
+    for nm, dept in name_to_dept.items():
+        if dept:
+            idx.setdefault(_pd_norm(nm), dept)
+    keys = list(idx)
+
+    def _look(name: str) -> str | None:
+        k = _pd_norm(name)
+        if k in idx:
+            return idx[k]
+        for ik in keys:
+            if len(k) >= 8 and len(ik) >= 8 and (ik.startswith(k) or k.startswith(ik)):
+                return idx[ik]
+        return None
+
+    agg: dict[str, dict] = {}
+    for it in items:
+        dept = _look(it.get("name", ""))
+        if not dept:
+            continue
+        d = agg.setdefault(dept, {"sales": 0.0, "qty": 0.0, "rate": None})
+        d["sales"] += it.get("sales", 0) or 0
+        d["qty"] += it.get("qty", 0) or 0
+    return agg
+
+
 def _assemble_departments(depts: dict[str, dict]) -> dict:
     """1店・1ヶ月ぶんの生部門（{部門名:{sales,qty,rate}}）を、標準バケット構成
     （コース/ランチ/アラカルト/飲み放題/食べ放題）＋生部門 raw に組み立てる。
@@ -751,6 +791,7 @@ def _build_abc_by_month(
     date_from: date,
     date_to: date,
     store_categories: dict | None = None,
+    product_depts: dict | None = None,
 ) -> tuple[dict, dict, dict]:
     """FW ABC（部門・商品）を月ごとに組み立てる。返り値 (departments_monthly,
     products_monthly, categories_monthly)＝各 {店コード: {"YYYY-MM": ...}}。月次で蓄積した
@@ -900,6 +941,12 @@ def _build_abc_by_month(
             # こうすると品目数（品目区分の count）にサブが二重に乗らない。
             items = _nest_zero_subs(items, rules)
             items.sort(key=lambda p: p["sales"], reverse=True)
+            # ABCの部門グリッドが出ない店は、完備の商品売上を『商品→部門』(分析用コードCSV)で
+            # 束ね直して疑似・部門合計を作る（dept_from_products）。ドリルもこの合成部門を見る。
+            if rules and rules.get("dept_from_products") and (product_depts or {}).get(code):
+                synth = _departments_from_products(items, product_depts[code])
+                if synth:
+                    departments_monthly.setdefault(code, {})[m] = _assemble_departments(synth)
             # 品目区分（店ごとのルールがある店だけ）。全商品で束ねてから売れ筋を切る。
             if rules:
                 if rules.get("classify_by") == "department":
@@ -924,7 +971,8 @@ def _build_abc_by_month(
     return departments_monthly, products_monthly, categories_monthly
 
 
-def survey_departments(warehouse, master, *, months_back: int = 3, full_store: str = "") -> int:
+def survey_departments(warehouse, master, *, months_back: int = 3, full_store: str = "",
+                       product_depts: dict | None = None) -> int:
     """各店の『現状の部門別並び』（チャートと同じ生FW部門）を一覧で出す。
 
     保存済みABC（Neon）だけで走る＝FWログイン不要。品目区分（store_categories）を
@@ -937,7 +985,7 @@ def survey_departments(warehouse, master, *, months_back: int = 3, full_store: s
     to = date.today()
     frm = to - timedelta(days=months_back * 31 + 5)
     # dm=生部門, pm=商品別, cm=品目区分（store_categories適用後の並び）。
-    dm, pm, cm = _build_abc_by_month(warehouse, master, frm, to, cats)
+    dm, pm, cm = _build_abc_by_month(warehouse, master, frm, to, cats, product_depts)
 
     name_of = {s.store_code: s.store_name for s in master.active}
     rows = []
@@ -1023,6 +1071,7 @@ def build(
     date_to: date,
     campaigns: list[dict] | None = None,
     creatives: list[dict] | None = None,
+    product_depts: dict | None = None,
 ) -> dict:
     """画面が必要とするものを1つの辞書にまとめる。"""
     rows = warehouse.aggregate(
@@ -1193,7 +1242,7 @@ def build(
     # 施策詳細で ケーキ/ジェラート/パフェ・食べ放題・宴会コース を月ごとに並べられる。
     store_categories = load_store_categories()
     departments_monthly, products_monthly, categories_monthly = _build_abc_by_month(
-        warehouse, master, date_from, date_to, store_categories
+        warehouse, master, date_from, date_to, store_categories, product_depts
     )
     # 施策の販売時期実績（abc-campaign 由来）。登録期間レンジで取った施策別の実績。
     campaign_actuals = _build_campaign_actuals(warehouse, master, date_from, date_to)

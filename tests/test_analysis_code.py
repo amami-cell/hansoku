@@ -233,7 +233,7 @@ class Test永続化用に商品行を取り出す:
     def test_コード有りは数値で入る(self):
         rows = analysis_code_rows([HEAD, _prow("P1", "15", "アジフライ")])
         assert rows == [{"product_code": "P1", "product_name": "アジフライ",
-                         "analysis_code": 15}]
+                         "analysis_code": 15, "dept_name": ""}]
 
     def test_空欄はNone(self):
         rows = analysis_code_rows([HEAD, _prow("P2", "", "お冷")])
@@ -252,6 +252,16 @@ class Test永続化用に商品行を取り出す:
 
     def test_見出しが無ければ空(self):
         assert analysis_code_rows([["店舗コード", "名称"], ["0001006", "からあげ"]]) == []
+
+    def test_部門名称もNN名前で入る(self):
+        # ABCの部門グリッドが出ない店の品目区分を、商品→部門で束ね直すため保存する。
+        r = _prow("P9", "15", "リエット")
+        r[8], r[9] = "02", "お通し"   # 部門コード / 部門名称
+        rows = analysis_code_rows([HEAD, r])
+        assert rows[0]["dept_name"] == "02:お通し"
+
+    def test_部門名称が無ければ空(self):
+        assert analysis_code_rows([HEAD, _prow("P8", "3")])[0]["dept_name"] == ""
 
 
 # ── 検算用：CSV行 → {menu, dept_code, dept_name, ...}（商品→部門の対応） ──

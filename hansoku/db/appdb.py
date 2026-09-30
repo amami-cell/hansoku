@@ -150,11 +150,12 @@ class AppDb:
                 cur.executemany(
                     """
                     INSERT INTO analysis_codes
-                        (store_code, product_code, product_name, analysis_code, updated_at)
-                    VALUES (%s, %s, %s, %s, now())
+                        (store_code, product_code, product_name, analysis_code, dept_name, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, now())
                     ON CONFLICT (store_code, product_code) DO UPDATE SET
                         product_name  = EXCLUDED.product_name,
                         analysis_code = EXCLUDED.analysis_code,
+                        dept_name     = EXCLUDED.dept_name,
                         updated_at    = now()
                     """,
                     [
@@ -163,12 +164,32 @@ class AppDb:
                             r["product_code"],
                             r.get("product_name", ""),
                             r.get("analysis_code"),
+                            r.get("dept_name", ""),
                         )
                         for r in rows
                     ],
                 )
         self.conn.commit()
         return len(rows)
+
+    def product_departments(self, store_codes: Iterable[str] | None = None) -> dict[str, dict[str, str]]:
+        """店ごとの 商品名→部門（"NN:名前"）を返す。dept_name が空の行は除く。
+
+        ABCの部門グリッドが取れない店（1069/1111/1137/1151/1168 等）の品目区分を、
+        完備している商品別売上を この 商品→部門 で束ね直して作るための元データ。
+        """
+        sql = "SELECT store_code, product_name, dept_name FROM analysis_codes WHERE dept_name <> ''"
+        params: tuple = ()
+        codes = [c for c in (store_codes or []) if c]
+        if codes:
+            sql += " AND store_code = ANY(%s)"
+            params = (list(codes),)
+        out: dict[str, dict[str, str]] = {}
+        for r in self.query(sql, params):
+            nm = (r["product_name"] or "").strip()
+            if nm:
+                out.setdefault(r["store_code"], {}).setdefault(nm, r["dept_name"])
+        return out
 
     def grant(self, email: str, store_code: str, role: str) -> None:
         self.execute(
