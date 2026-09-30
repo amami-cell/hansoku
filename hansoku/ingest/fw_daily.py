@@ -4952,8 +4952,11 @@ def ingest_analysis_codes(
         for st in not_fw:
             print(f"  ― {st.store_code} {st.store_name[:14]}  FW未連動のため対象外")
         if key:
+            # カンマ区切りで複数店を1ログインで（例 "1069,1111,1137"）。コード or 店名の一部。
+            keys = [k.strip() for k in key.split(",") if k.strip()]
+            codes = {k.lstrip("0") for k in keys}
             targets = [(o, s) for o, s in targets
-                       if s.store_code == key.lstrip("0") or key in s.store_name]
+                       if s.store_code in codes or any(k in s.store_name for k in keys)]
         if store_limit:
             targets = targets[:store_limit]
         print(f"[分析コード取込] 対象 {len(targets)}店")
