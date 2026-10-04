@@ -5114,24 +5114,27 @@ def _report_analysis_codes(per_store: list[dict], failures: list[str],
     # 全体像は下の順位表で見る。
     ordered = sorted(need, key=lambda r: -(len(r[2]["売れた"]) + len(r[2]["判定不能"])))
 
-    # 店に渡す用：全件（売れてるのに未設定／判定不能）を店別に書き出す。ログは上位5店×8件
-    # までしか出せないので、現場に配る完全な一覧はファイルで持つ。金額は出さない（名前だけ）。
+    # 店に渡す用：全件（売れてるのに未設定／判定不能）を店別に出す。ログは上位5店×8件
+    # までしか見やすく出せないが、完全な一覧は下のブロックに全部出す（ログ全体＝ファイルで
+    # 取り出せる）＋ fw-artifacts にも書き出す。金額は出さない（名前だけ）。
+    full: list[str] = ["分析用コード 要対応（売れているのに未設定）メニュー一覧", ""]
+    for st, got, bk in ordered:
+        full.append(f"■ {st.store_code} {st.store_name}  要対応 {len(bk['売れた'])}件"
+                    + (f" / 判定不能 {len(bk['判定不能'])}件" if bk["判定不能"] else ""))
+        for nm in bk["売れた"]:
+            full.append(f"    {nm}")
+        for nm in bk["判定不能"]:
+            full.append(f"    （判定不能）{nm}")
+        full.append("")
     if out_dir is not None:
         try:
             out_dir.mkdir(parents=True, exist_ok=True)
-            lines = ["分析用コード 要対応（売れているのに未設定）メニュー一覧", ""]
-            for st, got, bk in ordered:
-                lines.append(f"■ {st.store_code} {st.store_name}  要対応 {len(bk['売れた'])}件"
-                             + (f" / 判定不能 {len(bk['判定不能'])}件" if bk["判定不能"] else ""))
-                for nm in bk["売れた"]:
-                    lines.append(f"    {nm}")
-                for nm in bk["判定不能"]:
-                    lines.append(f"    （判定不能）{nm}")
-                lines.append("")
-            (out_dir / "analysis_code_blanks.txt").write_text("\n".join(lines), encoding="utf-8")
-            print(f"[分析コード] 要対応の全一覧を書き出しました: {out_dir / 'analysis_code_blanks.txt'}")
+            (out_dir / "analysis_code_blanks.txt").write_text("\n".join(full), encoding="utf-8")
         except Exception as e:  # noqa: BLE001
             print(f"[分析コード] 一覧の書き出しに失敗（{type(e).__name__}）")
+    print("\n===== 要対応 全件（店別・名前のみ） =====")
+    print("\n".join(full))
+    print("===== 要対応 全件ここまで =====\n")
     for st, got, bk in ordered[:5]:
         head = f"  ⚠ {st.store_code} {st.store_name[:16]:<16} {got['total']}件中 "
         parts = []
