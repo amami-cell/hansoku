@@ -1041,6 +1041,24 @@ def survey_departments(warehouse, master, *, months_back: int = 3, full_store: s
                 print(f"   ▲ 『{other}』に落ちた部門 {len(miss)}件（要調整候補）:")
                 for d in miss[:12]:
                     print(f"       {(d.get('name') or '')[:26]:26s} {round(d.get('sales') or 0):>11,}円")
+            # 検算：商品→部門(分析用コードCSV)で再計算した品目区分を、実ABCの部門ベースと
+            # 区分ごとに突き合わせる。両者がほぼ一致すれば『商品→部門で束ねる』手法が妥当。
+            pdm = (product_depts or {}).get(code)
+            if pdm:
+                prods_all = (pm.get(code, {}) or {}).get(r["m"]) or []
+                synth = _assemble_departments(_departments_from_products(prods_all, pdm))
+                recon = _categories_from_departments(synth.get("raw") or [], cats[code])
+                amap = {x.get("name"): round(x.get("sales") or 0) for x in result}
+                rmap = {x.get("name"): round(x.get("sales") or 0) for x in recon}
+                rtot = sum(rmap.values())
+                names = list(dict.fromkeys(list(amap) + list(rmap)))
+                print(f"   ▽ 検算：実ABC {round(tot):,}円 vs 商品→部門(CSV) {rtot:,}円"
+                      f"（差 {rtot-round(tot):+,}円 / 商品突合 {len(prods_all)}品）")
+                print(f"       {'区分':14s} {'実ABC':>11s} {'商品→部門':>11s} {'差':>10s}")
+                for nm in names:
+                    a, b = amap.get(nm, 0), rmap.get(nm, 0)
+                    flag = "" if abs(b - a) <= max(2000, a * 0.03) else "  ←差"
+                    print(f"       {(nm or '')[:14]:14s} {a:>11,} {b:>11,} {b-a:>+10,}{flag}")
             # 商品詳細（売れ筋・上位）。この店タイプは商品が部門に紐づかないので、区分別ではなく
             # 店の売れ筋商品を上位で出す（メニュー内容の確認用）。
             prods = sorted(((pm.get(code, {}) or {}).get(r["m"]) or []),

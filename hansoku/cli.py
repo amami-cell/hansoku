@@ -723,21 +723,17 @@ def cmd_schedule_lint(args: argparse.Namespace) -> int:
 
 
 def _load_product_depts(settings) -> dict:
-    """dept_from_products の店だけ、appdb から 商品→部門 を読む（無ければ空）。
+    """appdb から 商品→部門（部門名称を保存済みの店）を全店ぶん読む（無ければ空）。
 
     ABCの部門グリッドが出ない店の品目区分を、商品売上×分析用コードCSVの部門で
-    束ね直すための元データ。appdb（分析用コード）が無い環境では静かに空を返す。
+    束ね直すための元データ（dept_from_products の店で使う）。併せて検算にも使う
+    （実ABCの部門ベースと、この商品→部門での再計算を突き合わせる）ので、フラグの
+    有無に関係なく保存済みの店は全部読む。appdb が無い環境では静かに空を返す。
     """
-    from .web.export import load_store_categories
-
-    cats = load_store_categories()
-    codes = [c for c, r in cats.items() if (r or {}).get("dept_from_products")]
-    if not codes:
-        return {}
     try:
         with get_appdb(settings) as db:
             db.ensure_schema()
-            return db.product_departments(codes)
+            return db.product_departments()
     except Exception as e:  # noqa: BLE001
         print(f"[export] 商品→部門の読込みをスキップ（{type(e).__name__}）")
         return {}
