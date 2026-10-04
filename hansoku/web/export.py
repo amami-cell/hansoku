@@ -634,38 +634,69 @@ def _pd_norm(s: str | None) -> str:
     return unicodedata.normalize("NFKC", s or "").replace(" ", "").replace("　", "").lower()
 
 
-def _departments_from_products(items: list[dict], name_to_dept: dict[str, str]) -> dict[str, dict]:
-    """商品リストを『商品→部門(NN:名前)』で束ね直し、{部門名:{sales,qty,rate}} を作る。
+# 末尾のサイズ/金額/杯数などの表記（例「1000円」「150g」「5本」「2p」）。商品名の
+# 末尾だけが違う（ABC側の途中切れ・サイズ違い）揺れを吸収するために落とす。
+_PD_TAIL = re.compile(r"(?:\d+(?:\.\d+)?)(?:円|g|kg|ml|l|cc|本|個|杯|名|人|枚|貫|玉|p|pc|pcs|ｇ|ｍｌ)?$")
+
+
+def _pd_key(s: str | None) -> str:
+    """強めの突合キー：括弧の中身と末尾のサイズ/金額表記を落とした正規化名。"""
+    t = unicodedata.normalize("NFKC", s or "")
+    t = re.sub(r"[（(\[【][^）)\]】]*[）)\]】]", "", t)   # 括弧（全半角）の中身を除去
+    t = t.replace(" ", "").replace("　", "")
+    t = _PD_TAIL.sub("", t)                              # 末尾のサイズ/金額
+    return t.lower()
+
+
+def _departments_from_products(
+    items: list[dict], name_to_dept: dict[str, str]
+) -> tuple[dict[str, dict], list[dict]]:
+    """商品リストを『商品→部門(NN:名前)』で束ね直し、({部門名:{sales,qty,rate}}, 未突合) を返す。
 
     ABCの部門グリッドが出ない店（1069/1111/1137/1151/1168 等）で、完備している
     商品別売上を FW分析用コードCSVの部門で束ねて『疑似・部門合計』を作るための関数。
-    商品名はABC側が途中で切れることがあるので、正規化の完全一致→長い名前どうしの
-    前方一致で引く。引けない商品は部門に入れない（構成比は引けた分の比率になる）。
+    商品名はABC側が途中で切れる／末尾のサイズ・金額が違うので、段階的に突合する：
+      ① 正規化の完全一致 → ② 括弧・末尾表記を落とした強キーの完全一致
+      → ③ 強キーどうしの前方一致（6文字以上。ABC側の途中切れを拾う）。
+    引けない商品は部門に入れない（＝未突合として返し、検算で可視化する）。
     """
-    idx: dict[str, str] = {}
+    idx: dict[str, str] = {}       # 正規化名 → 部門
+    kidx: dict[str, str] = {}      # 強キー → 部門（衝突は先勝ち）
     for nm, dept in name_to_dept.items():
-        if dept:
-            idx.setdefault(_pd_norm(nm), dept)
-    keys = list(idx)
+        if not dept:
+            continue
+        idx.setdefault(_pd_norm(nm), dept)
+        k = _pd_key(nm)
+        if k:
+            kidx.setdefault(k, dept)
+    kkeys = list(kidx)
 
     def _look(name: str) -> str | None:
-        k = _pd_norm(name)
-        if k in idx:
-            return idx[k]
-        for ik in keys:
-            if len(k) >= 8 and len(ik) >= 8 and (ik.startswith(k) or k.startswith(ik)):
-                return idx[ik]
+        n = _pd_norm(name)
+        if n in idx:
+            return idx[n]
+        k = _pd_key(name)
+        if k and k in kidx:
+            return kidx[k]
+        if len(k) >= 6:
+            for ik in kkeys:
+                if len(ik) >= 6 and (ik.startswith(k) or k.startswith(ik)):
+                    return kidx[ik]
         return None
 
     agg: dict[str, dict] = {}
+    unmatched: list[dict] = []
     for it in items:
         dept = _look(it.get("name", ""))
         if not dept:
+            if (it.get("sales") or 0) > 0:
+                unmatched.append(it)
             continue
         d = agg.setdefault(dept, {"sales": 0.0, "qty": 0.0, "rate": None})
         d["sales"] += it.get("sales", 0) or 0
         d["qty"] += it.get("qty", 0) or 0
-    return agg
+    unmatched.sort(key=lambda p: -(p.get("sales") or 0))
+    return agg, unmatched
 
 
 def _assemble_departments(depts: dict[str, dict]) -> dict:
@@ -944,7 +975,7 @@ def _build_abc_by_month(
             # ABCの部門グリッドが出ない店は、完備の商品売上を『商品→部門』(分析用コードCSV)で
             # 束ね直して疑似・部門合計を作る（dept_from_products）。ドリルもこの合成部門を見る。
             if rules and rules.get("dept_from_products") and (product_depts or {}).get(code):
-                synth = _departments_from_products(items, product_depts[code])
+                synth, _unm = _departments_from_products(items, product_depts[code])
                 if synth:
                     departments_monthly.setdefault(code, {})[m] = _assemble_departments(synth)
             # 品目区分（店ごとのルールがある店だけ）。全商品で束ねてから売れ筋を切る。
@@ -1046,7 +1077,8 @@ def survey_departments(warehouse, master, *, months_back: int = 3, full_store: s
             pdm = (product_depts or {}).get(code)
             if pdm:
                 prods_all = (pm.get(code, {}) or {}).get(r["m"]) or []
-                synth = _assemble_departments(_departments_from_products(prods_all, pdm))
+                synth_agg, unmatched = _departments_from_products(prods_all, pdm)
+                synth = _assemble_departments(synth_agg)
                 recon = _categories_from_departments(synth.get("raw") or [], cats[code])
                 amap = {x.get("name"): round(x.get("sales") or 0) for x in result}
                 rmap = {x.get("name"): round(x.get("sales") or 0) for x in recon}
@@ -1059,6 +1091,11 @@ def survey_departments(warehouse, master, *, months_back: int = 3, full_store: s
                     a, b = amap.get(nm, 0), rmap.get(nm, 0)
                     flag = "" if abs(b - a) <= max(2000, a * 0.03) else "  ←差"
                     print(f"       {(nm or '')[:14]:14s} {a:>11,} {b:>11,} {b-a:>+10,}{flag}")
+                if unmatched:
+                    um = sum(round(p.get("sales") or 0) for p in unmatched)
+                    print(f"   ▲ 商品→部門で未突合（CSVに同名無し）{len(unmatched)}品 / 計 {um:,}円:")
+                    for p in unmatched[:20]:
+                        print(f"       {(p.get('name') or '')[:26]:26s} {round(p.get('sales') or 0):>10,}円")
             # 商品詳細（売れ筋・上位）。この店タイプは商品が部門に紐づかないので、区分別ではなく
             # 店の売れ筋商品を上位で出す（メニュー内容の確認用）。
             prods = sorted(((pm.get(code, {}) or {}).get(r["m"]) or []),
