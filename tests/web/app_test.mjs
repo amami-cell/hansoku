@@ -21,9 +21,17 @@ function loadApp(data, today = "2026-09-06") {
     get: (_t, k) => (k === "textContent" || k === "innerHTML" ? "" : noop),
     set: () => true,
   });
+  // 「現在時刻」を today に固定する。引数なしの new Date()／Date.now() だけ today に寄せ、
+  // 日付指定（new Date(iso) など）は本物の挙動のまま。これで当月/来月ロジックが実時間に
+  // 左右されず、テストが決定的になる（今まで today 引数は宣言だけで未使用だった）。
+  const FIXED_ISO = `${today}T00:00:00`;
+  class FixedDate extends Date {
+    constructor(...args) { if (args.length === 0) super(FIXED_ISO); else super(...args); }
+    static now() { return new Date(FIXED_ISO).getTime(); }
+  }
   const sandbox = {
     console,
-    Math, Date, JSON, Intl,
+    Math, Date: FixedDate, JSON, Intl,
     document: {
       getElementById: () => el,
       documentElement: el,
