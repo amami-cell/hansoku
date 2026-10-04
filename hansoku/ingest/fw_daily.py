@@ -4905,7 +4905,8 @@ def audit_analysis_codes(
     # 一覧が2701件になって誰も着手しない（実際そうなった）。
     sold, judged = _sold_menu_keys(
         warehouse, [p["store"].store_code for p in per_store], months)
-    return _report_analysis_codes(per_store, failures, sold=sold, judged=judged)
+    return _report_analysis_codes(per_store, failures, sold=sold, judged=judged,
+                                  out_dir=artifacts)
 
 
 def ingest_analysis_codes(
@@ -5080,7 +5081,8 @@ def classify_blank(blank: dict, sold: set, judged: set) -> str:
 
 def _report_analysis_codes(per_store: list[dict], failures: list[str],
                            *, sold: set | None = None,
-                           judged: set | None = None) -> int:
+                           judged: set | None = None,
+                           out_dir: "Path | None" = None) -> int:
     """結果をまとめて出し、赤くするかを決める。
 
     **赤にするのは「売れているのにコードが無い」ものだけ。** 全部を赤に
@@ -5111,6 +5113,25 @@ def _report_analysis_codes(per_store: list[dict], failures: list[str],
     # 明細は上位5店だけ。全店ぶん出すとログの末尾が明細で埋まる。
     # 全体像は下の順位表で見る。
     ordered = sorted(need, key=lambda r: -(len(r[2]["売れた"]) + len(r[2]["判定不能"])))
+
+    # 店に渡す用：全件（売れてるのに未設定／判定不能）を店別に書き出す。ログは上位5店×8件
+    # までしか出せないので、現場に配る完全な一覧はファイルで持つ。金額は出さない（名前だけ）。
+    if out_dir is not None:
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            lines = ["分析用コード 要対応（売れているのに未設定）メニュー一覧", ""]
+            for st, got, bk in ordered:
+                lines.append(f"■ {st.store_code} {st.store_name}  要対応 {len(bk['売れた'])}件"
+                             + (f" / 判定不能 {len(bk['判定不能'])}件" if bk["判定不能"] else ""))
+                for nm in bk["売れた"]:
+                    lines.append(f"    {nm}")
+                for nm in bk["判定不能"]:
+                    lines.append(f"    （判定不能）{nm}")
+                lines.append("")
+            (out_dir / "analysis_code_blanks.txt").write_text("\n".join(lines), encoding="utf-8")
+            print(f"[分析コード] 要対応の全一覧を書き出しました: {out_dir / 'analysis_code_blanks.txt'}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[分析コード] 一覧の書き出しに失敗（{type(e).__name__}）")
     for st, got, bk in ordered[:5]:
         head = f"  ⚠ {st.store_code} {st.store_name[:16]:<16} {got['total']}件中 "
         parts = []
