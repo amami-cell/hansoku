@@ -1098,6 +1098,13 @@ def survey_departments(warehouse, master, *, months_back: int = 3, full_store: s
                     print(f"   ▲ 商品→部門で未突合（CSVに同名無し）{len(unmatched)}品 / 計 {um:,}円:")
                     for p in unmatched[:20]:
                         print(f"       {(p.get('name') or '')[:26]:26s} {round(p.get('sales') or 0):>10,}円")
+                    # 全件（配布用）。マーカーで囲ってログから抽出する。TAB区切り：
+                    # UNM\t店コード\t商品名\t売上(税抜)\t点数
+                    sname = name_of.get(code, "")
+                    print(f"===== 未突合全件 {code} {sname} 開始 n={len(unmatched)} 計={um} =====")
+                    for p in unmatched:
+                        print(f"UNM\t{code}\t{p.get('name') or ''}\t{round(p.get('sales') or 0)}\t{round(p.get('qty') or 0)}")
+                    print(f"===== 未突合全件 {code} ここまで =====")
             # 商品詳細（売れ筋・上位）。この店タイプは商品が部門に紐づかないので、区分別ではなく
             # 店の売れ筋商品を上位で出す（メニュー内容の確認用）。
             prods = sorted(((pm.get(code, {}) or {}).get(r["m"]) or []),
