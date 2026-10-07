@@ -200,6 +200,8 @@ await test("部門別・商品・予算達成率の目標が集計できる（�
   // 出数は1日A/V＝Σqty(200+200=400) ÷ Σ暦日(31+31=62) = 6.45 → 6
   assert.equal(call(`_metricOverMonths("dept_qty#コース","1160",${ms})`), 6, "部門別出数＝1日A/V（合計qty÷暦日）");
   assert.equal(call(`TARGET_METRICS.find(m=>m.key==="dept_qty").daily`), true, "部門別出数はA/V（daily）指標");
+  // 振り返り表などの値表示（fmtMetricVal）は単位「点」をそのまま使う（以前は円で出ていた）
+  assert.equal(call(`fmtMetricVal(TARGET_METRICS.find(m=>m.key==="dept_qty"),151)`), "151点", "部門別出数の値表示は点（円ではない）");
   assert.equal(call(`_metricOverMonths("dept_share#アラカルト","1160",${ms})`), 50, "部門構成比＝区分売上/総売上");
   assert.equal(call(`_metricOverMonths("dept_avg_check#アラカルト","1160",${ms})`), 1250, "部門別客単価＝売上/数量");
   assert.equal(call(`_metricOverMonths("prod_sales#刺身盛合せ","1160",${ms})`), 250000, "商品の売上＝選んだ商品の合算");

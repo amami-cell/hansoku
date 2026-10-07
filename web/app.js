@@ -4400,6 +4400,7 @@ function fmtMetricVal(mt, v) {
   if (mt.unit === "%") return (+v).toFixed(1) + "%";
   if (mt.unit === "人") return ten(v) + "人";
   if (mt.key === "sales" || mt.key === "hour_sales" || mt.key === "dept_sales" || mt.key === "prod_sales") return man(v) + "円";
+  if (mt.unit && mt.unit !== "円") return ten(v) + mt.unit; // 点など（部門別出数）は単位をそのまま使う
   return ten(v) + "円"; // 客単価・時間帯客単価・部門別客単価
 }
 function renderTargetReview(c) {
