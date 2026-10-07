@@ -155,13 +155,15 @@ stores:
   "1739": { <<: *fwdept, name: "ぎふや 天満橋店" }
   "2004": { <<: *fwdept, name: んだんだ }
 
-  # ── ABCの部門グリッドが出ない5店：完備の商品売上を『商品→部門』(分析用コードCSV)で
-  #    束ね直して品目区分を作る（dept_from_products）。商品→部門は analysis-code-ingest で保存。
-  "1069": { <<: *fwdept, name: ひよこ飯店,        dept_from_products: true }
-  "1111": { <<: *fwdept, name: ちゃーちゃん,       dept_from_products: true }
-  "1137": { <<: *fwdept, name: "料理と酒 たいだい", dept_from_products: true }
-  "1151": { <<: *fwdept, name: NagaGutsu,        dept_from_products: true }
-  "1168": { <<: *fwdept, name: GOLD京都ポルタ店,   dept_from_products: true }
+  # ── 旧「ABCの部門グリッドが出ない5店」。以前は部門別が取れず商品→部門で再構成していたが
+  #    （dept_from_products）、FWのABC部門別が取り込めるようになった（DB確認：直近2026-08〜は
+  #    全5店そろい、月により2026-06〜07が欠け）。再構成は未突合商品を落として穴を作るため、
+  #    本物のFW部門別に切替（通常の dept_as_category）。部門データの無い初月は部門別が空になる。
+  "1069": { <<: *fwdept, name: ひよこ飯店 }
+  "1111": { <<: *fwdept, name: ちゃーちゃん }
+  "1137": { <<: *fwdept, name: "料理と酒 たいだい" }
+  "1151": { <<: *fwdept, name: NagaGutsu }
+  "1168": { <<: *fwdept, name: GOLD京都ポルタ店 }
 
   # ── すさび湯系（7店）：FW部門1:1 ＋ 肉寿司→寿司統合・盛り合わせ→寿司盛り合わせ改名 ──
   "1006": &sasabi
