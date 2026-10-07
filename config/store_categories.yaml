@@ -155,15 +155,15 @@ stores:
   "1739": { <<: *fwdept, name: "ぎふや 天満橋店" }
   "2004": { <<: *fwdept, name: んだんだ }
 
-  # ── 旧「ABCの部門グリッドが出ない5店」。以前は部門別が取れず商品→部門で再構成していたが
-  #    （dept_from_products）、FWのABC部門別が取り込めるようになった（DB確認：直近2026-08〜は
-  #    全5店そろい、月により2026-06〜07が欠け）。再構成は未突合商品を落として穴を作るため、
-  #    本物のFW部門別に切替（通常の dept_as_category）。部門データの無い初月は部門別が空になる。
-  "1069": { <<: *fwdept, name: ひよこ飯店 }
-  "1111": { <<: *fwdept, name: ちゃーちゃん }
-  "1137": { <<: *fwdept, name: "料理と酒 たいだい" }
-  "1151": { <<: *fwdept, name: NagaGutsu }
-  "1168": { <<: *fwdept, name: GOLD京都ポルタ店 }
+  # ── 旧「ABCの部門グリッドが出ない5店」。基本は本物のFW部門別（dept_as_category）。
+  #    ただしFWに部門紐付けが無い初月（プローブで確認：6月＝全5店／7月＝1069・1137）は
+  #    本物が空になるため、その月だけ商品→部門(分析用コードCSV)の再構成で補完する
+  #    （dept_fill_from_products）。補完月はCSVに無い商品が未突合で落ち過小計上になる（既知）。
+  "1069": { <<: *fwdept, name: ひよこ飯店,        dept_fill_from_products: true }
+  "1111": { <<: *fwdept, name: ちゃーちゃん,       dept_fill_from_products: true }
+  "1137": { <<: *fwdept, name: "料理と酒 たいだい", dept_fill_from_products: true }
+  "1151": { <<: *fwdept, name: NagaGutsu,        dept_fill_from_products: true }
+  "1168": { <<: *fwdept, name: GOLD京都ポルタ店,   dept_fill_from_products: true }
 
   # ── すさび湯系（7店）：FW部門1:1 ＋ 肉寿司→寿司統合・盛り合わせ→寿司盛り合わせ改名 ──
   "1006": &sasabi

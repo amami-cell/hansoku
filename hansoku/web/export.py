@@ -974,9 +974,20 @@ def _build_abc_by_month(
             # こうすると品目数（品目区分の count）にサブが二重に乗らない。
             items = _nest_zero_subs(items, rules)
             items.sort(key=lambda p: p["sales"], reverse=True)
-            # ABCの部門グリッドが出ない店は、完備の商品売上を『商品→部門』(分析用コードCSV)で
-            # 束ね直して疑似・部門合計を作る（dept_from_products）。ドリルもこの合成部門を見る。
-            if rules and rules.get("dept_from_products") and (product_depts or {}).get(code):
+            # 商品売上を『商品→部門』(分析用コードCSV)で束ね直した疑似・部門合計。
+            #  dept_from_products      … 全月を再構成で上書き（旧：部門グリッドが出ない店）。
+            #  dept_fill_from_products … 実FW部門が無い月だけ補完（本物があればそのまま）。
+            #    ※補完月はCSVに無い商品が未突合として落ち、過小計上になる（既知）。
+            has_real_dept = bool(((departments_monthly.get(code, {}) or {}).get(m)))
+            want_synth = bool(
+                rules
+                and (product_depts or {}).get(code)
+                and (
+                    rules.get("dept_from_products")
+                    or (rules.get("dept_fill_from_products") and not has_real_dept)
+                )
+            )
+            if want_synth:
                 synth, _unm = _departments_from_products(items, product_depts[code])
                 if synth:
                     departments_monthly.setdefault(code, {})[m] = _assemble_departments(synth)

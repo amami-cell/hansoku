@@ -3,7 +3,59 @@ from datetime import date
 
 import pytest
 
+from hansoku.web import export as _ex
 from hansoku.web.export import build, classify_category, _nest_zero_subs
+
+
+def test_dept_fill_from_products_実部門が無い月だけ商品再構成で補完する():
+    """dept_fill_from_products の店は、本物のFW部門がある月はそれを使い、
+    部門が無い月だけ『商品→部門』の再構成で埋める（全月上書きの dept_from_products とは別）。"""
+    d08, d07 = date(2026, 8, 15), date(2026, 7, 15)
+    rows = {
+        _ex.METRIC_DEPT_SALES: [
+            {"store_code": "9001", "date": d08, "product_name": "99:実八月部門",
+             "product_category": "20.0", "value": 11000.0},
+        ],
+        _ex.METRIC_DEPT_QTY: [
+            {"store_code": "9001", "date": d08, "product_name": "99:実八月部門", "value": 30.0},
+        ],
+        _ex.METRIC_PRODUCT_SALES: [
+            {"store_code": "9001", "date": d08, "product_name": "フード商品",
+             "product_category": "A", "value": 11000.0},
+            {"store_code": "9001", "date": d07, "product_name": "フード商品",
+             "product_category": "A", "value": 5500.0},
+            {"store_code": "9001", "date": d07, "product_name": "ドリンク商品",
+             "product_category": "A", "value": 3300.0},
+        ],
+        _ex.METRIC_PRODUCT_QTY: [
+            {"store_code": "9001", "date": d08, "product_name": "フード商品",
+             "product_category": "A", "value": 10.0},
+            {"store_code": "9001", "date": d07, "product_name": "フード商品",
+             "product_category": "A", "value": 5.0},
+            {"store_code": "9001", "date": d07, "product_name": "ドリンク商品",
+             "product_category": "A", "value": 3.0},
+        ],
+    }
+
+    class FakeWH:
+        def aggregate(self, q):
+            return list(rows.get(q.metrics[0], []))
+
+    class FakeMaster:
+        active_codes = ["9001"]
+
+    cats = {"9001": {"name": "T", "other": "その他", "classify_by": "department",
+                     "dept_as_category": True, "dept_fill_from_products": True,
+                     "dept_other": []}}
+    pdepts = {"9001": {"フード商品": "01:フード", "ドリンク商品": "02:ドリンク"}}
+    dm, _pm, _cm = _ex._build_abc_by_month(
+        FakeWH(), FakeMaster(), date(2026, 1, 1), date(2026, 12, 31), cats, pdepts
+    )
+    aug = {b["name"] for b in dm["9001"]["2026-08"]["raw"]}
+    jul = {b["name"] for b in dm["9001"]["2026-07"]["raw"]}
+    assert any("実八月" in n for n in aug), aug          # 8月は本物のFW部門を使う
+    assert not any("実八月" in n for n in jul)           # 7月に本物は無い
+    assert any("フード" in n for n in jul), jul          # 7月は商品→部門で補完される
 
 
 # 0円サブ（選択メニュー内訳）を親メイン商品の下に畳む変換。zero_groups のある店だけ効く。
