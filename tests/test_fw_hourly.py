@@ -46,6 +46,55 @@ def test_時間帯グリッドから時間帯別の売上と客数を拾う(monk
     assert b12["ints"][_HOUR_SALES] == 942288
 
 
+def test_hourly_単店指定でその店だけ取り込む(monkeypatch):
+    """ingest_hourly(store=...) は指定店だけを処理する（月次マトリクスで 1店=1ジョブ用）。"""
+    import contextlib
+
+    class _St:
+        def __init__(self, code, name):
+            self.store_code, self.store_name, self.active, self.pos = code, name, True, "fw"
+
+    stores = [_St("1006", "本店"), _St("1151", "NagaGutsu"), _St("1160", "ルクア")]
+
+    class _Master:
+        active = stores
+        def find_by_name(self, nm):
+            return next((s for s in stores if s.store_name == nm), None)
+
+    selected = []
+
+    @contextlib.contextmanager
+    def _fake_session(_a):
+        yield object()
+
+    # ingest_hourly は関数内で from .fw_budget import _combo_options/_select_combo/_click_search
+    # するので、これらは fw_budget 側を差し替える。
+    from hansoku.ingest import fw_budget
+    monkeypatch.setattr(fw_daily, "fw_session", _fake_session)
+    monkeypatch.setattr(fw_daily, "_open_hourly", lambda _s: None)
+    monkeypatch.setattr(fw_budget, "_combo_options",
+                        lambda _s: [{"value": s.store_code, "name": s.store_name} for s in stores])
+    monkeypatch.setattr(fw_budget, "_select_combo",
+                        lambda _s, v: (selected.append(v) or True))
+    monkeypatch.setattr(fw_budget, "_click_search", lambda _s: None)
+    monkeypatch.setattr(fw_daily, "_set_date_range", lambda _s, a, b: True)
+    monkeypatch.setattr(fw_daily, "_visual_rows", lambda _s: [])
+    monkeypatch.setattr(fw_daily, "_extract_hour_grid",
+                        lambda _s: [{"hour": 12, "ints": [5, 20, 300000]}])
+    monkeypatch.setattr(fw_daily.time, "sleep", lambda *_a, **_k: None)
+
+    class _WH:
+        def __init__(self): self.rows = []
+        def ensure_schema(self): pass
+        def replace_actuals(self, rows, **_k): self.rows = list(rows); return len(rows)
+
+    wh = _WH()
+    fw_daily.ingest_hourly(wh, _Master(), artifacts=None, month="2026-07", store="1151")
+
+    assert selected == ["1151"], selected                     # 指定店だけ選択
+    assert {r.store_code for r in wh.rows} == {"1151"}         # 書き込みも1151だけ
+
+
 def test_月次グリッドから売上と客数を拾う(monkeypatch):
     # FW「月別日別売上推移」の実ダンプ（八銭 2025-09 の1行ぶん）。％を挟む15列。
     row = [

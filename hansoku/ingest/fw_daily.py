@@ -759,6 +759,7 @@ def ingest_hourly(
     *,
     artifacts: Path,
     month: str | None = None,
+    store: str | None = None,
     store_limit: int | None = None,
     dry_run: bool = False,
 ) -> int:
@@ -803,19 +804,28 @@ def ingest_hourly(
         _open_hourly(session)
         options = _combo_options(session)
         print(f"[時間帯別] 店舗コンボボックス {len(options)}件 / 対象月 {month}（{d_from}〜{d_to}）")
+        # 単店指定（月次マトリクスで 1店=1ジョブに回すため）。コード or 店名の一部で絞る。
+        want = (store or "").strip()
+        want_code = want.lstrip("0")
         targets = []
         skipped_pos = []
         for opt in options:
             code = opt["value"].lstrip("0")
-            store = active_by_code.get(code) or master.find_by_name(opt["name"])
-            if not (store and store.active):
+            st = active_by_code.get(code) or master.find_by_name(opt["name"])
+            if not (st and st.active):
                 continue
             # FW未連動の店（pos=uレジ/ダイニー）はFWにデータが無いので対象外。掘っても
             # 毎回「グリッド無し」で失敗するだけ（例 1766 ぎふや福岡天神＝uレジ）。
-            if store.pos != "fw":
-                skipped_pos.append(f"{store.store_code}:{store.pos}")
+            if st.pos != "fw":
+                skipped_pos.append(f"{st.store_code}:{st.pos}")
                 continue
-            targets.append((opt["value"], store))
+            if want and not (
+                code == want_code
+                or want in (st.store_name or "")
+                or want in opt["name"]
+            ):
+                continue
+            targets.append((opt["value"], st))
     if skipped_pos:
         print(f"[時間帯別] FW未連動でスキップ {len(skipped_pos)}件: {', '.join(skipped_pos)}")
     print(f"[時間帯別] マスタと一致した稼働店 {len(targets)}件")

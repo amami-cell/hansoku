@@ -678,6 +678,7 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 master,
                 artifacts=Path(args.artifacts),
                 month=args.month,
+                store=args.abc_store or None,
                 store_limit=args.limit,
                 dry_run=(args.mode == "hourly-dry" or args.dry_run),
             )
