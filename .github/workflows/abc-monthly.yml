@@ -7,6 +7,10 @@ name: 月次ABCを取り込む
 #
 # 施策詳細の「1ヵ月毎」表示（ケーキ/ジェラート/パフェ・食べ放題・宴会コース）と
 # 横断「忘新年会・宴会まとめ」の土台。取り込んだら deploy.yml で画面へ反映する。
+#
+# あわせて各店の『分析用コード』（商品→コードの対応）も毎月Neonへ取り込む。
+# 店が『分析用コード設定』で部門コードを入れたら、翌月のこの自動取込で部門別売上
+# （ABC）と商品→コードの両方が更新され、deploy.yml で画面へ反映される。
 
 on:
   workflow_dispatch:
@@ -120,6 +124,33 @@ jobs:
               xvfb-run -a python -m hansoku.cli fw-daily --mode abc-store-ingest \
                 --abc-store "${{ matrix.store }}" --artifacts fw-artifacts
             fi
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: 分析用コード取込（1店・商品→コードをNeonへ）
+        # 店が『分析用コード設定』でメニューに部門コードを入れたら、その対応を
+        # Neon に取り込む（下流の部門別客数・区分の月次再構成の元データ）。
+        # FWには書かない（押すのは CSV出力 とダウンロードだけ）。月は持たず現在のマスタを読む。
+        # 店舗選択・グリッド描画の一過性フレを吸収するため最大2回まで粘る。
+        env:
+          FOODIST_JOURNAL_USER_ID: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FOODIST_JOURNAL_PASSWORD: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -o pipefail
+          run_once() {
+            xvfb-run -a python -m hansoku.cli fw-daily --mode analysis-code-ingest \
+              --abc-store "${{ matrix.store }}" --artifacts fw-artifacts
+          }
+          {
+            echo "## 月次 分析用コード 取込 ${{ matrix.store }}"
+            echo ''
+            echo '```'
+            run_once || { echo '--- 1回目失敗。再取込 ---'; sleep 8; run_once; }
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
