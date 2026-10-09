@@ -456,6 +456,75 @@ tbody tr:last-child td{border-bottom:0;}
 .sgrp-n{color:var(--ink-3);font-weight:400;font-size:11px;}
 
 /* ── 店舗詳細：この店の販促 ─────────────────────────────── */
+/* 店舗トップの累計サマリー（予算/実績・前年対比・客単価）。 */
+.ph-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;}
+.ph-tile{background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:12px 14px;}
+.ph-l{font-size:12px;color:var(--ink-2);font-weight:600;}
+.ph-big{font-size:26px;font-weight:800;line-height:1.15;font-variant-numeric:tabular-nums;letter-spacing:-.01em;margin-top:2px;color:var(--ink);}
+.ph-big.up{color:var(--good-ink);} .ph-big.down{color:var(--critical-ink);}
+.ph-big .u{font-size:14px;font-weight:700;color:var(--ink-2);margin-left:1px;}
+.ph-sub{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;margin-top:3px;}
+.ph-sub .up{color:var(--good-ink);font-weight:700;} .ph-sub .down{color:var(--critical-ink);font-weight:700;}
+
+/* 販促タイムライン（直近結果／実施中／今後予定）。 */
+.tl-grp{margin-bottom:14px;}
+.tl-grp:last-child{margin-bottom:0;}
+.tl-h{font-size:12px;font-weight:700;color:var(--ink-2);letter-spacing:.02em;margin:0 0 6px;
+  display:flex;align-items:center;gap:7px;}
+.tl-n{font-size:11px;color:var(--ink-3);background:var(--bg);border:1px solid var(--line);border-radius:999px;padding:0 7px;}
+.tl-list{list-style:none;margin:0;padding:0;}
+.tl-list li{display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:9px 4px;
+  border-bottom:1px solid var(--line);cursor:pointer;font-size:13.5px;}
+.tl-list li:last-child{border-bottom:0;}
+.tl-list li:hover{background:var(--surface-2);}
+.tl-dot{width:9px;height:9px;border-radius:3px;flex:0 0 auto;}
+.tl-nm{font-weight:600;color:var(--ink);flex:1 1 auto;min-width:120px;}
+.tl-rg{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;}
+
+/* 来月のアクション（準備の抜け・去年の学び）。 */
+.na-grp{margin-bottom:14px;} .na-grp:last-child{margin-bottom:0;}
+.na-wh{color:var(--critical-ink);}
+.na-list{list-style:none;margin:0;padding:0;}
+.na-list>li{padding:11px 4px;border-bottom:1px solid var(--line);cursor:pointer;}
+.na-list>li:last-child{border-bottom:0;}
+.na-list>li:hover{background:var(--surface-2);}
+.na-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:13.5px;}
+.na-nm{font-weight:700;color:var(--ink);flex:1 1 auto;min-width:120px;}
+.na-todos{display:flex;flex-wrap:wrap;gap:6px;margin:7px 0 0 18px;}
+.na-todo{font-size:12px;color:var(--warning-ink);background:var(--warn-soft);border-radius:999px;padding:2px 9px;font-weight:600;}
+.na-todo.na-w,.na-w{color:var(--critical-ink);}
+.na-ok{font-size:12px;color:var(--good-ink);margin:6px 0 0 18px;font-weight:600;}
+.na-learn{margin:8px 0 0 18px;padding:8px 11px;border-radius:9px;background:var(--surface-2);
+  border:1px solid var(--line);font-size:12.5px;line-height:1.6;}
+.na-learn-l{font-weight:700;color:var(--ink-2);}
+.na-m{color:var(--ink-2);margin-top:3px;} .na-n{color:var(--ink);margin-top:3px;}
+.na-n b{color:var(--accent);}
+.psum-i.na-w{color:var(--critical-ink);font-weight:700;}
+/* 来月の「やること」チェックリスト（動詞・最初の一歩）。行を押すとその画面へ。 */
+.do-list{list-style:none;margin:0;padding:0;}
+.do-i{display:flex;align-items:center;gap:10px;padding:12px 6px;border-bottom:1px solid var(--line);
+  font-size:14.5px;color:var(--ink);}
+.do-i:last-child{border-bottom:0;}
+.do-i[data-goal],.do-i[data-upload],.do-i[data-camp],.do-i[data-memo]{cursor:pointer;}
+.do-i[data-goal]:hover,.do-i[data-upload]:hover,.do-i[data-camp]:hover,.do-i[data-memo]:hover{background:var(--surface-2);}
+.do-c{color:var(--ink-3);font-size:16px;flex:0 0 auto;}
+.do-t{flex:1 1 auto;font-weight:600;}
+.do-go{color:var(--accent);font-weight:700;flex:0 0 auto;}
+.do-ok{padding:14px 6px;color:var(--good-ink);font-weight:600;font-size:14px;}
+/* 参考（去年どうだったか）。既定は畳む＝行を増やさない。 */
+.na-ref{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;}
+.na-ref>summary{cursor:pointer;font-size:12.5px;color:var(--ink-2);padding:4px 2px;list-style:none;}
+.na-ref>summary::-webkit-details-marker{display:none;}
+.na-ref>summary::before{content:"▸ ";color:var(--ink-3);}
+.na-ref[open]>summary::before{content:"▾ ";}
+.na-learn-in{margin:4px 0 2px 18px;font-size:12.5px;line-height:1.6;color:var(--ink-2);}
+.na-learn-in>b{color:var(--ink);}
+/* いまの状況：ひと目判定の1行。 */
+.ph-verdict{font-size:15px;font-weight:700;margin:0 0 12px;padding:9px 13px;border-radius:9px;
+  background:var(--surface-2);border:1px solid var(--line);color:var(--ink);}
+.ph-verdict.up{color:var(--good-ink);background:var(--good-soft);border-color:transparent;}
+.ph-verdict.down{color:var(--critical-ink);background:color-mix(in srgb,var(--critical-ink) 12%,var(--surface));border-color:transparent;}
+
 /* 販促の効果サマリ＋並べ替え/タブ＋用語（この店の販促の頭）。 */
 .psum{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 10px;font-size:13px;color:var(--ink-2);}
 .psum-i{display:inline-flex;align-items:baseline;gap:5px;font-variant-numeric:tabular-nums;}
@@ -961,6 +1030,7 @@ html{overflow-anchor:none;}
 .tr-note{margin-top:9px;font-size:11px;color:var(--ink-3);line-height:1.6;}
 /* 目標の変更ログ（誰がいつ設定したか）。目標セルの下に控えめに。 */
 .tr-meta{margin-top:2px;font-size:10px;font-weight:400;color:var(--ink-3);white-space:nowrap;}
+.tr-sub{margin-top:2px;font-size:10.5px;font-weight:400;color:var(--ink-3);white-space:nowrap;}
 
 /* 目標スコアボード（施策の効果ビュー上部・横断の達成率一覧） */
 .tblist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}
@@ -1076,6 +1146,31 @@ html{overflow-anchor:none;}
 .ghelp{font-size:11.5px;color:var(--ink-3);line-height:1.55;margin-top:6px;padding:8px 10px;
   background:var(--surface-2);border:1px solid var(--line);border-radius:8px;}
 .glg i{width:10px;height:10px;border-radius:3px;display:inline-block;font-style:normal;font-size:11px;line-height:1;}
+/* 販促一覧の色ドット凡例（＝販促の種類）。ドットの色が何かを、一覧の頭で示す。 */
+.klegend{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0 0 10px;font-size:12px;color:var(--ink-2);}
+.kleg{display:inline-flex;align-items:center;gap:6px;}
+/* いまの状況の「今の販促（実施中）」チップ。押すとその販促の詳細へ。 */
+.nowpromo{margin-top:14px;border-top:1px solid var(--line);padding-top:12px;}
+.nowpromo.muted{color:var(--ink-3);font-size:13px;}
+.nowpromo-h{font-size:12px;font-weight:700;color:var(--ink-2);margin:2px 0 6px;}
+.nowpromo-h.next{margin-top:10px;color:var(--ink-3);}
+.nowc{display:flex;align-items:center;gap:9px;width:100%;text-align:left;font:inherit;cursor:pointer;
+  background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:7px;min-height:44px;}
+.nowc:last-child{margin-bottom:0;}
+.nowc:hover{border-color:var(--accent);}
+.nowc-t{flex:1 1 auto;font-weight:700;color:var(--ink);min-width:0;}
+.nowc-e{font-size:11px;font-weight:700;border-radius:5px;padding:1px 7px;white-space:nowrap;}
+.nowc-e.good{color:var(--good-ink);background:var(--good-soft);}
+.nowc-e.warn{color:var(--critical-ink);background:color-mix(in srgb,var(--critical-ink) 15%,var(--surface));}
+.nowc-r{font-size:12px;color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap;}
+/* 年間チャートの折りたたみ（既定は畳む）。月次一覧の下に置く開くボタン。 */
+.chartfold>summary{cursor:pointer;list-style:none;font-size:13px;color:var(--accent);font-weight:600;
+  padding:11px 13px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);
+  min-height:44px;display:flex;align-items:center;gap:8px;}
+.chartfold>summary::-webkit-details-marker{display:none;}
+.chartfold>summary::before{content:"▸";}
+.chartfold[open]>summary::before{content:"▾";}
+.chartfold[open]>summary{margin-bottom:10px;}
 /* 販促 年間チャート＝月カルーセル。横スクロールで月移動、前後の月が両端にチラ見え。
    上＝その月のPOP・制作物サムネ、下＝その月の販促チップ。 */
 .pcar{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;
@@ -1407,7 +1502,46 @@ textarea.pf-in{resize:vertical;line-height:1.5;}
 .pf-row .pf-l{flex:1;}
 .pf-msg{font-size:12px;color:var(--critical-ink);background:var(--warn-soft);border-radius:7px;padding:6px 10px;}
 .pf-hint{font-size:10.5px;font-weight:600;color:var(--sub);margin-left:6px;}
+.pf-ym{display:flex;gap:6px;}
+.pf-ym-y{flex:1 1 0;min-width:0;}
+.pf-ym-m{flex:0 0 auto;width:5.2em;}
 .pf-tg-head{font-size:12px;font-weight:800;color:var(--ink-2);margin-top:4px;border-top:1px solid var(--line);padding-top:10px;}
+.pf-goalhint{font-size:12.5px;color:var(--ink-3);background:var(--surface-2);border:1px dashed var(--line);
+  border-radius:9px;padding:11px 12px;margin-top:6px;line-height:1.5;}
+.pf-goalsec{animation:pfReveal .18s ease;}
+@keyframes pfReveal{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:none;}}
+.gg-h{display:flex;flex-direction:column;gap:2px;margin-bottom:6px;}
+.gg-h>b{font-size:16px;color:var(--ink);}
+.gg-h>.sub{font-size:12px;color:var(--ink-3);}
+/* 目標行（カテゴリ▽＋値＋目安＋削除）。＋追加で複数持てる。 */
+.gg-rows{display:flex;flex-direction:column;gap:10px;margin:8px 0;}
+.gr{border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:var(--surface-2);}
+.gr-top{display:flex;align-items:center;gap:7px;}
+.gr-n{font-size:12px;font-weight:800;color:var(--ink-2);flex:0 0 auto;min-width:38px;}
+.gr-cat{flex:1 1 auto;min-width:0;}
+.gr-line2{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px;padding-left:45px;}
+.gr-band{flex:1 1 150px;min-width:120px;}
+.gr-val{flex:1 1 130px;min-width:100px;}
+.gg-force{display:inline-flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-2);cursor:pointer;margin:2px 0 10px;}
+.gg-force input{width:16px;height:16px;}
+.gr-fill{flex:0 0 auto;font:inherit;font-size:12px;color:var(--accent);background:var(--surface);
+  border:1px solid var(--line);border-radius:8px;padding:6px 9px;cursor:pointer;min-height:38px;}
+.gr-fill:hover{border-color:var(--accent);}
+.gr-del{flex:0 0 auto;font-size:18px;line-height:1;color:var(--ink-3);background:none;border:0;cursor:pointer;padding:4px 6px;}
+.gr-del:hover{color:var(--critical-ink);}
+.gr-help{font-size:11.5px;color:var(--ink-3);margin-top:6px;line-height:1.5;}
+.gg-add{font:inherit;font-size:13px;font-weight:700;color:var(--accent);background:var(--surface);
+  border:1px dashed var(--accent);border-radius:10px;padding:10px;cursor:pointer;width:100%;min-height:44px;}
+.gg-add:hover{background:var(--good-soft);}
+/* 目標画面の中のPOP・画像アップロード（同じ画面で完結）。 */
+.gg-pop{margin:6px 0;}
+.gg-pop-actions{display:flex;flex-direction:column;gap:6px;margin-top:6px;}
+.gg-upl{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-weight:700;font-size:13px;
+  color:var(--accent);background:var(--surface);border:1px dashed var(--accent);border-radius:10px;
+  padding:10px;cursor:pointer;min-height:44px;}
+.gg-upl:hover{background:var(--good-soft);}
+.gg-skip{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2);cursor:pointer;padding:6px 2px;}
+.gg-skip input{width:18px;height:18px;}
 .pf-tg-inherit{margin-left:8px;font-size:10.5px;font-weight:600;color:var(--gold,#a9722a);background:color-mix(in srgb,var(--gold,#a9722a) 14%,transparent);border-radius:5px;padding:1px 7px;}
 .pf-tg-grid{display:flex;flex-direction:column;gap:7px;}
 .pf-tg{display:grid;grid-template-columns:1fr auto 112px;grid-template-areas:"l fill in" "help help diff";gap:2px 8px;align-items:center;}
@@ -1767,6 +1901,18 @@ b.warn{color:var(--warning-ink);}
 .moredet>summary::-webkit-details-marker{display:none;}
 .moredet>summary::before{content:"▸ ";}
 .moredet[open]>summary::before{content:"▾ ";}
+/* 「販促一覧」「もっと見る」ボタン（畳んだ中身を開く大きな押しやすいバー）。 */
+.opendet{margin-bottom:16px;}
+.opendet:last-child{margin-bottom:36px;}
+.opendet>summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:10px;
+  min-height:52px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;
+  background:var(--surface-2);color:var(--ink);font-weight:700;font-size:15px;}
+.opendet>summary::-webkit-details-marker{display:none;}
+.opendet>summary::before{content:"▸";color:var(--accent);font-weight:700;flex:0 0 auto;}
+.opendet[open]>summary::before{content:"▾";}
+.opendet[open]>summary{border-radius:12px 12px 0 0;margin-bottom:0;background:var(--surface);}
+.opendet>summary:hover{border-color:var(--accent);}
+.openbtn-t{flex:1 1 auto;min-width:0;}
 
 /* ══ さがす（シート）══════════════════════════════════════════════════ */
 .sheet{position:fixed;inset:0;z-index:60;display:flex;}

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -35,7 +36,9 @@ from ..model import (
     METRIC_SALES,
     METRIC_SALES_BUDGET,
     dept_bucket,
+    is_cover_charge,
     is_drink_dept,
+    is_takeout,
 )
 
 # 店舗詳細に出す売れ筋商品の件数
@@ -89,17 +92,79 @@ def classify_category(name: str, rules: dict, group: str | None = None) -> str:
     name_cat = (rules.get("name_category") or {}).get(name or "")
     if name_cat:
         return name_cat
+    # 部門＝区分（1:1）。FWの部門をそのまま品目区分にする店（すさび湯系）。
+    # 部門名（見出しの "NN:名前" の名前部分）が区分名。dept_merge で統合、dept_rename で改名、
+    # dept_other でオペ部門を その他 へ。部門ベース(classify_by:department)で使う。
+    if rules.get("dept_as_category"):
+        base = _group_label(group) if group else _group_label(name)
+        base = re.sub(r"^【[^】]*】", "", base).strip()   # 店タグ【ｽｻﾋﾞﾊﾟﾅ】等も落として区分名を揃える
+        if not base:
+            return rules.get("other", "その他")
+        if base in set(rules.get("dept_other") or []):
+            return rules.get("other", "その他")
+        merge = rules.get("dept_merge") or {}
+        if base in merge:
+            return merge[base]
+        return (rules.get("dept_rename") or {}).get(base, base)
     gmap = rules.get("groups") or {}
     if group:
         label = _group_label(group)
         if label in gmap:
             return gmap[label]
     nm = name or ""
+    # キーワードは商品名だけでなく FW区分見出し（部門名）にも当てる。詳細部門を持つ店
+    # （寿司/焼き物/ビール… と部門が既に意味を持つ店）を、部門見出しの語で束ねられる。
+    lbl = _group_label(group) if group else ""
     for cat in rules.get("categories", []):
         for kw in cat.get("keywords", []):
-            if kw and kw in nm:
+            if kw and (kw in nm or (lbl and kw in lbl)):
                 return cat["name"]
     return rules.get("other", "その他")
+
+
+def _categories_from_departments(depts: list[dict], rules: dict) -> list[dict]:
+    """1店・1ヶ月ぶんの『生FW部門』を品目区分に束ねる（部門ベース）。
+
+    商品にFW区分見出し(group)が付いていない店では、商品名だけでは区分を当てられず
+    大量が『その他』へ落ちる。詳細な部門を持つ店（寿司酒場など）は、部門そのものは
+    見出しの語で確実に束ねられるので、部門合計から品目区分を作る。
+    classify_by: department を付けた店で使う。
+    """
+    other = rules.get("other", "その他")
+    # 部門＝区分（1:1）の店は、並びをFW部門コード順（"NN:" の数値）にする＝現場の並びに合わせる。
+    if rules.get("dept_as_category"):
+        def _dcode(nm: str) -> int:
+            m = re.match(r"^\s*(\d+)", nm or "")
+            return int(m.group(1)) if m else 9999
+        seen: list[str] = []
+        for d in sorted(depts, key=lambda x: _dcode(x.get("name") or "")):
+            cat = classify_category(d.get("name") or "", rules, d.get("name") or "")
+            if cat != other and cat not in seen:
+                seen.append(cat)
+        order = seen + [other]
+    else:
+        order = list(dict.fromkeys([c["name"] for c in rules.get("categories", [])] + [other]))
+    agg: dict[str, dict] = {}
+    for d in depts:
+        nm = d.get("name") or ""
+        cat = classify_category(nm, rules, nm)   # 部門名を name と group の両方に渡す
+        a = agg.setdefault(cat, {"sales": 0.0, "qty": 0.0, "count": 0})
+        a["sales"] += d.get("sales") or 0
+        a["qty"] += d.get("qty") or 0
+        a["count"] += 1
+    total = sum(a["sales"] for a in agg.values()) or 1.0
+    # 0円区分（飲み放題用・センベロ用・コース内訳用などの“空”部門）は非表示にする（HQ 2026-09・②A）。
+    hide_zero = bool(rules.get("dept_as_category"))
+    out = []
+    for name in order:
+        if name not in agg:
+            continue
+        a = agg[name]
+        if hide_zero and round(a["sales"]) <= 0:
+            continue
+        out.append({"name": name, "sales": round(a["sales"]), "qty": round(a["qty"]),
+                    "count": a["count"], "share": round(a["sales"] / total, 4)})
+    return out
 
 
 def _categories_for_month(items: list[dict], rules: dict, total_sales: float) -> list[dict]:
@@ -564,6 +629,78 @@ NET_DIVISOR = 1.10
 NET_ADJUST_METRICS = frozenset({METRIC_SALES, METRIC_DEPT_SALES, METRIC_PRODUCT_SALES})
 
 
+def _pd_norm(s: str | None) -> str:
+    """商品名の突合キー（全半角・空白・大小の揺れを吸収）。"""
+    return unicodedata.normalize("NFKC", s or "").replace(" ", "").replace("　", "").lower()
+
+
+# 末尾のサイズ/金額/杯数などの表記（例「1000円」「150g」「5本」「2p」）。商品名の
+# 末尾だけが違う（ABC側の途中切れ・サイズ違い）揺れを吸収するために落とす。
+_PD_TAIL = re.compile(r"(?:\d+(?:\.\d+)?)(?:円|g|kg|ml|l|cc|本|個|杯|名|人|枚|貫|玉|p|pc|pcs|ｇ|ｍｌ)?$")
+
+
+def _pd_key(s: str | None) -> str:
+    """強めの突合キー：先頭の販路プレフィックス・括弧の中身・末尾のサイズ/金額を落とした正規化名。"""
+    t = unicodedata.normalize("NFKC", s or "")
+    # 先頭の短い販路/クーポンの印（例「CP）」「歓)」「特)」「ツアー)」）を落とす。
+    t = re.sub(r"^[0-9A-Za-zぁ-んァ-ヶ一-龠ｦ-ﾟ]{1,5}[）)]", "", t)
+    t = re.sub(r"[（(\[【][^）)\]】]*[）)\]】]", "", t)   # 括弧（全半角）の中身を除去
+    t = t.replace(" ", "").replace("　", "")
+    t = _PD_TAIL.sub("", t)                              # 末尾のサイズ/金額
+    return t.lower()
+
+
+def _departments_from_products(
+    items: list[dict], name_to_dept: dict[str, str]
+) -> tuple[dict[str, dict], list[dict]]:
+    """商品リストを『商品→部門(NN:名前)』で束ね直し、({部門名:{sales,qty,rate}}, 未突合) を返す。
+
+    ABCの部門グリッドが出ない店（1069/1111/1137/1151/1168 等）で、完備している
+    商品別売上を FW分析用コードCSVの部門で束ねて『疑似・部門合計』を作るための関数。
+    商品名はABC側が途中で切れる／末尾のサイズ・金額が違うので、段階的に突合する：
+      ① 正規化の完全一致 → ② 括弧・末尾表記を落とした強キーの完全一致
+      → ③ 強キーどうしの前方一致（6文字以上。ABC側の途中切れを拾う）。
+    引けない商品は部門に入れない（＝未突合として返し、検算で可視化する）。
+    """
+    idx: dict[str, str] = {}       # 正規化名 → 部門
+    kidx: dict[str, str] = {}      # 強キー → 部門（衝突は先勝ち）
+    for nm, dept in name_to_dept.items():
+        if not dept:
+            continue
+        idx.setdefault(_pd_norm(nm), dept)
+        k = _pd_key(nm)
+        if k:
+            kidx.setdefault(k, dept)
+    kkeys = list(kidx)
+
+    def _look(name: str) -> str | None:
+        n = _pd_norm(name)
+        if n in idx:
+            return idx[n]
+        k = _pd_key(name)
+        if k and k in kidx:
+            return kidx[k]
+        if len(k) >= 6:
+            for ik in kkeys:
+                if len(ik) >= 6 and (ik.startswith(k) or k.startswith(ik)):
+                    return kidx[ik]
+        return None
+
+    agg: dict[str, dict] = {}
+    unmatched: list[dict] = []
+    for it in items:
+        dept = _look(it.get("name", ""))
+        if not dept:
+            if (it.get("sales") or 0) > 0:
+                unmatched.append(it)
+            continue
+        d = agg.setdefault(dept, {"sales": 0.0, "qty": 0.0, "rate": None})
+        d["sales"] += it.get("sales", 0) or 0
+        d["qty"] += it.get("qty", 0) or 0
+    unmatched.sort(key=lambda p: -(p.get("sales") or 0))
+    return agg, unmatched
+
+
 def _assemble_departments(depts: dict[str, dict]) -> dict:
     """1店・1ヶ月ぶんの生部門（{部門名:{sales,qty,rate}}）を、標準バケット構成
     （コース/ランチ/アラカルト/飲み放題/食べ放題）＋生部門 raw に組み立てる。
@@ -571,6 +708,13 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
     total = sum(d["sales"] for d in depts.values()) or 1.0
     buckets: dict[str, dict] = {}
     alacarte_split = {"フード": 0.0, "ドリンク": 0.0}
+    # アラカルトの出品数（点数）をフード/ドリンクに分ける。金額分け(alacarte_split)と同じ
+    # is_drink_dept 判定で束ねる。フード/ドリンク別の一品単価（＝金額÷点数）に使う。
+    alacarte_qty = {"フード": 0.0, "ドリンク": 0.0}
+    # お通し／席チャージの点数＝アラカルト人数の近似（一人当たり出品数の分母）。
+    cover_qty = 0.0
+    # テイクアウト（持ち帰り）の点数。アラカルト客数の分母から差し引く。
+    takeout_qty = 0.0
     raw_list = []
     for name, d in depts.items():
         bucket = dept_bucket(name)
@@ -587,6 +731,11 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
         if bucket == "アラカルト":
             key = "ドリンク" if is_drink_dept(name) else "フード"
             alacarte_split[key] += d["sales"]
+            alacarte_qty[key] += d["qty"]
+        if is_cover_charge(name):
+            cover_qty += d["qty"]
+        if is_takeout(name):
+            takeout_qty += d["qty"]
         raw_list.append(
             {
                 "name": name,
@@ -621,6 +770,11 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
         "total_sales": round(total),
         "buckets": bucket_list,
         "alacarte": {k: round(v) for k, v in alacarte_split.items()},
+        "alacarte_qty": {k: round(v) for k, v in alacarte_qty.items()},
+        # お通し／席チャージの合計点数＝アラカルト人数の近似（0なら該当なし）。
+        "alacarte_covers": round(cover_qty),
+        # テイクアウト（持ち帰り）の合計点数。アラカルト客数の分母から差し引く。
+        "takeout_qty": round(takeout_qty),
         "raw": raw_list,
     }
 
@@ -670,6 +824,7 @@ def _build_abc_by_month(
     date_from: date,
     date_to: date,
     store_categories: dict | None = None,
+    product_depts: dict | None = None,
 ) -> tuple[dict, dict, dict]:
     """FW ABC（部門・商品）を月ごとに組み立てる。返り値 (departments_monthly,
     products_monthly, categories_monthly)＝各 {店コード: {"YYYY-MM": ...}}。月次で蓄積した
@@ -819,10 +974,32 @@ def _build_abc_by_month(
             # こうすると品目数（品目区分の count）にサブが二重に乗らない。
             items = _nest_zero_subs(items, rules)
             items.sort(key=lambda p: p["sales"], reverse=True)
+            # 商品売上を『商品→部門』(分析用コードCSV)で束ね直した疑似・部門合計。
+            #  dept_from_products      … 全月を再構成で上書き（旧：部門グリッドが出ない店）。
+            #  dept_fill_from_products … 実FW部門が無い月だけ補完（本物があればそのまま）。
+            #    ※補完月はCSVに無い商品が未突合として落ち、過小計上になる（既知）。
+            has_real_dept = bool(((departments_monthly.get(code, {}) or {}).get(m)))
+            want_synth = bool(
+                rules
+                and (product_depts or {}).get(code)
+                and (
+                    rules.get("dept_from_products")
+                    or (rules.get("dept_fill_from_products") and not has_real_dept)
+                )
+            )
+            if want_synth:
+                synth, _unm = _departments_from_products(items, product_depts[code])
+                if synth:
+                    departments_monthly.setdefault(code, {})[m] = _assemble_departments(synth)
             # 品目区分（店ごとのルールがある店だけ）。全商品で束ねてから売れ筋を切る。
             if rules:
-                total = sum(p["sales"] for p in items)
-                cats = _categories_for_month(items, rules, total)
+                if rules.get("classify_by") == "department":
+                    # 部門ベース：商品にgroupが無い店でも、部門合計から確実に束ねる。
+                    dep_raw = ((departments_monthly.get(code, {}) or {}).get(m, {}) or {}).get("raw") or []
+                    cats = _categories_from_departments(dep_raw, rules)
+                else:
+                    total = sum(p["sales"] for p in items)
+                    cats = _categories_for_month(items, rules, total)
                 if cats:
                     categories_monthly.setdefault(code, {})[m] = cats
             # 売れ筋 top-N に加え、内訳（FW区分見出し付き＝選択商品）・内訳を畳んだ親
@@ -838,6 +1015,129 @@ def _build_abc_by_month(
     return departments_monthly, products_monthly, categories_monthly
 
 
+def survey_departments(warehouse, master, *, months_back: int = 3, full_store: str = "",
+                       product_depts: dict | None = None) -> int:
+    """各店の『現状の部門別並び』（チャートと同じ生FW部門）を一覧で出す。
+
+    保存済みABC（Neon）だけで走る＝FWログイン不要。品目区分（store_categories）を
+    どの店から作るかの設計材料。部門数の少ない（＝粗い）店から順に並べる。
+    """
+    from datetime import timedelta
+
+    cats = load_store_categories()          # {code: cfg} 設定済みの店
+    configured = set(cats.keys())
+    to = date.today()
+    frm = to - timedelta(days=months_back * 31 + 5)
+    # dm=生部門, pm=商品別, cm=品目区分（store_categories適用後の並び）。
+    dm, pm, cm = _build_abc_by_month(warehouse, master, frm, to, cats, product_depts)
+
+    name_of = {s.store_code: s.store_name for s in master.active}
+    rows = []
+    for s in master.active:
+        code = s.store_code
+        months = dm.get(code) or {}
+        if not months:
+            rows.append({"code": code, "n": -1, "m": None, "depts": [], "total": 0})
+            continue
+        m = sorted(months)[-1]
+        raw = sorted(months[m].get("raw") or [], key=lambda r: -(r.get("sales") or 0))
+        rows.append({"code": code, "n": len(raw), "m": m, "depts": raw,
+                     "total": months[m].get("total_sales") or 0})
+    # 粗い順（部門数が少ない順、データ無しは末尾）。
+    rows.sort(key=lambda r: (r["n"] if r["n"] >= 0 else 9999, -(r["total"] or 0)))
+
+    print("=== 各店 現状の部門別並び（直近月・保存済みABC／FW未接続）===")
+    print(f"品目区分 設定済み: {sorted(configured)}")
+    print("※ 設定済みの店は『品目区分（束ね直し後）』も併記。その他が多い店は要調整。\n")
+    for r in rows:
+        code, nm = r["code"], name_of.get(r["code"], "")
+        cfgd = code in configured
+        cfgmark = " ✓品目区分あり" if cfgd else ""
+        if r["n"] < 0:
+            print(f"■ {code} {nm}  … ABCデータなし（FW未接続/未取込）{cfgmark}")
+            continue
+        coarse = " ⚠粗い" if r["n"] <= 4 else ""
+        print(f"■ {code} {nm}  FW部門 {r['n']}件 / {r['m']} / 売上計 {round(r['total']):,}円{coarse}{cfgmark}")
+        if cfgd:
+            # 束ね直し後の並び（＝新しいチャートの部門別並び）。
+            result = (cm.get(code, {}) or {}).get(r["m"]) or []
+            tot = sum(x.get("sales") or 0 for x in result) or 1
+            print("   ▼ 品目区分（束ね直し後の並び）:")
+            for x in result:
+                print(f"     {(x.get('name') or '')[:16]:16s} {round(x.get('sales') or 0):>11,}円 / 構成比 {round((x.get('sales') or 0)/tot*100):>3}% / {x.get('count') or 0}品")
+            # 区分の中身（各区分にどの生FW部門が入っているか）。ドリルダウンで見える並び。
+            by_cat: dict[str, list[dict]] = {}
+            for d in r["depts"]:
+                c = classify_category("", cats[code], d.get("name"))
+                by_cat.setdefault(c, []).append(d)
+            print("   ▽ 区分の中身（各区分に入っている部門）:")
+            for x in result:
+                cn = x.get("name") or ""
+                members = sorted(by_cat.get(cn, []), key=lambda d: -(d.get("sales") or 0))
+                print(f"     ● {cn}（{len(members)}部門 / {round(x.get('sales') or 0):,}円）")
+                for d in members:
+                    print(f"         - {(d.get('name') or '')[:28]:28s} {round(d.get('sales') or 0):>11,}円")
+            # 『その他』に落ちた生部門を洗い出す（調整の材料）。
+            other = (cats.get(code) or {}).get("other", "その他")
+            miss = [d for d in r["depts"]
+                    if classify_category("", cats[code], d.get("name")) == other]
+            if miss:
+                print(f"   ▲ 『{other}』に落ちた部門 {len(miss)}件（要調整候補）:")
+                for d in miss[:12]:
+                    print(f"       {(d.get('name') or '')[:26]:26s} {round(d.get('sales') or 0):>11,}円")
+            # 検算：商品→部門(分析用コードCSV)で再計算した品目区分を、実ABCの部門ベースと
+            # 区分ごとに突き合わせる。両者がほぼ一致すれば『商品→部門で束ねる』手法が妥当。
+            pdm = (product_depts or {}).get(code)
+            if pdm:
+                prods_all = (pm.get(code, {}) or {}).get(r["m"]) or []
+                synth_agg, unmatched = _departments_from_products(prods_all, pdm)
+                synth = _assemble_departments(synth_agg)
+                recon = _categories_from_departments(synth.get("raw") or [], cats[code])
+                amap = {x.get("name"): round(x.get("sales") or 0) for x in result}
+                rmap = {x.get("name"): round(x.get("sales") or 0) for x in recon}
+                rtot = sum(rmap.values())
+                names = list(dict.fromkeys(list(amap) + list(rmap)))
+                print(f"   ▽ 検算：実ABC {round(tot):,}円 vs 商品→部門(CSV) {rtot:,}円"
+                      f"（差 {rtot-round(tot):+,}円 / 商品突合 {len(prods_all)}品）")
+                print(f"       {'区分':14s} {'実ABC':>11s} {'商品→部門':>11s} {'差':>10s}")
+                for nm in names:
+                    a, b = amap.get(nm, 0), rmap.get(nm, 0)
+                    flag = "" if abs(b - a) <= max(2000, a * 0.03) else "  ←差"
+                    print(f"       {(nm or '')[:14]:14s} {a:>11,} {b:>11,} {b-a:>+10,}{flag}")
+                if unmatched:
+                    um = sum(round(p.get("sales") or 0) for p in unmatched)
+                    print(f"   ▲ 商品→部門で未突合（CSVに同名無し）{len(unmatched)}品 / 計 {um:,}円:")
+                    for p in unmatched[:20]:
+                        print(f"       {(p.get('name') or '')[:26]:26s} {round(p.get('sales') or 0):>10,}円")
+                    # 全件（配布用）。マーカーで囲ってログから抽出する。TAB区切り：
+                    # UNM\t店コード\t商品名\t売上(税抜)\t点数
+                    sname = name_of.get(code, "")
+                    print(f"===== 未突合全件 {code} {sname} 開始 n={len(unmatched)} 計={um} =====")
+                    for p in unmatched:
+                        print(f"UNM\t{code}\t{p.get('name') or ''}\t{round(p.get('sales') or 0)}\t{round(p.get('qty') or 0)}")
+                    print(f"===== 未突合全件 {code} ここまで =====")
+            # 商品詳細（売れ筋・上位）。この店タイプは商品が部門に紐づかないので、区分別ではなく
+            # 店の売れ筋商品を上位で出す（メニュー内容の確認用）。
+            prods = sorted(((pm.get(code, {}) or {}).get(r["m"]) or []),
+                           key=lambda p: -(p.get("sales") or 0))
+            full = bool(full_store) and (code == full_store)
+            cap = len(prods) if full else 20
+            if prods:
+                if full:
+                    print(f"   ▽ 商品詳細（全{len(prods)}品・売れ筋順／全品表示）:")
+                else:
+                    print(f"   ▽ 商品詳細（売れ筋 上位{min(20, len(prods))}／全{len(prods)}品）:")
+                for p in prods[:cap]:
+                    q = f" / {round(p.get('qty') or 0):>6,}点" if p.get("qty") else ""
+                    grp = f"  ［部門:{_group_label(p.get('group'))}］" if p.get("group") else "  ［部門なし］"
+                    print(f"       {(p.get('name') or '')[:26]:26s} {round(p.get('sales') or 0):>10,}円{q}{grp}")
+        else:
+            for d in r["depts"][:24]:
+                print(f"     {(d.get('name') or '')[:26]:26s} {round(d.get('sales') or 0):>11,}円 / {round(d.get('qty') or 0):>7,}点 → 束ね先:{d.get('bucket')}")
+        print()
+    return 0
+
+
 def build(
     warehouse: Warehouse,
     master: StoreMaster,
@@ -846,6 +1146,7 @@ def build(
     date_to: date,
     campaigns: list[dict] | None = None,
     creatives: list[dict] | None = None,
+    product_depts: dict | None = None,
 ) -> dict:
     """画面が必要とするものを1つの辞書にまとめる。"""
     rows = warehouse.aggregate(
@@ -1016,7 +1317,7 @@ def build(
     # 施策詳細で ケーキ/ジェラート/パフェ・食べ放題・宴会コース を月ごとに並べられる。
     store_categories = load_store_categories()
     departments_monthly, products_monthly, categories_monthly = _build_abc_by_month(
-        warehouse, master, date_from, date_to, store_categories
+        warehouse, master, date_from, date_to, store_categories, product_depts
     )
     # 施策の販売時期実績（abc-campaign 由来）。登録期間レンジで取った施策別の実績。
     campaign_actuals = _build_campaign_actuals(warehouse, master, date_from, date_to)

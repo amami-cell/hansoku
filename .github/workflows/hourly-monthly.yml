@@ -1,0 +1,134 @@
+name: 月次 時間帯別を取り込む
+
+# 毎月1回、全稼働店の「時間帯×売上・客数」を FW から取り込み、Neon に月ごとに
+# 蓄積する（grain=hour、その月の1日を代表日）。ダッシュボードの時間帯目標
+# （時間帯売上／時間帯集客／時間帯客単価の1日A/V）の土台。
+#
+# 1店=1ジョブのマトリクスで回す（abc-monthly.yml と同じ方式）。FWの時間帯別は
+# 店舗選択・グリッド描画がまれに一過性で空振りするため、ジョブ内で最大2回まで
+# 粘ってから落とす。冪等キー (source, grain, date) は月単位なので毎月積み上がる。
+# month に範囲/複数を渡しての遡りは非対応（1ヶ月ずつ。既定は前月）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "対象月 YYYY-MM。空欄=前月。"
+        required: false
+        default: ''
+  schedule:
+    # 毎月6日 05:50 JST (= 前日 20:50 UTC)。uriage(04:00)・ABC(05:20) の後に回す。
+    - cron: '50 20 5 * *'
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  # 稼働店コードを config/stores.yaml から動的に取り出し、matrix の入力にする。
+  matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      stores: ${{ steps.gen.outputs.stores }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 依存（PyYAMLのみ）
+        run: pip install pyyaml
+      - id: gen
+        name: 稼働店コードを列挙
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, yaml
+          data = yaml.safe_load(open("config/stores.yaml")) or {}
+          # FW未連動の店（pos が fw 以外）はFWに時間帯別が無い。回しても空振りするだけ。
+          codes = [
+              str(s["store_code"])
+              for s in data.get("stores", [])
+              if s.get("active") and (s.get("pos") or "fw") == "fw"
+          ]
+          print("stores=" + json.dumps(codes))
+          PY
+
+  # 1店ずつ時間帯別を取り込む。FWは同時ログインに耐えるので数店ずつ並行で回す。
+  ingest:
+    needs: matrix
+    runs-on: ubuntu-latest
+    # 1店あたり約1〜2分。一過性フレのリトライぶんも含めて長めに取る。
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        store: ${{ fromJSON(needs.matrix.outputs.stores) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: |
+          pip install -r requirements.txt
+          # FWはSPAなのでブラウザが要る。これが無いと取込は起動すらできない。
+          python -m playwright install --with-deps chromium
+
+      - name: Secrets の確認
+        env:
+          FW_USER: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FW_PASS: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+          NEON: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          miss=""
+          [ -z "$FW_USER" ] && miss="$miss FOODIST_JOURNAL_USER_ID"
+          [ -z "$FW_PASS" ] && miss="$miss FOODIST_JOURNAL_PASSWORD"
+          [ -z "$NEON" ]    && miss="$miss NEON_DATABASE_URL"
+          if [ -n "$miss" ]; then
+            echo "::error::未設定のSecrets:$miss"
+            exit 1
+          fi
+
+      - name: 時間帯別取込（1店・対象月ぶん）
+        env:
+          FOODIST_JOURNAL_USER_ID: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FOODIST_JOURNAL_PASSWORD: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          set -o pipefail
+          M="${{ inputs.month }}"
+          run_once() {
+            if [ -n "$M" ]; then
+              xvfb-run -a python -m hansoku.cli fw-daily --mode hourly \
+                --abc-store "${{ matrix.store }}" --month "$M" --artifacts fw-artifacts
+            else
+              xvfb-run -a python -m hansoku.cli fw-daily --mode hourly \
+                --abc-store "${{ matrix.store }}" --artifacts fw-artifacts
+            fi
+          }
+          {
+            echo "## 月次 時間帯別 取込 ${{ matrix.store }} / ${M:-前月}"
+            echo ''
+            echo '```'
+            # 店舗選択・グリッド描画の一過性フレを吸収するため最大2回まで粘る。
+            run_once || { echo '--- 1回目失敗。再取込 ---'; sleep 8; run_once; }
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: 記録をアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hourly-monthly-${{ matrix.store }}
+          path: fw-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore

@@ -446,6 +446,18 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
         master = StoreMaster.load(args.stores)
         with get_warehouse(settings) as warehouse:
             return report_abc_coverage(warehouse, master, month=args.month)
+    if args.mode == "dept-survey":
+        # 各店の現状の部門別並び（生FW部門）を一覧化。品目区分の設計材料。
+        # 保存済みABC（Neon）だけで走る＝FWログイン不要。
+        from .web.export import survey_departments
+
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        product_depts = _load_product_depts(settings)
+        with get_warehouse(settings) as warehouse:
+            return survey_departments(warehouse, master, months_back=args.months,
+                                       full_store=args.abc_store or "",
+                                       product_depts=product_depts)
     if args.mode == "abc-store-ingest":
         from .ingest.fw_daily import ingest_abc_store, ingest_abc_stores
 
@@ -609,6 +621,34 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 store_filter=args.abc_store or "",
                 store_limit=args.limit,
             )
+    if args.mode == "analysis-code-ingest":
+        # 商品→分析用コードを CSV から読み、Neon に保存する（下流の部門別客数用）。
+        # FWには書かない（押すのは CSV出力 とダウンロードだけ）。
+        from .ingest.fw_daily import ingest_analysis_codes
+
+        settings = load_settings()
+        master = StoreMaster.load(args.stores)
+        with get_appdb(settings) as db:
+            db.ensure_schema()
+            return ingest_analysis_codes(
+                Path(args.artifacts),
+                master,
+                db,
+                store_filter=args.abc_store or "",
+                store_limit=args.limit,
+                dry_run=bool(getattr(args, "dry_run", False)),
+            )
+    if args.mode == "analysis-dept-report":
+        # 分析用コードCSVから 部門→商品 を印字（区分の中身の検算用）。
+        # DBにもFWにも書き込まない（押すのは CSV出力 とダウンロードだけ）。
+        from .ingest.fw_daily import report_analysis_departments
+
+        return report_analysis_departments(
+            Path(args.artifacts),
+            StoreMaster.load(args.stores),
+            store_filter=args.abc_store or "",
+            store_limit=args.limit,
+        )
     if args.mode == "analysis-code-probe":
         # 診断のみ。DBにもFWにも書き込まない（押すのは CSV出力 だけ）。
         from .ingest.fw_daily import probe_analysis_codes
@@ -638,6 +678,7 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
                 master,
                 artifacts=Path(args.artifacts),
                 month=args.month,
+                store=args.abc_store or None,
                 store_limit=args.limit,
                 dry_run=(args.mode == "hourly-dry" or args.dry_run),
             )
@@ -682,11 +723,29 @@ def cmd_schedule_lint(args: argparse.Namespace) -> int:
     return report_schedule_lint(master, args.path)
 
 
+def _load_product_depts(settings) -> dict:
+    """appdb から 商品→部門（部門名称を保存済みの店）を全店ぶん読む（無ければ空）。
+
+    ABCの部門グリッドが出ない店の品目区分を、商品売上×分析用コードCSVの部門で
+    束ね直すための元データ（dept_from_products の店で使う）。併せて検算にも使う
+    （実ABCの部門ベースと、この商品→部門での再計算を突き合わせる）ので、フラグの
+    有無に関係なく保存済みの店は全部読む。appdb が無い環境では静かに空を返す。
+    """
+    try:
+        with get_appdb(settings) as db:
+            db.ensure_schema()
+            return db.product_departments()
+    except Exception as e:  # noqa: BLE001
+        print(f"[export] 商品→部門の読込みをスキップ（{type(e).__name__}）")
+        return {}
+
+
 def cmd_export_web(args: argparse.Namespace) -> int:
     from .web.export import build, load_creatives, load_schedule, write
 
     settings = load_settings()
     master = StoreMaster.load(args.stores)
+    product_depts = _load_product_depts(settings)
     campaigns = load_schedule(master)
     creatives = load_creatives(master, campaigns)
     # 目標と要因メモは dashboard.json に焼き込まない。
@@ -703,6 +762,7 @@ def cmd_export_web(args: argparse.Namespace) -> int:
             date_to=args.date_to,
             campaigns=campaigns,
             creatives=creatives,
+            product_depts=product_depts,
         )
     path = write(payload, Path(args.out))
     print(f"書き出し完了: {path}")
@@ -1036,9 +1096,10 @@ def build_parser() -> argparse.ArgumentParser:
                  "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
                  "abc-dom-probe", "uriage-probe", "monthly-coverage",
-                 "abc-detail", "data-audit", "source-audit", "abc-campaign",
+                 "abc-detail", "data-audit", "source-audit", "abc-campaign", "dept-survey",
                  "gelato-switch", "analysis-code-probe",
-                 "analysis-code-audit"],
+                 "analysis-code-audit", "analysis-code-ingest",
+                 "analysis-dept-report"],
         help="動作（monthly=月別日別売上推移、hourly=時間帯別売上、abc=ABC分析から取り込む）",
     )
     fwdaily.add_argument(

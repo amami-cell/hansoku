@@ -59,7 +59,7 @@ function loadForm(data) {
   const ctx = vm.createContext(sandbox);
   vm.runInContext(src, ctx, { filename: "app.js" });
   vm.runInContext(`DATA=${JSON.stringify(data)}; PLANS=[]; PLANS_API_OK=true; ME={name:"テスト担当"}; BASE_CAMPAIGNS=null; render=function(){};`, ctx);
-  return { ctx, byId, CAP, getEl, call: (e) => vm.runInContext(e, ctx), lastOverlay: () => created[created.length - 1] };
+  return { ctx, byId, CAP, getEl, call: (e) => vm.runInContext(e, ctx), lastOverlay: () => created[created.length - 1], allCreated: () => created };
 }
 
 const base = {
@@ -127,9 +127,9 @@ await test("常設で起票：目標が採番後IDのキーで保存され、再
   Object.assign(h.getEl("pf-bucket"), { value: "" });
   Object.assign(h.getEl("pf-owner"), { value: "テスト担当" });
   Object.assign(h.getEl("pf-note"), { value: "実地テスト" });
-  Object.assign(h.getEl("pf-tg-sales"), { value: "16,000,000" });  // カンマ入り
-  Object.assign(h.getEl("pf-tg-cost_rate"), { value: "28" });
   h.getEl("pf-pdf").files = [];
+  // 目標は「▽で選ぶ行」コントローラの collect() から来る（DOMは軽量モックなので値を直接注入）。
+  h.getEl("planedit")._goalRows = { collect: () => ({ map: { sales: 16000000, cost_rate: 28 }, err: null }) };
 
   await h.call("savePlanFromForm({})");
 
@@ -181,6 +181,57 @@ await test("時間帯売上/集客は対象月の1日平均（A/V）、前年同
   assert.equal(ref, 160000, "前年同期の時間帯売上1日平均");
 });
 
+await test("部門別・商品・予算達成率の目標が集計できる（選択付きキー）", () => {
+  const d = { ...base,
+    departments_monthly: { "1160": {
+      "2026-07": { total_sales: 1000000, buckets: [ { name: "コース", sales: 300000, qty: 200 }, { name: "アラカルト", sales: 500000, qty: 400 } ], alacarte: { "フード": 120000, "ドリンク": 84000 }, alacarte_qty: { "フード": 200, "ドリンク": 120 }, alacarte_covers: 100 },
+      "2026-08": { total_sales: 1000000, buckets: [ { name: "コース", sales: 300000, qty: 200 }, { name: "アラカルト", sales: 500000, qty: 400 } ], alacarte: { "フード": 120000, "ドリンク": 84000 }, alacarte_qty: { "フード": 200, "ドリンク": 120 }, alacarte_covers: 100 },
+    } },
+    products_monthly: { "1160": {
+      "2026-07": [ { name: "刺身盛合せ", sales: 120000 } ],
+      "2026-08": [ { name: "刺身盛合せ", sales: 130000 } ],
+    } },
+    monthly: { "1160": { "2026-07": { sales: 900000 }, "2026-08": { sales: 1100000 } } },
+    budget: { "1160": { "2026-07": 1000000, "2026-08": 1000000 } },
+  };
+  const { call } = loadForm(d);
+  const ms = `["2026-07","2026-08"]`;
+  assert.equal(call(`_metricOverMonths("dept_sales#コース","1160",${ms})`), 600000, "部門別売上＝選んだ区分の合算");
+  // 出数は1日A/V＝Σqty(200+200=400) ÷ Σ暦日(31+31=62) = 6.45 → 6
+  assert.equal(call(`_metricOverMonths("dept_qty#コース","1160",${ms})`), 6, "部門別出数＝1日A/V（合計qty÷暦日）");
+  assert.equal(call(`TARGET_METRICS.find(m=>m.key==="dept_qty").daily`), true, "部門別出数はA/V（daily）指標");
+  // 振り返り表などの値表示（fmtMetricVal）は単位「点」をそのまま使う（以前は円で出ていた）
+  assert.equal(call(`fmtMetricVal(TARGET_METRICS.find(m=>m.key==="dept_qty"),151)`), "151点", "部門別出数の値表示は点（円ではない）");
+  assert.equal(call(`_metricOverMonths("dept_share#アラカルト","1160",${ms})`), 50, "部門構成比＝区分売上/総売上");
+  assert.equal(call(`_metricOverMonths("dept_avg_check#アラカルト","1160",${ms})`), 1250, "部門別客単価＝売上/数量");
+  assert.equal(call(`_metricOverMonths("prod_sales#刺身盛合せ","1160",${ms})`), 250000, "商品の売上＝選んだ商品の合算");
+  assert.equal(call(`_metricOverMonths("budget_rate","1160",${ms})`), 100, "予算達成率＝売上/予算×100");
+  // 一品単価＝金額合計÷出品数合計。フード=(120000×2)/(200×2)=600、ドリンク=(84000×2)/(120×2)=700
+  assert.equal(call(`_metricOverMonths("alacarte_food_avg","1160",${ms})`), 600, "フード一品単価＝アラカルトフード金額÷出品数");
+  assert.equal(call(`_metricOverMonths("alacarte_drink_avg","1160",${ms})`), 700, "ドリンク一品単価＝アラカルトドリンク金額÷出杯数");
+  // 一人当たり＝出品数÷アラカルト人数(お通し)。フード=(200×2)/(100×2)=2、ドリンク=(120×2)/(100×2)=1.2
+  assert.equal(call(`_metricOverMonths("food_per_cover","1160",${ms})`), 2, "フード一人当たり出品数＝出品数÷お通し人数");
+  assert.equal(call(`_metricOverMonths("drink_per_cover","1160",${ms})`), 1.2, "ドリンク一人当たり出杯数＝出杯数÷お通し人数");
+  assert.equal(call(`metricLabel("dept_sales#コース")`), "部門別売上（コース）", "ラベルに選択が付く");
+  assert.equal(call(`subKind("prod_sales")`), "prod", "商品指標は商品ピッカー");
+});
+
+await test("お通しの無い店は 全体客数−セット系−TO でアラカルト客数を推定して一人当たりを出す", () => {
+  const d = { ...base,
+    covers: { "1200": { "2026-07": 200, "2026-08": 200 } },
+    departments_monthly: { "1200": {
+      "2026-07": { total_sales: 900000, buckets: [ { name: "コース", sales: 1, qty: 50 }, { name: "ランチ", sales: 1, qty: 30 }, { name: "食べ放題", sales: 1, qty: 10 }, { name: "飲み放題", sales: 1, qty: 20 } ], alacarte_qty: { "フード": 300, "ドリンク": 200 }, takeout_qty: 5 },
+      "2026-08": { total_sales: 900000, buckets: [ { name: "コース", sales: 1, qty: 50 }, { name: "ランチ", sales: 1, qty: 30 }, { name: "食べ放題", sales: 1, qty: 10 }, { name: "飲み放題", sales: 1, qty: 20 } ], alacarte_qty: { "フード": 300, "ドリンク": 200 }, takeout_qty: 5 },
+    } },
+  };
+  const { call } = loadForm(d);
+  const ms = `["2026-07","2026-08"]`;
+  // フード客数＝200−50−30−10−5=105、フード一人当たり=(300×2)/(105×2)=2.857→2.86
+  assert.equal(call(`_metricOverMonths("food_per_cover","1200",${ms})`), 2.86, "お通し無し：フードは全体−コース・ランチ・食放・TO で割る");
+  // ドリンク客数＝200−20−5=175、ドリンク一人当たり=(200×2)/(175×2)=1.142→1.14
+  assert.equal(call(`_metricOverMonths("drink_per_cover","1200",${ms})`), 1.14, "お通し無し：ドリンクは全体−飲放・TO で割る");
+});
+
 console.log("目標の変更ログ（誰がいつ）");
 
 await test("設定者・日付が達成サマリーの目標欄に出る", () => {
@@ -204,7 +255,7 @@ await test("目標の範囲チェック：原価率は0〜100%、その他は0�
   getEl("pf-tg-cost_rate").value = "120";
   assert.match(call("validateTargetInputs()"), /原価率.*0〜100/, "原価率120%は弾く");
   getEl("pf-tg-cost_rate").value = "28"; getEl("pf-tg-sales").value = "-5";
-  assert.match(call("validateTargetInputs()"), /売上目標.*0以上/, "負の売上目標は弾く");
+  assert.match(call("validateTargetInputs()"), /販促の売上.*0以上/, "負の売上目標は弾く");
   getEl("pf-tg-sales").value = "16000000";
   assert.equal(call("validateTargetInputs()"), null, "妥当な値は通る");
 });
@@ -254,11 +305,20 @@ await test("複製起票：複製元の目標が初期値として引き継が�
   h.call(`SERVER_TARGETS_M = {"src@2025":{sales:{value:16000000}, cost_rate:{value:28}}};
     DATA.campaigns=[{id:"src",stores:["1160"],title:"昨年の秋パフェ",kind:"osusume",start:"2025-11-01",end:"2025-12-31"}];`);
   h.call(`duplicatePlan("src","1160")`);
-  const html = h.lastOverlay().innerHTML || "";
+  // 目標行は動的生成（各行が別の created 要素）。オーバーレイ＋全行の innerHTML をまとめて確認。
+  const html = h.allCreated().map(e => e.innerHTML || "").join("\n");
   assert.ok(html.includes("複製元から") && html.includes("引き継ぎ"), "引き継ぎ注記が出る");
   assert.ok(html.includes('value="16000000"'), "売上目標が初期値に入る");
   assert.ok(html.includes('value="28"'), "原価率目標が初期値に入る");
   assert.ok(html.includes("昨年の秋パフェ"), "販促名も複製される");
+});
+
+await test("ジェラート販促の目標は既定で点数(部門別出数)", () => {
+  const { call } = loadForm(base);
+  const gel = call(`defaultGoalKey({bucket:"ジェラート",stores:["1160"],start:"2026-09-01",end:"2026-10-31"})`);
+  assert.equal(gel, "dept_qty#ジェラート", "0円ジェラートは円でなく点数(出数)を既定に");
+  const other = call(`defaultGoalKey({bucket:"コース",stores:["1160"],start:"2026-09-01",end:"2026-10-31"})`);
+  assert.ok(other === "sales" || other === "store_sales", "ジェラート以外は従来どおり売上が既定");
 });
 
 await test("目標未入力の販促だけならスコアボードは非表示", () => {

@@ -18,6 +18,14 @@ const RATIO_METRICS = new Set(["cost_rate", "actual_cost_rate"]);
 const isRatioMetric = m => RATIO_METRICS.has(m);
 const yen = n => "¥" + Math.round(n).toLocaleString("ja-JP");
 const man = n => (n / 10000).toFixed(0) + "万";
+// 金額表示（全画面共通）：画面に収まるなら「500,000円」、大きくて携帯で溢れる時だけ「50万」。
+// 100万未満は常に全表示（携帯でも収まる）。100万以上は PC=全表示／携帯=○万。
+const _wideScreen = () => { try { return !!(window.matchMedia && window.matchMedia("(min-width: 760px)").matches); } catch (e) { return true; } };
+const money = n => {
+  const v = Math.round(n);
+  if (Math.abs(v) < 1000000) return v.toLocaleString("ja-JP") + "円";
+  return _wideScreen() ? v.toLocaleString("ja-JP") + "円" : man(v);
+};
 const pct = n => (n * 100).toFixed(1) + "%";
 const signed = n => (n >= 0 ? "+" : "") + n.toFixed(1);
 
@@ -85,7 +93,8 @@ let API_OK = false;              // 目標APIが使えるか（本番=true）
 let SERVER_TARGETS = {};         // id → {value, by, at}（売上のみ・後方互換）
 let SERVER_TARGETS_M = {};       // id → { metric: {value, by, at} }（全指標）
 let GOALS = {};                  // id → 円（端末内フォールバック）
-let TG_CUR = {};                 // 目標フォームの現状（薄字）値。指標key→数値。「現状を入れる」と現状比に使う。
+let TG_CUR = {};                 // 目標フォームの直近実績（現状）値。指標key→数値。「直近比」の基準。
+let TG_SUGGEST = {};             // 目標フォームの目安（薄字）値＝直近×102%（原価率は×98%）。「目安を入れる」で使う。
 
 function loadGoals() { try { return JSON.parse(localStorage.getItem("hansoku_goals") || "{}"); } catch (e) { return {}; } }
 function saveGoals() { try { localStorage.setItem("hansoku_goals", JSON.stringify(GOALS)); } catch (e) { /* 保存不可でも表示は続ける */ } }
@@ -105,7 +114,8 @@ async function fetchServerTargets() {
 // 現システムで「振り返り数値」を出せるものだけ。人件費率/販管費/診断スコアはデータ源が
 // 無いので載せない。higherBetter=false（原価率）は達成色を反転（低いほど良い）。
 const TARGET_METRICS = [
-  { key: "sales", label: "売上目標", unit: "円", higher: true },
+  { key: "sales", label: "販促の売上（対象部門/商品）", unit: "円", higher: true },
+  { key: "store_sales", label: "店全体の売上", unit: "円", higher: true },
   { key: "covers", label: "客数", unit: "人", higher: true },
   { key: "avg_check", label: "客単価", unit: "円", higher: true },
   { key: "cost_rate", label: "原価率", unit: "%", higher: false },
@@ -114,13 +124,92 @@ const TARGET_METRICS = [
   { key: "hour_sales", label: "時間帯売上", unit: "円", higher: true, daily: true },
   { key: "hour_covers", label: "時間帯集客", unit: "人", higher: true, daily: true },
   { key: "hour_avg_check", label: "時間帯客単価", unit: "円", higher: true, daily: true },
+  { key: "dept_sales", label: "部門別売上", unit: "円", higher: true },
+  { key: "dept_qty", label: "部門別出数", unit: "点", higher: true, daily: true },
+  { key: "dept_share", label: "部門構成比", unit: "%", higher: true },
+  { key: "dept_avg_check", label: "部門別一品単価", unit: "円", higher: true },
+  { key: "prod_sales", label: "商品の売上", unit: "円", higher: true },
+  { key: "budget_rate", label: "予算達成率", unit: "%", higher: true },
+  { key: "alacarte_food_avg", label: "フード一品単価（アラカルト）", unit: "円", higher: true },
+  { key: "alacarte_drink_avg", label: "ドリンク一品単価（アラカルト）", unit: "円", higher: true },
+  { key: "food_per_cover", label: "フード一人当たり出品数", unit: "点", higher: true, decimal: true, percover: true },
+  { key: "drink_per_cover", label: "ドリンク一人当たり出杯数", unit: "杯", higher: true, decimal: true, percover: true },
 ];
+const HOUR_METRICS = new Set(["hour_sales", "hour_covers", "hour_avg_check"]);
+// 部門を選ぶ指標（部門＝コース/飲み放題/アラカルト/ランチ/食べ放題）と、商品を選ぶ指標。
+const DEPT_METRICS = new Set(["dept_sales", "dept_qty", "dept_share", "dept_avg_check"]);
+const PROD_METRICS = new Set(["prod_sales"]);
+// 「もう1段選ぶ（時間帯／部門／商品）」が要る指標か。要るなら種類を返す。
+const SUB_METRICS = new Set([...HOUR_METRICS, ...DEPT_METRICS, ...PROD_METRICS]);
+function subKind(base) { return HOUR_METRICS.has(base) ? "band" : DEPT_METRICS.has(base) ? "dept" : PROD_METRICS.has(base) ? "prod" : null; }
+// 時間帯バンド（営業時間帯）。目標はバンド単位で持てる（例 hour_sales#dinner）。
+const TIME_BANDS = [
+  { key: "lunch",    label: "ランチ",   range: "10〜15", hours: [10, 11, 12, 13, 14], core: true },
+  { key: "idle",     label: "アイドル", range: "15〜17", hours: [15, 16],             core: true },
+  { key: "dinner",   label: "ディナー", range: "17〜23", hours: [17, 18, 19, 20, 21, 22], core: true },
+  { key: "midnight", label: "深夜",     range: "23〜5",  hours: [23, 0, 1, 2, 3, 4],  core: false },
+  { key: "morning",  label: "早朝",     range: "5〜10",  hours: [5, 6, 7, 8, 9],      core: false },
+];
+// 指標キーを「基本指標＋選択（時間帯/部門/商品）」に分ける。
+// hour_sales#dinner → base=hour_sales, sel=dinner, band=ディナー ／ dept_sales#コース → base,sel=コース。
+function splitMetric(key) {
+  const i = String(key).indexOf("#");
+  if (i < 0) return { base: key, sel: null, band: null };
+  const base = key.slice(0, i), sel = key.slice(i + 1);
+  return { base, sel, band: HOUR_METRICS.has(base) ? (TIME_BANDS.find(b => b.key === sel) || null) : null };
+}
+// その店が営業している（＝実績のある）時間帯バンド。深夜・早朝が無い店では選択肢に出さない。
+function storeBands(code) {
+  const per = (DATA.hourly || {})[code] || {};
+  return TIME_BANDS.filter(b => b.hours.some(h => ((per[String(h)] || {}).covers || 0) > 0));
+}
+// その店の部門（区分）の一覧。月次の buckets から名前を集める（順序は登場順）。
+function storeDepts(code) {
+  const dm = (DATA.departments_monthly || {})[code] || {};
+  const seen = [];
+  for (const m of Object.keys(dm)) for (const b of ((dm[m] || {}).buckets || [])) if (!seen.includes(b.name)) seen.push(b.name);
+  if (!seen.length) { const d = (DATA.departments || {})[code]; if (d && d.buckets) for (const b of d.buckets) if (!seen.includes(b.name)) seen.push(b.name); }
+  return seen;
+}
+// その店の商品一覧（売上の大きい順・上位のみ）。数が多いので絞る。
+function storeProducts(code) {
+  const totals = new Map();
+  const pm = (DATA.products_monthly || {})[code] || {};
+  for (const m of Object.keys(pm)) for (const p of (pm[m] || [])) totals.set(p.name, (totals.get(p.name) || 0) + (p.sales || 0));
+  if (!totals.size) { const arr = (DATA.products || {})[code] || []; for (const p of arr) totals.set(p.name, (totals.get(p.name) || 0) + (p.sales || 0)); }
+  return [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 50).map(e => e[0]);
+}
+// 指標キーの表示ラベル（選択付きは「時間帯売上（ディナー）」「部門別売上（コース）」など）。
+function metricLabel(key) {
+  const { base, sel, band } = splitMetric(key);
+  const mt = TARGET_METRICS.find(m => m.key === base);
+  const bl = mt ? mt.label : base;
+  if (band) return `${bl}（${band.label}）`;
+  if (sel && (DEPT_METRICS.has(base) || PROD_METRICS.has(base))) return `${bl}（${sel}）`;
+  return bl;
+}
 const shiftYear = (ym, d) => { if (!ym) return ""; const [y, m] = ym.split("-"); return `${+y + d}-${m}`; };
 // 期間の月一覧（既存 monthRange を使う。範囲不正なら空/単月）。
 const monthsBetween = (a, b) => (a && b && b >= a) ? monthRange(a, b) : (a ? [a] : []);
 const _msales = (code, m) => (((DATA.monthly || {})[code] || {})[m] || {}).sales;
 const _mcovers = (code, m) => ((DATA.covers || {})[code] || {})[m];
 const _mcost = (code, m) => ((DATA.cost_rate || {})[code] || {})[m];
+// アラカルト客数（一人当たりの分母）。お通し（席チャージ）がある店はその点数＝アラカルト人数。
+// 無い店は「全体客数−セット系の人数」で推定：フード＝全体−コース−ランチ−食べ放題、
+// ドリンク＝全体−飲み放題（セット系は1人1つなので数量＝人数として使う）。0以下は不成立で null。
+function _bucketQty(dm, name) { const b = ((dm && dm.buckets) || []).find(x => x.name === name); return b ? (b.qty || 0) : 0; }
+function alacarteCovers(dm, code, m, kind) {
+  if (!dm) return null;
+  const otoshi = dm.alacarte_covers;
+  if (typeof otoshi === "number" && otoshi > 0) return otoshi;   // お通しがあればそれが人数
+  const total = _mcovers(code, m);
+  if (typeof total !== "number" || total <= 0) return null;
+  const to = dm.takeout_qty || 0;   // テイクアウトはどちらの分母からも引く
+  const est = kind === "drink"
+    ? total - _bucketQty(dm, "飲み放題") - to
+    : total - _bucketQty(dm, "コース") - _bucketQty(dm, "ランチ") - _bucketQty(dm, "食べ放題") - to;
+  return est > 0 ? est : null;
+}
 // 原価率（損益）が出ない理由。export の cost_status（{code:{status,months,latest}}）から。
 // 「―」を素で出さず、なぜ出ないか（新レジ未接続／新店・反映待ち／FW未反映／直近のみ）を添える。
 const COST_REASON = {
@@ -144,9 +233,10 @@ function _latestMonth(code) {
 // code は文字列（1店）でも配列（複数店を合算）でもよい。原価率・客単価は売上加重で合算。
 function _metricOverMonths(metric, code, months) {
   const codes = Array.isArray(code) ? code : [code];
-  if (metric === "hour_sales" || metric === "hour_covers" || metric === "hour_avg_check") {
-    // 時間帯は「1日平均（A/V）」。月別プロファイル（各月＝代表日1日ぶん）を、
-    // 対象月ぶん集めて日数で割る。前年同期なら前年の月群が渡る＝前年の1日平均になる。
+  const { base, band } = splitMetric(metric);
+  if (HOUR_METRICS.has(base)) {
+    // 時間帯は「1日平均（A/V）」。バンド指定があればその時間帯だけ合算する。
+    const inBand = h => !band || band.hours.includes(+h);
     const bm = DATA.hourly_by_month || {};
     let s = 0, c = 0, days = 0;
     const ms = (months && months.length) ? months : null;
@@ -155,27 +245,90 @@ function _metricOverMonths(metric, code, months) {
       const keys = ms ? ms.filter(m => per[m]) : Object.keys(per);
       for (const m of keys) {
         const prof = per[m]; let ms_ = 0, mc = 0;
-        for (const h of Object.keys(prof)) { ms_ += (prof[h] || {}).sales || 0; mc += (prof[h] || {}).covers || 0; }
+        for (const h of Object.keys(prof)) { if (!inBand(h)) continue; ms_ += (prof[h] || {}).sales || 0; mc += (prof[h] || {}).covers || 0; }
         s += ms_; c += mc; days += 1;
       }
     }
     if (days > 0) {
-      if (metric === "hour_sales") return Math.round(s / days) || null;
-      if (metric === "hour_covers") return Math.round(c / days) || null;
+      if (base === "hour_sales") return Math.round(s / days) || null;
+      if (base === "hour_covers") return Math.round(c / days) || null;
       return c ? Math.round(s / c) : null;   // 客単価は日数が相殺
     }
     // フォールバック：月別が無い（旧データ）なら、全月合算スナップショットを1件として使う。
     let fs = 0, fc = 0, any = false;
     for (const cd of codes) {
       const per = (DATA.hourly || {})[cd]; if (!per) continue; any = true;
-      for (const h of Object.keys(per)) { fs += (per[h] || {}).sales || 0; fc += (per[h] || {}).covers || 0; }
+      for (const h of Object.keys(per)) { if (!inBand(h)) continue; fs += (per[h] || {}).sales || 0; fc += (per[h] || {}).covers || 0; }
     }
     if (!any) return null;
-    if (metric === "hour_sales") return fs || null;
-    if (metric === "hour_covers") return fc || null;
+    if (base === "hour_sales") return fs || null;
+    if (base === "hour_covers") return fc || null;
     return fc ? Math.round(fs / fc) : null;
   }
   if (!months || !months.length) return null;
+  // 部門別（区分を選ぶ）。月次 buckets を選んだ区分名で合算。構成比・客単価は合算後に算出。
+  if (DEPT_METRICS.has(base)) {
+    const name = band ? null : (splitMetric(metric).sel || "");
+    let bs = 0, bq = 0, tot = 0, dayDen = 0, any = false;
+    for (const cd of codes) for (const m of months) {
+      const dm = ((DATA.departments_monthly || {})[cd] || {})[m]; if (!dm) continue;
+      tot += dm.total_sales || 0;
+      const bk = (dm.buckets || []).find(b => b.name === name);
+      if (bk) { bs += bk.sales || 0; bq += bk.qty || 0; dayDen += lastDayOfMonth(m); any = true; }
+    }
+    if (!any) return null;
+    if (base === "dept_sales") return Math.round(bs) || null;
+    // 出数は「1日あたり平均(A/V)」＝ 月次出数の合計 ÷ その月の暦日数の合計。
+    if (base === "dept_qty") return dayDen ? Math.round(bq / dayDen) : null;
+    if (base === "dept_share") return tot ? +((bs / tot) * 100).toFixed(1) : null;
+    if (base === "dept_avg_check") return bq ? Math.round(bs / bq) : null;
+    return null;
+  }
+  // 商品の売上（商品を選ぶ）。月次 products を選んだ商品名で合算。
+  if (PROD_METRICS.has(base)) {
+    const name = splitMetric(metric).sel || "";
+    let ps = 0, any = false;
+    for (const cd of codes) for (const m of months) {
+      const arr = ((DATA.products_monthly || {})[cd] || {})[m]; if (!arr) continue;
+      const p = arr.find(x => x.name === name); if (p) { ps += p.sales || 0; any = true; }
+    }
+    if (!any) return null;
+    return Math.round(ps) || null;
+  }
+  // 予算達成率＝売上合計 ÷ 予算合計 ×100（店の月別予算に対して）。
+  if (base === "budget_rate") {
+    let sales = 0, bud = 0;
+    for (const cd of codes) for (const m of months) {
+      const sv = _msales(cd, m), bv = ((DATA.budget || {})[cd] || {})[m];
+      if (typeof sv === "number" && typeof bv === "number" && bv > 0) { sales += sv; bud += bv; }
+    }
+    return bud ? +((sales / bud) * 100).toFixed(1) : null;
+  }
+  // アラカルトのフード/ドリンク一品単価＝アラカルトのフード（ドリンク）金額合計 ÷ 出品数合計。
+  // 金額分け(alacarte)と点数分け(alacarte_qty)は departments_monthly の各月に入っている。
+  if (base === "alacarte_food_avg" || base === "alacarte_drink_avg") {
+    const fk = base === "alacarte_food_avg" ? "フード" : "ドリンク";
+    let s = 0, q = 0, any = false;
+    for (const cd of codes) for (const m of months) {
+      const dm = ((DATA.departments_monthly || {})[cd] || {})[m]; if (!dm) continue;
+      const sp = dm.alacarte || {}, qp = dm.alacarte_qty || {};
+      if (qp[fk]) { s += sp[fk] || 0; q += qp[fk] || 0; any = true; }
+    }
+    return (any && q) ? Math.round(s / q) : null;
+  }
+  // 一人当たり出品数/出杯数＝アラカルトのフード（ドリンク）出品数 ÷ アラカルト人数
+  // （＝お通し/席チャージの点数 alacarte_covers）。お通しが無い店は null（データなし）。
+  if (base === "food_per_cover" || base === "drink_per_cover") {
+    const fk = base === "food_per_cover" ? "フード" : "ドリンク";
+    const kind = base === "food_per_cover" ? "food" : "drink";
+    let items = 0, cov = 0, any = false;
+    for (const cd of codes) for (const m of months) {
+      const dm = ((DATA.departments_monthly || {})[cd] || {})[m]; if (!dm) continue;
+      const c = alacarteCovers(dm, cd, m, kind), qp = dm.alacarte_qty || {};
+      if (typeof c === "number" && c > 0) { items += qp[fk] || 0; cov += c; any = true; }
+    }
+    return (any && cov) ? +(items / cov).toFixed(2) : null;
+  }
   let sales = 0, covers = 0, costNum = 0, costDen = 0, sN = 0, cN = 0;
   for (const cd of codes) for (const m of months) {
     const sv = _msales(cd, m), cv = _mcovers(cd, m), cr = _mcost(cd, m);
@@ -183,7 +336,7 @@ function _metricOverMonths(metric, code, months) {
     if (typeof cv === "number") { covers += cv; cN++; }
     if (typeof sv === "number" && typeof cr === "number") { costNum += sv * cr; costDen += sv; }
   }
-  if (metric === "sales") return sN ? Math.round(sales) : null;
+  if (metric === "sales" || metric === "store_sales") return sN ? Math.round(sales) : null;
   if (metric === "covers") return cN ? Math.round(covers) : null;
   if (metric === "avg_check") return (covers > 0 && sN) ? Math.round(sales / covers) : null;
   // DATA.cost_rate は割合（0.30＝30%）で入っている。目標は％で入力するので％へ揃える。
@@ -197,6 +350,16 @@ function currentTargetValue(metric, code, startYM, endYM, openEnded) {
     ? monthsBetween(startYM, _latestMonth(code))
     : monthsBetween(shiftYear(startYM, -1), shiftYear(endYM || startYM, -1));
   return _metricOverMonths(metric, code, months);
+}
+// 目安の基準＝直近確定の実績。期間の長さぶんの「直近の確定月」で集計する（常設は直近1ヶ月）。
+// 目標の薄字は、この直近実績を +2%（原価率など↓良は −2%）した値を出す（会社の規定）。
+function recentTargetValue(metric, code, startYM, endYM, openEnded) {
+  if (!code) return null;
+  const latest = _latestMonth(code);
+  if (!latest) return null;
+  const len = openEnded ? 1 : Math.max(1, monthsBetween(startYM, endYM || startYM).length);
+  const start = addMonth(latest, -(len - 1));
+  return _metricOverMonths(metric, code, monthsBetween(start, latest));
 }
 // 販促の「実績」値（振り返り）。当年の販促期間（常設＝開始〜直近）で集計。
 function actualTargetValue(metric, code, startYM, endYM, openEnded) {
@@ -255,14 +418,33 @@ async function editGoal(id) {
   const c = (DATA.campaigns || []).find(x => campKey(x) === id || x.id === bareId(id));
   const basis = c ? goalBasisLabel(c) : null;
   const per = c && goalIsMonthly(c) ? "1ヶ月あたりの" : "期間ぜんぶの";
+  // 目安（規定）＝直近実績＋2%。この販促の対象（部門/商品）を、直近確定の同じ長さの期間で
+  // 集計し、その＋2%を初期値に入れる。フリーワードのままにせず、判断の物差しを添える。
+  let guide = "", suggested = cur;
+  if (c) {
+    const fmt = n => Math.round(n).toLocaleString("ja-JP");
+    const latest = addMonth(CURRENT_MONTH, -1);
+    const len = goalIsMonthly(c) ? 1 : Math.max(1, monthsBetween(c.start.slice(0, 7), campEndM(c)).length);
+    const rng = { from: addMonth(latest, -(len - 1)), to: latest };
+    const tr = campTargeted(c, null, rng);
+    const base = (tr && tr.cur > 0) ? tr.cur : null;
+    if (base) {
+      const s2 = Math.round(base * 1.02);
+      guide = `\n\n【目安】直近${len}ヶ月の${basis || "実績"}：${fmt(base)}円\n`
+        + `　おすすめ目標＝直近＋2% ＝ ${fmt(s2)}円（円で自由に上書きできます）`;
+      if (cur == null) suggested = s2;
+    } else {
+      guide = `\n\n【目安】直近の実績がまだ取れないため、狙いたい売上を円で入力してください。`;
+    }
+  }
   const v = window.prompt(
-    basis
+    (basis
       ? `${per}目標を入力してください（円・空欄で削除）\n\n`
         + `この施策の実績は「${basis}」で見ています。同じものへの目標を入れてください。`
         + (c && goalIsMonthly(c)
             ? "\n終了日を決めていない施策なので、直近の確定月と比べます。" : "")
-      : "この販促の目標売上（円）を入力してください（空欄で削除）",
-    cur == null ? "" : String(cur));
+      : "この販促の目標売上（円）を入力してください（空欄で削除）") + guide,
+    suggested == null ? "" : String(suggested));
   if (v === null) return;
   const cleaned = String(v).replace(/[,，円\s]/g, "");
   let value = null;
@@ -285,6 +467,290 @@ async function editGoal(id) {
     saveGoals();
   }
   render();
+}
+
+// 目標設定ダイアログ。目標ボタン（data-goal）から開く。
+// カテゴリ1つ選択式（▽）の「目標行」を、＋追加で複数持てる（目標①②③…）。
+// 薄字＝選んだ指標の「直近実績＋2%」の目安（原価率など↓良は−2%）。
+const _mtByKey = () => Object.fromEntries(TARGET_METRICS.map(m => [m.key, m]));
+// 目標カテゴリの選択肢（売上＝この販促の対象部門/商品の売上）。
+const GOAL_CAT_OPTS = [
+  { key: "sales", label: "販促の売上（対象部門/商品）" },
+  { key: "store_sales", label: "店全体の売上" },
+  { key: "covers", label: "客数" },
+  { key: "avg_check", label: "客単価" },
+  { key: "cost_rate", label: "原価率" },
+  { key: "food_cost_rate", label: "フード原価率" },
+  { key: "drink_cost_rate", label: "ドリンク原価率" },
+  { key: "hour_sales", label: "時間帯売上" },
+  { key: "hour_covers", label: "時間帯集客" },
+  { key: "hour_avg_check", label: "時間帯客単価" },
+  { key: "dept_sales", label: "部門別 売上" },
+  { key: "dept_qty", label: "部門別 出数（点数・皿数／1日A/V）" },
+  { key: "dept_share", label: "部門構成比" },
+  { key: "dept_avg_check", label: "部門別 一品単価（売上÷出品数）" },
+  { key: "prod_sales", label: "商品の売上" },
+  { key: "budget_rate", label: "予算達成率" },
+  { key: "alacarte_food_avg", label: "フード一品単価（アラカルト）" },
+  { key: "alacarte_drink_avg", label: "ドリンク一品単価（アラカルト）" },
+  { key: "food_per_cover", label: "フード一人当たり出品数（アラカルト）" },
+  { key: "drink_per_cover", label: "ドリンク一人当たり出杯数（アラカルト）" },
+];
+// 選んだ指標の「直近実績」（＝目安の基準）と前年比。売上はこの販促の対象（部門/商品）、
+// 他は店の直近同期間で見る。前年比は率指標（原価率）は差分ポイント、他は％。
+function goalRef(c, key) {
+  const code = (c.stores || [])[0] || "";
+  const sm = (c.start || "").slice(0, 7);
+  const em = c.open_ended ? "" : (c.end || c.start || "").slice(0, 7);
+  const openEnded = !em;
+  const latest = addMonth(CURRENT_MONTH, -1);
+  const len = openEnded ? 1 : Math.max(1, monthsBetween(sm, em || sm).length);
+  const from = addMonth(latest, -(len - 1));
+  const months = monthsBetween(from, latest);
+  const isRate = key.indexOf("cost_rate") >= 0;
+  if (key === "sales") {
+    const tr = campTargeted(c, null, { from, to: latest });
+    return { base: (tr && tr.cur > 0) ? tr.cur : null, prevPct: (tr && tr.pct != null) ? tr.pct : null, isRate: false };
+  }
+  const base = _metricOverMonths(key, code, months);
+  const prev = _metricOverMonths(key, code, months.map(m => shiftYear(m, -1)));
+  let prevPct = null;
+  if (base != null && prev != null && prev) prevPct = isRate ? (base - prev) : (base / prev - 1) * 100;
+  return { base, prevPct, isRate };
+}
+const goalRefValue = (c, key) => goalRef(c, key).base;
+// 最初に出す目標カテゴリ。対象部門/商品の売上が出せない起票直後は「店全体の売上」を既定にして、
+// いきなり〈データなし〉の空欄で始まらないようにする（実績が見える状態から書き始められる）。
+function defaultGoalKey(c) {
+  // ジェラート販促は0円商品（売上が付かない）。円ではなく点数(出数)で目標を持つ。
+  // 部門=ジェラートの1日A/V出数を既定にし、薄字＝直近ベース（×102%）が出るようにする。
+  if (c && c.bucket === "ジェラート") return "dept_qty#ジェラート";
+  try { return goalRef(c, "sales").base != null ? "sales" : "store_sales"; }
+  catch (e) { return "sales"; }
+}
+// 目標マップ（指標→値）をサーバ保存。既存キー∪新キー（時間帯バンド hour_sales#dinner
+// なども含む）を突き合わせ、渡した指標は upsert、渡っていない指標は削除（消した行の反映）。
+async function saveGoalMap(gkey, map) {
+  const existing = Object.keys(SERVER_TARGETS_M[gkey] || {});
+  const keys = [...new Set([...existing, ...Object.keys(map)])];
+  for (const k of keys) {
+    const has = Object.prototype.hasOwnProperty.call(map, k);
+    const target = has ? map[k] : null;
+    try {
+      const res = await fetch("/api/targets", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: gkey, metric: k, target }),
+      });
+      if (res.ok) {
+        SERVER_TARGETS_M[gkey] = SERVER_TARGETS_M[gkey] || {};
+        if (target == null) { delete SERVER_TARGETS_M[gkey][k]; if (k === "sales") delete SERVER_TARGETS[gkey]; }
+        else {
+          SERVER_TARGETS_M[gkey][k] = { value: target, by: "自分", at: new Date().toISOString() };
+          if (k === "sales") SERVER_TARGETS[gkey] = { value: target, by: "自分", at: new Date().toISOString() };
+        }
+      }
+    } catch (e) { /* 1指標の失敗で全体を止めない */ }
+  }
+}
+// 目標の「▽で選ぶ行」の共通コントローラ。起票フォームと目標ダイアログの両方で使う。
+// getCtx() は「販促風オブジェクト」（stores/bucket/items/start/end/open_ended）を返す。
+function makeGoalRows(container, getCtx, forceEl) {
+  const mtByKey = _mtByKey();
+  const fmtVal = (mt, v) => v == null ? "―" : mt.decimal ? (+v).toFixed(1) + mt.unit : mt.unit === "円" ? money(v) : mt.unit === "%" ? v + "%" : ten(v) + mt.unit;
+  const bandOptsHtml = selBand => {
+    const code = (getCtx().stores || [])[0] || "";
+    const op = storeBands(code);
+    let list = (forceEl && forceEl.checked) ? TIME_BANDS.slice() : op.slice();
+    if (!list.length) list = TIME_BANDS.slice();
+    if (selBand && !list.some(b => b.key === selBand)) { const b = TIME_BANDS.find(x => x.key === selBand); if (b) list.push(b); }
+    const def = selBand || (list.find(b => b.key === "dinner") || list[0] || {}).key;
+    return list.map(b => `<option value="${b.key}"${b.key === def ? " selected" : ""}>${esc(b.label)}（${esc(b.range)}）</option>`).join("");
+  };
+  // 部門/商品の選択肢（名前の一覧から）。保存済みの選択が一覧に無ければ（商品が上位50から
+  // 外れた・その月に部門が無い等）末尾に足して選択を保持する（勝手に別の値へすり替えない）。
+  const listOptsHtml = (names, selName) => {
+    let list = names.slice();
+    if (selName && !list.includes(selName)) list = list.concat(selName);
+    if (!list.length) return `<option value="">（データなし）</option>`;
+    const def = (selName && list.includes(selName)) ? selName : list[0];
+    return list.map(n => `<option value="${esc(n)}"${n === def ? " selected" : ""}>${esc(n)}</option>`).join("");
+  };
+  // 指標に応じた「もう1段の選択肢」（時間帯／部門／商品）。
+  const subOptsHtml = (base, selVal) => {
+    const kind = subKind(base), code = (getCtx().stores || [])[0] || "";
+    if (kind === "band") return bandOptsHtml(selVal);
+    if (kind === "dept") return listOptsHtml(storeDepts(code), selVal);
+    if (kind === "prod") return listOptsHtml(storeProducts(code), selVal);
+    return "";
+  };
+  const renumber = () => [...container.querySelectorAll(".gr-n")].forEach((el, i) => el.textContent = `目標${i + 1}`);
+  const usedBases = () => [...container.querySelectorAll(".gr-cat")].map(s => s.value);
+  const addRow = (selKey, val) => {
+    const parsed = splitMetric(selKey || "");
+    const base0 = GOAL_CAT_OPTS.some(o => o.key === parsed.base) ? parsed.base : null;
+    const def = base0 || (GOAL_CAT_OPTS.find(o => !usedBases().includes(o.key)) || GOAL_CAT_OPTS[0]).key;
+    const selSub = parsed.band ? parsed.band.key : (parsed.sel || null);   // 時間帯キー、または部門/商品名
+    const row = document.createElement("div"); row.className = "gr";
+    row.innerHTML = `<div class="gr-top">
+        <span class="gr-n">目標</span>
+        <select class="pf-in gr-cat">${GOAL_CAT_OPTS.map(o => `<option value="${o.key}"${o.key === def ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select>
+        <button type="button" class="gr-del" title="この目標を削除" aria-label="削除">×</button>
+      </div>
+      <div class="gr-line2">
+        <select class="pf-in gr-band"${SUB_METRICS.has(def) ? "" : " hidden"}>${subOptsHtml(def, selSub)}</select>
+        <input class="pf-in gr-val" type="number" inputmode="decimal" step="any" value="${val != null && val !== "" ? val : ""}">
+        <button type="button" class="gr-fill" title="目安（直近実績±2%）を入れる">目安</button>
+      </div>
+      <div class="gr-help"></div>`;
+    container.appendChild(row);
+    const sel = row.querySelector(".gr-cat"), bandSel = row.querySelector(".gr-band");
+    const inp = row.querySelector(".gr-val"), help = row.querySelector(".gr-help");
+    const effKey = () => SUB_METRICS.has(sel.value) ? `${sel.value}#${bandSel.value}` : sel.value;
+    row._effKey = effKey;
+    const refresh = () => {
+      const c = getCtx();
+      const mt = mtByKey[sel.value]; if (!mt) return;
+      const kind = subKind(sel.value), isSub = !!kind, isHour = kind === "band";
+      bandSel.hidden = !isSub;
+      const ref = goalRef(c, effKey());
+      const base = ref.base;
+      const f = mt.higher ? 1.02 : 0.98;
+      const suggest = base == null ? null : ((mt.unit === "%" || mt.decimal) ? Math.round(base * f * 10) / 10 : Math.round(base * f));
+      inp.dataset.suggest = suggest == null ? "" : suggest;
+      inp.placeholder = suggest == null ? "―（データなし）" : fmtVal(mt, suggest);
+      let ratio = "";
+      if (ref.prevPct != null) ratio = ref.isRate
+        ? `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}pt`
+        : `・前年比 ${ref.prevPct >= 0 ? "+" : ""}${ref.prevPct.toFixed(1)}%`;
+      const bandObj = isHour ? TIME_BANDS.find(b => b.key === bandSel.value) : null;
+      const subName = isHour ? (bandObj ? `${bandObj.label}（${bandObj.range}時）の` : "")
+        : (isSub && bandSel.value ? `${bandSel.value}の` : "");
+      const avTail = mt.daily ? "　※「1日あたり平均(A/V)」で入力・判定します" : "";
+      // 一人当たり出品数/出杯数の注釈。分母＝アラカルト客数（お通しの点数、無い店は全体客数−セット系）。
+      const coverTail = mt.percover
+        ? "　※一人当たり＝アラカルト出品数÷アラカルト客数。客数＝お通しの点数（お通しの無い店は 全体客数−コース・ランチ・食べ放題・テイクアウト〈ドリンクは飲み放題・テイクアウト〉）。お通しも1品として数えます"
+        : "";
+      const subWhat = kind === "dept" ? "部門" : kind === "prod" ? "商品" : "指標";
+      help.textContent = base == null
+        ? (sel.value === "sales"
+            ? "この販促は対象部門/商品が未設定のため実績が出せません。『店全体の売上』を選ぶか、狙う値を入力してください。"
+            : mt.percover
+              ? "アラカルト客数が算出できません（客数データが不足）。狙う値を入力してください。"
+            : isHour
+              ? `この時間帯（${bandObj ? bandObj.range + "時" : ""}）の直近実績がありません（営業時間外かも）。狙う値を入力してください。`
+              : isSub
+                ? `この${subWhat}（${bandSel.value || "―"}）の直近実績がありません。狙う値を入力してください。`
+                : "この指標の直近実績がありません。狙う値を入力してください。")
+        : `直近${subName}${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）${avTail}${coverTail}`;
+    };
+    row._refresh = refresh;
+    sel.addEventListener("change", () => { if (SUB_METRICS.has(sel.value)) bandSel.innerHTML = subOptsHtml(sel.value, null); refresh(); });
+    bandSel.addEventListener("change", refresh);
+    row.querySelector(".gr-fill").addEventListener("click", () => { if (inp.dataset.suggest) inp.value = inp.dataset.suggest; });
+    row.querySelector(".gr-del").addEventListener("click", () => { row.remove(); renumber(); });
+    refresh();
+  };
+  if (forceEl) forceEl.addEventListener("change", () => {
+    // 時間帯（band）の行だけ選択肢を作り直す。部門・商品の行は対象外。
+    container.querySelectorAll(".gr").forEach(row => {
+      const cat = row.querySelector(".gr-cat"), bs = row.querySelector(".gr-band");
+      if (cat && bs && HOUR_METRICS.has(cat.value)) bs.innerHTML = bandOptsHtml(bs.value);
+    });
+  });
+  const refreshAll = () => container.querySelectorAll(".gr").forEach(r => r._refresh && r._refresh());
+  const collect = () => {
+    const map = {}; let err = "";
+    for (const row of container.querySelectorAll(".gr")) {
+      const key = row._effKey ? row._effKey() : row.querySelector(".gr-cat").value;
+      const raw = (row.querySelector(".gr-val").value || "").replace(/[,，\s]/g, "");
+      if (raw === "") continue;
+      const v = Number(raw), lbl = metricLabel(key), isRate = key.indexOf("cost_rate") >= 0;
+      if (!isFinite(v)) { err = `「${lbl}」の目標が数値ではありません。`; break; }
+      if (isRate && (v <= 0 || v > 100)) { err = `「${lbl}」は 0〜100% で入れてください。`; break; }
+      if (!isRate && v < 0) { err = `「${lbl}」は0以上で入れてください。`; break; }
+      map[key] = v;
+    }
+    return { map, err };
+  };
+  return { addRow, renumber, refreshAll, collect };
+}
+function openGoalGrid(c) {
+  const gkey = campKey(c);
+  // 既存の保存済み目標→初期行（時間帯バンド hour_sales#dinner 等も含めて全キーから）。
+  const savedMap = SERVER_TARGETS_M[gkey] || SERVER_TARGETS_M[c.id] || {};
+  const saved = [];
+  for (const k of Object.keys(savedMap)) {
+    const v = savedMap[k] && savedMap[k].value;
+    if (typeof v === "number") saved.push({ key: k, val: v });
+  }
+  if (!saved.length) { const sv = targetMetricOf(c, "sales"); if (sv != null) saved.push({ key: "sales", val: sv }); }
+  const initRows = saved.length ? saved : [{ key: defaultGoalKey(c), val: "" }];
+
+  let ov = document.getElementById("goalgrid"); if (ov) ov.remove();
+  ov = document.createElement("div"); ov.id = "goalgrid"; ov.className = "crprev";
+  ov.innerHTML = `<div class="crprev-bd" data-goalclose></div>
+    <div class="crprev-box planbox" role="dialog" aria-modal="true">
+      <div class="crprev-bar"><span class="crprev-title">目標・POPを設定</span>
+        <button class="crprev-x" type="button" data-goalclose aria-label="閉じる">×</button></div>
+      <div class="planform">
+        <div class="gg-h"><b>${esc(c.title)}</b><span class="sub">${esc(campRange(c))}${(c.stores || [])[0] ? "・" + esc(storeName(c.stores[0])) : ""}</span></div>
+        <div class="pf-tg-head">カテゴリを選んで目標を打ち込む。薄字＝直近実績＋2%の目安（原価率は−2%）。「＋目標を追加」で複数入れられます。</div>
+        <div class="gg-rows" id="gg-rows"></div>
+        <label class="gg-force"><input type="checkbox" id="gg-force"> 営業時間外の時間帯（深夜・早朝など）も選べるようにする</label>
+        <button type="button" class="gg-add" id="gg-add">＋ 目標を追加</button>
+        ${CREATIVES_API_OK ? `
+        <div class="pf-tg-head" style="margin-top:16px">POP・画像</div>
+        <div class="gg-pop" id="gg-pop"></div>
+        <div class="gg-pop-actions">
+          <label class="gg-upl" id="gg-upl-label">POP・画像をアップロード<input type="file" id="gg-pop-file" accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,image/*,application/pdf" hidden></label>
+          <label class="gg-skip"><input type="checkbox" id="gg-skip"> 完成後にアップロードする（今はスキップ）</label>
+          <div class="gr-help" id="gg-skip-note" hidden>スキップOK。「来月やること」に〈POPを用意する〉として残り、あとからアップロードできます。</div>
+        </div>` : ""}
+        <div class="pf-msg" id="pf-msg" hidden></div>
+        <div class="pf-actions"><span></span><div>
+          <button class="pf-cancel" type="button" data-goalclose>キャンセル</button>
+          <button class="pf-save" type="button" id="gg-save">保存</button>
+        </div></div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  // POP・画像：同じ画面でアップロード（クリック回数を減らす）。あとで＝そのまま保存でOK。
+  const refreshPops = () => {
+    const box = ov.querySelector("#gg-pop"); if (!box) return;
+    const crs = creativesForCampaign(c.id);
+    box.innerHTML = crs.length
+      ? `<div class="cgrid mini">${crs.map(creativeCard).join("")}</div>`
+      : `<div class="gr-help">まだPOP・画像はありません。完成次第でOKです。</div>`;
+  };
+  refreshPops();
+  const popFile = ov.querySelector("#gg-pop-file");
+  if (popFile) popFile.addEventListener("change", async () => {
+    const f = popFile.files && popFile.files[0]; if (!f) return;
+    const msg = ov.querySelector("#pf-msg"); if (msg) { msg.textContent = "アップロード中…"; msg.hidden = false; }
+    await uploadCreative(f, c.id, "");
+    popFile.value = ""; refreshPops();
+    if (msg) { msg.textContent = "POPをアップロードしました。"; }
+  });
+  // 基本はアップロード。完成後アップロードならチェックでスキップ（アップロード欄を畳む）。
+  const skip = ov.querySelector("#gg-skip"), uplLabel = ov.querySelector("#gg-upl-label"), skipNote = ov.querySelector("#gg-skip-note");
+  if (skip) skip.addEventListener("change", () => {
+    if (uplLabel) uplLabel.style.display = skip.checked ? "none" : "";
+    if (skipNote) skipNote.hidden = !skip.checked;
+  });
+  const rowsEl = ov.querySelector("#gg-rows");
+  const rows = makeGoalRows(rowsEl, () => c, ov.querySelector("#gg-force"));
+  initRows.forEach(r => rows.addRow(r.key, r.val));
+  rows.renumber();
+  ov.querySelector("#gg-add").addEventListener("click", () => { rows.addRow(null, ""); rows.renumber(); });
+  ov.addEventListener("click", e => { if (e.target.hasAttribute("data-goalclose")) ov.remove(); });
+  ov.querySelector("#gg-save").addEventListener("click", async () => {
+    const { map, err } = rows.collect();
+    const msg = ov.querySelector("#pf-msg");
+    if (err) { if (msg) { msg.textContent = err; msg.hidden = false; } return; }
+    if (msg) { msg.textContent = "保存中…"; msg.hidden = false; }
+    await saveGoalMap(gkey, map);
+    ov.remove(); render();
+  });
 }
 
 // 販促の要因メモ（施策id→本文）。目標と同じく本番=Neon(/api/notes)共有、
@@ -445,6 +911,11 @@ const campEndM = c => (c.open_ended ? CURRENT_MONTH : (c.end || c.start).slice(0
 const campRange = c =>
   c.open_ended ? `${c.start} 〜 継続中`
   : c.start === c.end ? c.start : `${c.start} 〜 ${c.end}`;
+// 新人にも読みやすい短縮日付（"2026-12-01"→"12/1"）と短縮期間（"12/1〜12/25"）。
+const shortDate = d => { const m = String(d || "").match(/\d{4}-(\d{2})-(\d{2})/); return m ? `${+m[1]}/${+m[2]}` : (d || ""); };
+const shortRange = c =>
+  c.open_ended ? `${shortDate(c.start)}〜`
+  : c.start === c.end ? shortDate(c.start) : `${shortDate(c.start)}〜${shortDate(c.end)}`;
 // 期間の進み具合（0-100）。予定=0／終了=100／実施中は start〜end の経過割合。
 function campProgress(c) {
   const k = campStatus(c).k;
@@ -1203,7 +1674,13 @@ function render() {
   app.querySelectorAll("[data-year]").forEach(el =>
     el.addEventListener("click", () => { YEAR = +el.dataset.year; render(); syncHash(); }));
   app.querySelectorAll("[data-goal]").forEach(el =>
-    el.addEventListener("click", e => { e.stopPropagation(); editGoal(el.dataset.goal); }));
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      const key = el.dataset.goal;
+      // 本番（API）ではカテゴリ別グリッドを開く。ローカル等では従来の売上プロンプト。
+      const c = API_OK ? (DATA.campaigns || []).find(x => campKey(x) === key || x.id === bareId(key)) : null;
+      if (c) openGoalGrid(c); else editGoal(key);
+    }));
   app.querySelectorAll("[data-memo]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); editMemo(el.dataset.memo); }));
   app.querySelectorAll("[data-status]").forEach(el =>
@@ -2105,20 +2582,40 @@ function refreshTargetPlaceholders() {
   const sm = g("pf-start") ? g("pf-start").value : "";
   const em = g("pf-end") ? g("pf-end").value : "";
   const openEnded = !em;
+  // 円は大きい額（売上）は「○万」、小さい額（客単価）は「¥○」で見せる。%はそのまま。
+  const fmtVal = (mt, v) => v == null ? "―"
+    : mt.unit === "円" ? (Math.abs(v) >= 100000 ? man(v) : yen(v))
+    : mt.unit === "%" ? v + "%"
+    : ten(v) + mt.unit;
+  const bucket = g("pf-bucket") ? g("pf-bucket").value : "";
+  // 販促の売上（sales）は「対象区分」の直近実績で見る（店全体ではなく）。区分未設定は出せない。
+  const recentBucketSales = () => {
+    if (!bucket || !code) return null;
+    const latest = addMonth(CURRENT_MONTH, -1);
+    const len = openEnded ? 1 : Math.max(1, monthsBetween(sm, em || sm).length);
+    let sum = 0, any = false;
+    for (let i = 0; i < len; i++) { const b = bucketOrCatAtM(code, addMonth(latest, -i), bucket); if (b) { sum += b.sales; any = true; } }
+    return any ? sum : null;
+  };
   for (const mt of TARGET_METRICS) {
     const inp = g("pf-tg-" + mt.key); if (!inp) continue;
-    const cur = currentTargetValue(mt.key, code, sm, em, openEnded);
-    TG_CUR[mt.key] = cur;   // 「現状を入れる」チップと現状比が使う
-    inp.placeholder = cur == null ? "―（データなし）"
-      : (mt.unit === "円" ? man(cur) + "万" : mt.unit === "%" ? cur + "%" : ten(cur) + mt.unit) + "（現状）";
+    // 直近確定の実績（＝現状）と、その ±2% の目安（薄字）。原価率など↓良は −2%。
+    const cur = mt.key === "sales" ? recentBucketSales() : recentTargetValue(mt.key, code, sm, em, openEnded);
+    const factor = mt.higher ? 1.02 : 0.98;
+    const suggest = cur == null ? null
+      : (mt.unit === "%" ? Math.round(cur * factor * 10) / 10 : Math.round(cur * factor));
+    TG_CUR[mt.key] = cur;         // 「直近比」の基準
+    TG_SUGGEST[mt.key] = suggest; // 「目安を入れる」で使う（薄字の値）
+    inp.placeholder = suggest == null ? "―（データなし）"
+      : `${fmtVal(mt, suggest)}（目安 直近${mt.higher ? "+2" : "−2"}%）`;
     const fill = document.querySelector(`[data-fillcur="${mt.key}"]`);
-    if (fill) fill.disabled = cur == null;   // 現状値が無ければコピー不可
+    if (fill) fill.disabled = suggest == null;   // 目安が無ければコピー不可
     const help = g("pf-tghelp-" + mt.key);
     if (help) {
-      const per = mt.daily
-        ? (openEnded ? "開始〜直近の時間帯1日平均（A/V）" : "前年同期の時間帯1日平均（A/V）")
-        : openEnded ? "開始〜直近の実績" : "前年同期の実績";
-      help.textContent = cur == null ? "（現状値なし）" : `薄字＝${per}`;
+      const avn = mt.daily ? "1日平均（A/V）" : "実績";
+      help.textContent = cur == null
+        ? (mt.key === "sales" ? "（対象区分を選ぶと、その部門/商品の直近実績が出ます）" : "（直近の実績なし）")
+        : `薄字＝直近${avn} ${fmtVal(mt, cur)} の ${mt.higher ? "+2%" : "−2%"}`;
     }
     updateTargetDiff(mt.key);
   }
@@ -2135,8 +2632,36 @@ function updateTargetDiff(key) {
   if (v == null || !isFinite(v) || cur == null || !cur) { out.textContent = ""; out.className = "pf-tg-diff"; return; }
   const pct = (v - cur) / cur * 100;
   const good = mt.higher ? pct >= 0 : pct <= 0;   // 客単価↑・原価率↓が良い
-  out.textContent = `現状比 ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
+  out.textContent = `直近比 ${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
   out.className = "pf-tg-diff " + (Math.abs(pct) < 0.05 ? "flat" : good ? "good" : "bad");
+}
+// 年月プルダウン（ブラウザ標準の <input type=month> は端末言語で英語表記になるため、
+// 「2026年」「11月」の日本語プルダウンに置き換える）。値は隠しinput #id に "YYYY-MM" で持つ。
+function ymPickerHtml(id, value, allowBlank) {
+  const now = Number(CURRENT_MONTH.slice(0, 4));
+  const y0 = now - 1, y1 = now + 2;
+  const [vy, vm] = (value || "").split("-");
+  // 年・月とも先頭に空の選択肢（未選択）。開始月は未選択で始め、選ぶと目標欄が出る。
+  const yBlank = allowBlank ? "―（常設）" : "年を選ぶ";
+  const mBlank = allowBlank ? "―" : "月を選ぶ";
+  const yOpts = [`<option value=""${!vy ? " selected" : ""}>${yBlank}</option>`];
+  for (let y = y0; y <= y1; y++) yOpts.push(`<option value="${y}"${String(y) === vy ? " selected" : ""}>${y}年</option>`);
+  const mOpts = [`<option value=""${!vm ? " selected" : ""}>${mBlank}</option>`];
+  for (let m = 1; m <= 12; m++) { const mm = String(m).padStart(2, "0"); mOpts.push(`<option value="${mm}"${mm === vm ? " selected" : ""}>${m}月</option>`); }
+  return `<span class="pf-ym">`
+    + `<select class="pf-in pf-ym-y" id="${id}-y" aria-label="年">${yOpts.join("")}</select>`
+    + `<select class="pf-in pf-ym-m" id="${id}-m" aria-label="月">${mOpts.join("")}</select>`
+    + `<input type="hidden" id="${id}" value="${esc(value || "")}"></span>`;
+}
+// 年・月プルダウンの変更を隠しinputへ反映し、changeを飛ばして既存リスナー（段階表示など）を起こす。
+function wireYmPicker(root, id) {
+  const y = root.querySelector("#" + id + "-y"), m = root.querySelector("#" + id + "-m"), h = root.querySelector("#" + id);
+  if (!y || !m || !h) return;
+  const sync = () => {
+    h.value = (y.value && m.value) ? `${y.value}-${m.value}` : "";
+    h.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  y.addEventListener("change", sync); m.addEventListener("change", sync);
 }
 function openPlanEditor(seed) {
   if (!PLANS_API_OK) { alert("販促の起票は本番（ログイン済み）でのみ使えます。"); return; }
@@ -2158,21 +2683,14 @@ function openPlanEditor(seed) {
   // 複製起票では、複製元の目標を初期値として引き継ぐ（seed.__seedTargets）。既存プランの
   // 保存済み目標があればそちらを優先。どちらも「入れた項目だけ保存」なので後で消せる。
   const seedT = s.__seedTargets || null;
-  let inherited = 0;
-  const tgRows = TARGET_METRICS.map(mt => {
-    const saved = camp ? targetMetricOf(camp, mt.key) : null;
-    const seedVal = (saved == null && seedT && seedT[mt.key] != null) ? seedT[mt.key] : null;
-    if (seedVal != null) inherited += 1;
-    const val = saved != null ? saved : (seedVal != null ? seedVal : "");
-    const suf = mt.unit === "円" ? "円" : mt.unit === "%" ? "％" : mt.unit;
-    return `<div class="pf-tg">
-      <span class="pf-tg-l">${esc(mt.label)}<span class="pf-tg-u">${esc(suf)}</span>${mt.higher ? "" : '<span class="pf-tg-rev" title="低いほど良い">↓良</span>'}</span>
-      <input class="pf-in pf-tg-in" id="pf-tg-${mt.key}" type="number" inputmode="decimal" step="any" value="${val !== "" ? val : ""}">
-      <button type="button" class="pf-tg-fill" data-fillcur="${mt.key}" title="現状（薄字）の値を目標欄に入れる">現状</button>
-      <span class="pf-tg-help" id="pf-tghelp-${mt.key}"></span>
-      <span class="pf-tg-diff" id="pf-tgdiff-${mt.key}"></span>
-    </div>`;
-  }).join("");
+  // 初期の目標行（▽で選ぶ形）。編集は既存の全キー（時間帯バンド含む）、複製は seedT から。
+  const initGoalRows = [];
+  if (camp) {
+    const sm2 = (SERVER_TARGETS_M[campKey(camp)] || SERVER_TARGETS_M[camp.id] || {});
+    for (const k of Object.keys(sm2)) { const v = sm2[k] && sm2[k].value; if (typeof v === "number") initGoalRows.push({ key: k, val: v }); }
+  }
+  if (!initGoalRows.length && seedT) for (const k of Object.keys(seedT)) { if (seedT[k] != null) initGoalRows.push({ key: k, val: seedT[k] }); }
+  const inherited = (!camp && seedT) ? Object.keys(seedT).length : 0;
   ov.innerHTML = `<div class="crprev-bd" data-planclose></div>
     <div class="crprev-box planbox" role="dialog" aria-modal="true">
       <div class="crprev-bar"><span class="crprev-title">${s.id ? "販促プランを編集" : "販促プランを起票"}</span>
@@ -2188,12 +2706,17 @@ function openPlanEditor(seed) {
           <label class="pf-l">対象区分<select class="pf-in" id="pf-bucket">${bucketOpts}</select></label>
         </div>
         <div class="pf-row">
-          <label class="pf-l">開始月<input class="pf-in" id="pf-start" type="month" value="${esc(ym(s.start))}"></label>
-          <label class="pf-l">終了月<span class="pf-hint">空欄＝常設</span><input class="pf-in" id="pf-end" type="month" value="${esc(s.open_ended ? "" : ym(s.end))}"></label>
+          <label class="pf-l">開始月${ymPickerHtml("pf-start", ym(s.start), false)}</label>
+          <label class="pf-l">終了月<span class="pf-hint">未選択＝常設</span>${ymPickerHtml("pf-end", s.open_ended ? "" : ym(s.end), true)}</label>
         </div>
         <label class="pf-l">販促物（PDF・画像）<input class="pf-in" id="pf-pdf" type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,image/*,application/pdf"></label>
-        <div class="pf-tg-head">目標数値（入れた項目だけ保存。薄字＝現状の参考値）${inherited ? `<span class="pf-tg-inherit">複製元から${inherited}件引き継ぎ（要確認）</span>` : ""}</div>
-        <div class="pf-tg-grid">${tgRows}</div>
+        <div id="pf-goalhint" class="pf-goalhint">↑「販促名」と「開始月」を入れると、その期間の目安つきで目標欄が出ます。</div>
+        <div id="pf-goalsec" class="pf-goalsec" hidden>
+          <div class="pf-tg-head">目標数値（カテゴリを▽で選んで打ち込む。薄字＝直近実績＋2%の目安／原価率は−2%）${inherited ? `<span class="pf-tg-inherit">複製元から${inherited}件引き継ぎ（要確認）</span>` : ""}</div>
+          <div class="gg-rows" id="pf-goalrows"></div>
+          <label class="gg-force"><input type="checkbox" id="pf-goalforce"> 営業時間外の時間帯（深夜・早朝など）も選べるようにする</label>
+          <button type="button" class="gg-add" id="pf-goaladd">＋ 目標を追加</button>
+        </div>
         <label class="pf-l">メモ（任意）<textarea class="pf-in" id="pf-note" rows="2" placeholder="狙い・段取りなど">${esc(s.note || "")}</textarea></label>
         <div class="pf-msg" id="pf-msg" hidden></div>
         <div class="pf-actions">
@@ -2206,25 +2729,37 @@ function openPlanEditor(seed) {
       </div>
     </div>`;
   document.body.appendChild(ov);
+  wireYmPicker(ov, "pf-start"); wireYmPicker(ov, "pf-end");
   ov.addEventListener("click", e => { if (e.target.hasAttribute("data-planclose")) ov.remove(); });
   ov.querySelector("#pf-save").addEventListener("click", () => savePlanFromForm(s));
   const del = ov.querySelector("[data-plandelete]");
   if (del) del.addEventListener("click", () => deletePlan(del.dataset.plandelete));
-  // 店舗・期間を変えたら薄字（現状値）を計算し直す。
-  ["pf-store", "pf-start", "pf-end"].forEach(id => {
-    const el = ov.querySelector("#" + id); if (el) el.addEventListener("change", refreshTargetPlaceholders);
+  // フォームの入力値から「販促風オブジェクト」を作り、目標行の薄字算出に使う。
+  const gv = id => { const el = ov.querySelector("#" + id); return el ? el.value : ""; };
+  const getPseudoCtx = () => {
+    const code = gv("pf-store"), sm = gv("pf-start"), em = gv("pf-end"), bucket = gv("pf-bucket"), kind = gv("pf-kind");
+    return { id: s.id ? bareId(s.id) : "__new__", stores: code ? [code] : [], bucket, items: [], kind,
+      start: sm ? sm + "-01" : "", end: em ? em + "-28" : (sm ? sm + "-01" : ""), open_ended: !em };
+  };
+  // 目標行（▽で選ぶ形）を共通コントローラで作る。起票フォームでも時間帯バンドが選べる。
+  const pfRows = makeGoalRows(ov.querySelector("#pf-goalrows"), getPseudoCtx, ov.querySelector("#pf-goalforce"));
+  ov._goalRows = pfRows;
+  (initGoalRows.length ? initGoalRows : [{ key: defaultGoalKey(getPseudoCtx()), val: "" }]).forEach(r => pfRows.addRow(r.key, r.val));
+  pfRows.renumber();
+  ov.querySelector("#pf-goaladd").addEventListener("click", () => { pfRows.addRow(null, ""); pfRows.renumber(); });
+  // 期間（開始月）を入れたら目標欄を出す（算出は一瞬なのでそのまま表示）。
+  const updateGoalSection = () => {
+    const start = ov.querySelector("#pf-start"), sec = ov.querySelector("#pf-goalsec"), hint = ov.querySelector("#pf-goalhint");
+    const has = !!(start && start.value);
+    if (sec) sec.hidden = !has;
+    if (hint) hint.hidden = has;
+    if (has) pfRows.refreshAll();
+  };
+  // 店舗・期間・対象区分を変えたら薄字を計算し直す＋目標欄の表示を更新。
+  ["pf-store", "pf-start", "pf-end", "pf-bucket"].forEach(id => {
+    const el = ov.querySelector("#" + id); if (el) el.addEventListener("change", updateGoalSection);
   });
-  // 「現状を入れる」チップ：薄字の値を目標欄にコピー。
-  ov.querySelectorAll("[data-fillcur]").forEach(btn => btn.addEventListener("click", () => {
-    const k = btn.dataset.fillcur, cur = TG_CUR[k], inp = document.getElementById("pf-tg-" + k);
-    if (inp && cur != null) { inp.value = cur; updateTargetDiff(k); }
-  }));
-  // 目標を打つと「現状比 +X%」を即時表示（達成の妥当性が直感で分かる）。
-  TARGET_METRICS.forEach(mt => {
-    const inp = ov.querySelector("#pf-tg-" + mt.key);
-    if (inp) inp.addEventListener("input", () => updateTargetDiff(mt.key));
-  });
-  refreshTargetPlaceholders();
+  updateGoalSection();
   const t = ov.querySelector("#pf-title"); if (t) t.focus();
 }
 function lastDayOfMonth(ym) { const [y, m] = ym.split("-").map(Number); return new Date(y, m, 0).getDate(); }
@@ -2252,7 +2787,9 @@ async function savePlanFromForm(seed) {
   if (!code) return show("店舗を選んでください。");
   if (!title) return show("販促名を入れてください。");
   if (!sm) return show("開始月を入れてください。");
-  const tgErr = validateTargetInputs();
+  const ovForm = document.getElementById("planedit");
+  const goalRows = ovForm && ovForm._goalRows;
+  const { map: goalMap, err: tgErr } = goalRows ? goalRows.collect() : { map: {}, err: null };
   if (tgErr) return show(tgErr);
   // 終了月が空＝常設（終了日なし）。ご指定どおり確認ポップアップ→Yesで無期限に進む。
   let openEnded = false;
@@ -2289,10 +2826,10 @@ async function savePlanFromForm(seed) {
       if (i >= 0) PLANS[i] = plan; else PLANS.push(plan);
       applyPlans();
     }
-    // 目標（指標別）を保存。鍵は施策キー（id@開始年）。空欄は削除扱い。
+    // 目標（指標別・時間帯バンド含む）を保存。鍵は施策キー（id@開始年）。空欄は削除扱い。
     if (plan) {
       const key = campKey(planToCamp(plan));
-      await saveTargetsFromForm(key);
+      await saveGoalMap(key, goalMap);
       // 販促物PDF/画像があれば添付（プラン保存後、確定した id にひも付け）。
       const pf = g("pf-pdf"); const file = pf && pf.files && pf.files[0];
       if (file) { try { await uploadCreative(file, plan.id, code); } catch (e) { /* 添付失敗は握りつぶさず後述メッセージ */ } }
@@ -2460,13 +2997,25 @@ const groupLabel = g => (g || "").replace(/^\s*\d+\s*[:：]\s*/, "").trim();
 function classifyCat(name, code, group) {
   const r = catRules(code);
   if (!r) return null;
+  // 部門＝区分（1:1）。FWの部門をそのまま区分にする店（すさび湯系など）。
+  // 部門名（"NN:名前" の名前部分）が区分名。dept_merge で統合・dept_rename で改名・
+  // dept_other で オペ部門→その他（export 側 classify_category と同じ挙動）。
+  if (r.dept_as_category) {
+    const base = groupLabel(group || name).replace(/^【[^】]*】/, "").trim();
+    if (!base) return r.other || "その他";
+    if ((r.dept_other || []).includes(base)) return r.other || "その他";
+    if ((r.dept_merge || {})[base]) return r.dept_merge[base];
+    return (r.dept_rename || {})[base] || base;
+  }
   // 内訳（全商品に出ない0円の選択商品）は素の風味名では区分を当てられないので、
   // FW自身の区分見出し（groups マップ）を商品名より優先する。
   const gmap = r.groups || {};
   if (group) { const lb = groupLabel(group); if (gmap[lb]) return gmap[lb]; }
   const nm = name || "";
+  // キーワードは商品名だけでなく FW区分見出し（部門名）にも当てる（export 側と同じ）。
+  const lbl = group ? groupLabel(group) : "";
   for (const c of (r.categories || [])) {
-    for (const kw of (c.keywords || [])) { if (kw && nm.includes(kw)) return c.name; }
+    for (const kw of (c.keywords || [])) { if (kw && (nm.includes(kw) || (lbl && lbl.includes(kw)))) return c.name; }
   }
   return r.other || "その他";
 }
@@ -2491,7 +3040,23 @@ function catsAtM(code, m) {
   }));
 }
 const catAtM = (code, m, cat) => catsAtM(code, m).find(c => c.name === cat) || null;
-const prodsInCat = (code, m, cat) => prodsAtM(code, m).filter(p => classifyCat(p.name, code, p.group) === cat);
+// FW部門名から表示用の名前（先頭 "NN:" と 店タグ【…】を落とす）。
+const cleanDeptName = n => (n || "").replace(/^\s*\d+\s*[:：]\s*/, "").replace(/^【[^】]*】/, "").trim();
+// 部門ベースの店（classify_by=department）の「区分の中身」＝その区分に属するFW部門。
+// 商品にFW区分見出し(group)が付かない店でも、部門は確実に束ねられるので中身が出る。
+function deptsInCat(code, m, cat) {
+  const dm = ((DATA.departments_monthly || {})[code] || {})[m];
+  const raw = (dm && dm.raw) || [];
+  return raw
+    .filter(d => classifyCat(cleanDeptName(d.name), code, d.name) === cat)
+    .filter(d => (d.sales || 0) > 0)   // 0円の“飲み放題用/コース用”部門は隠す（HQ 2026-09・②A）
+    .map(d => ({ name: cleanDeptName(d.name), sales: d.sales || 0, qty: d.qty || 0, dept: true }));
+}
+const prodsInCat = (code, m, cat) => {
+  const r = catRules(code);
+  if (r && r.classify_by === "department") return deptsInCat(code, m, cat);
+  return prodsAtM(code, m).filter(p => classifyCat(p.name, code, p.group) === cat);
+};
 
 // ── 構成比セルを押すと出る「小ウインドウ」（複数可・ドラッグ移動・×で閉じる）──────
 // 中身＝その区分×月の商品内訳（各商品の売上＝税抜 と、区分内の売上構成比%）。
@@ -2714,7 +3279,7 @@ function panelContent(d) {
             : (c.sales ? Math.round((p.sales || 0) / c.sales * 100) : 0);
           // 販促マークは「販促の対象商品」か「販促のある区分の“限定/おすすめ”商品」だけ。
           // GM(定番＝6か月連続)には付けない。
-          const pOn = hits.items.has(p.name) || (on && isLimitedProduct(d.code, d.m, p.name));
+          const pOn = !p.dept && (hits.items.has(p.name) || (on && isLimitedProduct(d.code, d.m, p.name)));
           const q = (p.qty != null) ? ` <span class="fw-pq">${ten(p.qty)}点</span>` : "";
           html += `<li class="fw-subrow${pOn ? " promo" : ""}" style="--cc:${col}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${pOn ? ' <span class="fw-pbadge">販促</span>' : ""}${subToggleCtrl(d.code, d.m, p)}</span><span class="fw-pv">${man(p.sales)}${q}<span class="fw-pp">${ppct}%</span></span></li>`;
           html += subRowsHtml(d.code, d.m, p, col, hits);
@@ -2739,7 +3304,7 @@ function panelContent(d) {
       : (tot ? Math.round((p.sales || 0) / tot * 100) : 0);
     const qty = (p.qty != null) ? ` <span class="fw-pq">${ten(p.qty)}点</span>` : "";
     // 販促マーク：対象商品か、販促のある区分の“限定/おすすめ”商品だけ（GMは付けない）。
-    const on = hits.items.has(p.name) || (catOn && isLimitedProduct(d.code, d.m, p.name));
+    const on = !p.dept && (hits.items.has(p.name) || (catOn && isLimitedProduct(d.code, d.m, p.name)));
     return `<li class="${on ? "promo" : ""}"><span class="fw-pn">${esc(p.name)}${p.rank ? ` <span class="fw-rk">${esc(p.rank)}</span>` : ""}${on ? ' <span class="fw-pbadge">販促</span>' : ""}${subToggleCtrl(d.code, d.m, p)}</span><span class="fw-pv">${man(p.sales)}${qty}<span class="fw-pp">${pct}%</span></span></li>`
       + subRowsHtml(d.code, d.m, p, null, hits);
   }).join("") : `<li class="muted">この月の商品データ（FW ABC）はありません</li>`;
@@ -3293,7 +3858,18 @@ function campDeptMix(c) {
 function campGelatoCompo(c) {
   if (c.bucket !== "ジェラート") return "";
   const code = (c.stores || [])[0]; if (!code) return "";
-  const months = monthRange(String(c.start).slice(0, 7), String(c.end).slice(0, 7));
+  const hasGelato = m => prodsInCat(code, m, "ジェラート").length > 0;
+  let months = monthRange(String(c.start).slice(0, 7), String(c.end).slice(0, 7));
+  // この回がまだ始まったばかり（期間内にデータのある月が無い）ときは、
+  // 直近でデータのある月に切り替えて「直近の実績」を必ず出す（0円ゆえ振り返りが空にならないよう）。
+  let fallback = false;
+  if (!months.some(hasGelato)) {
+    const recent = [];
+    for (let m = CURRENT_MONTH, i = 0; i < 6 && recent.length < 2; i++, m = monthMinus(m, 1)) {
+      if (hasGelato(m)) recent.push(m);
+    }
+    if (recent.length) { months = recent.slice().reverse(); fallback = true; }
+  }
   const flav = {}; let single = 0, dbl = 0, tri = 0;
   const excluded = n =>
     /^TOジェラート/.test(n) || /^TO(シングル|ダブル|トリプル)/.test(n) ||
@@ -3323,9 +3899,12 @@ function campGelatoCompo(c) {
     return `<li><span class="fw-pn">${hot ? "★ " : ""}${esc(n)}</span>` +
       `<span class="fw-pv"><span class="fw-pq">${ten(q)}点</span><span class="fw-pp">${pct}%</span></span></li>`;
   }).join("");
+  const per = fallback
+    ? `直近の実績（${months[0]}〜${months[months.length - 1]}）　※この回（${c.start}〜${c.end}）はまだ実績なし`
+    : `${c.start}〜${c.end}`;
   return `<section class="block">
     <div class="bhead"><h2>TOジェラート 出品数構成比</h2>
-      <span class="bnote">${esc(c.start)}〜${esc(c.end)}／ジェラートは0円のため出品数(点数)で見る。総スクープ＝シングル×1＋ダブル×2＋トリプル×3。★＝この回の販促2品</span></div>
+      <span class="bnote">${esc(per)}／ジェラートは0円のため出品数(点数)で見る。総スクープ＝シングル×1＋ダブル×2＋トリプル×3。★＝この回の販促2品</span></div>
     <div class="panel">
       <div class="cactual-sum">総出品数(スクープ) <b>${ten(scoops)}</b>　容器内訳: 単${ten(single)}／双${ten(dbl)}／三${ten(tri)}</div>
       <ul class="fw-list">${rows}</ul>
@@ -3346,7 +3925,7 @@ function renderCampaign(id) {
   // 目標（進捗欄で編集）。目標は2026年10月分から。過ぎた施策には出さない。
   const goalBtn = !goalEligible(c) ? ""
     : tgt != null
-      ? `<button class="goalbtn" data-goal="${campKey(c)}" title="目標を編集">目標 ${man(tgt)}円 ✎</button>`
+      ? `<button class="goalbtn" data-goal="${campKey(c)}" title="目標を編集">目標 ${money(tgt)} ✎</button>`
       : `<button class="goalbtn add" data-goal="${campKey(c)}">＋ 目標を入力</button>`;
 
   // ── 達成サマリー（この販促の主役）。5段階評価＋達成率＋実施中は日割りペース見込み。
@@ -3364,28 +3943,31 @@ function renderCampaign(id) {
   } else if (tgt == null) {
     achHtml = `<div class="cmemo muted">＋目標を入力すると、達成率と5段階評価（◎〇△××）が出ます。<div style="margin-top:8px">${goalBtn}</div></div>`;
   } else if (!pace) {
-    achHtml = `<div class="cmemo muted">目標 <b>${man(tgt)}円</b>。確定した月の実績が出たら達成率を表示します。<div style="margin-top:8px">${goalBtn}${goalMetaHtml}</div></div>`;
+    achHtml = `<div class="cmemo muted">目標 <b>${money(tgt)}</b>。確定した月の実績が出たら達成率を表示します。<div style="margin-top:8px">${goalBtn}${goalMetaHtml}</div></div>`;
   } else {
-    const g = achieveGrade(pace.nowRate);
-    const nowLbl = pace.monthly ? `${pace.month}の1ヶ月` : (pace.status === "done" ? "確定・最終" : `確定${pace.doneMonths != null ? pace.doneMonths : ""}ヶ月`);
-    // 実施中は日割りペース見込み（次段階で日別化。いまは確定“月”ペース概算）。
-    const pg = (pace.status === "live" && pace.projRate != null) ? achieveGrade(pace.projRate) : null;
-    const projRow = pg
-      ? `<div class="ach-proj ${pg.tone}">
-          <span class="ach-mark sm">${pg.mark}</span>
-          <div class="ach-proj-b"><div>見込み達成率 <b>${pace.projRate.toFixed(0)}%</b>・${pg.label}<span class="ach-pill">日割りペース概算</span></div>
-            <div class="sub">確定${pace.doneMonths}/${pace.totalMonths}ヶ月ぶんの実績を期末まで引き伸ばした概算（日別売上の取込は次段階）</div></div></div>`
+    // 実施中は「今のペースでの見込み達成率」を主役に。確定分の累計÷全期間目標（＝nowRate）は
+    // 期間途中では必ず低く出て（例：1/3消化なら82%でも“×”に見える）誤解を生むため副次に回す。
+    const isLive = pace.status === "live" && pace.projRate != null;
+    const heroRate = isLive ? pace.projRate : pace.nowRate;
+    const g = achieveGrade(heroRate);
+    const nowLbl = pace.monthly ? `${pace.month}の1ヶ月の達成率`
+      : (pace.status === "done" ? "確定・最終の達成率" : `確定${pace.doneMonths != null ? pace.doneMonths : ""}ヶ月の達成率`);
+    const subLine = isLive
+      ? `今のペースでの見込み達成率（確定${pace.doneMonths}/${pace.totalMonths}ヶ月・期間${prog}%経過）`
+      : nowLbl;
+    const ctxLine = isLive
+      ? `<div class="ach-line sub">確定分：実績 <b>${money(pace.cur)}</b>（全期間目標 ${money(tgt)} の ${pace.nowRate.toFixed(0)}%）</div>`
       : "";
     achHtml = `<div class="ach">
       <div class="ach-hero ${g.tone}">
         <span class="ach-mark">${g.mark}</span>
-        <div class="ach-figs"><div class="ach-rate">${pace.nowRate.toFixed(0)}<span class="u">%</span></div>
+        <div class="ach-figs"><div class="ach-rate">${heroRate.toFixed(0)}<span class="u">%</span></div>
           <div class="ach-grade">${g.label}</div></div>
       </div>
       <div class="ach-meta">
-        <div class="ach-line">目標 <b>${man(tgt)}</b> → 実績 <b>${man(pace.cur)}</b>${pace.label ? `　<span class="sub">${esc(pace.label)}</span>` : ""}</div>
-        <div class="ach-line sub">${nowLbl}の達成率${pace.status === "live" ? "（現時点）" : ""}</div>
-        ${projRow}
+        <div class="ach-line">目標 <b>${money(tgt)}</b> → 実績 <b>${money(pace.cur)}</b>${pace.label ? `　<span class="sub">${esc(pace.label)}</span>` : ""}</div>
+        <div class="ach-line sub">${subLine}</div>
+        ${ctxLine}
         <div class="ach-scale">◎110%↑ 〇100%↑ △90%↑ ×80%↑ ××80%未満</div>
         <div class="cgoalbar">${goalBtn}${goalMetaHtml}</div>
       </div>
@@ -3414,7 +3996,7 @@ function renderCampaign(id) {
       // “去年との比較”を見せる。
       let prevLbl;
       if (t.pct != null) {
-        prevLbl = `（前年 ${man(t.prev)}）`;
+        prevLbl = `（前年 ${money(t.prev)}）`;
       } else {
         const bk = c.bucket || campKindBucket(c.kind);
         const hasItems = (c.items || []).filter(Boolean).length;
@@ -3427,7 +4009,7 @@ function renderCampaign(id) {
           <div class="big ${t.pct != null ? (t.pct >= 0 ? "up" : "down") : ""}">${
             t.pct != null ? signed(t.pct) + "%" : "―"
           }</div>
-          <div class="delta">${man(t.cur)}${prevLbl}</div></div>`;
+          <div class="delta">${money(t.cur)}${prevLbl}</div></div>`;
     } else {
       tgtKpi = `<div class="kpi"><div class="lbl">この施策の効果</div>
           <div class="big">―</div>
@@ -3444,7 +4026,7 @@ function renderCampaign(id) {
       ${covKpi}
     </div>
     <div class="cdnote camp-storewide">店全体の${METRIC_LABELS[METRIC]}（参考・確定${sum.months}ヶ月・${sum.stores}/${sum.total}店）
-      <b>${man(sum.cur)}円</b>　${yoy}${mom ? "　" + mom : ""}・${esc(overlapNote(c))}</div>`;
+      <b>${money(sum.cur)}</b>　${yoy}${mom ? "　" + mom : ""}・${esc(overlapNote(c))}</div>`;
   } else {
     overall = `<div class="empty">確定した月の売上が出たら、前年同月比などの結果を表示します（月単位で集計）。</div>`;
   }
@@ -3492,6 +4074,22 @@ function renderCampaign(id) {
   const progBar = `<div class="cprog"><span class="cprog-fill ${st.k}" style="width:${prog}%"></span></div>
     <div class="cprog-lbl"><span>${c.start}</span><span class="cprog-now ${st.k}">${st.label}${st.k === "live" ? `・${prog}%経過` : ""}</span><span>${c.end}</span></div>`;
 
+  // 詳細（部門内訳・期間の実績・ジェラート構成・目標の振り返り・店別・環境施策）は
+  // 「必要な情報だけ」を上に出すため、まとめて もっと見る に畳む。中身が無ければ出さない。
+  const storeRows = (c.stores.length > 1 || c.kind === "lunch")
+    ? `<section class="block">
+        <div class="bhead"><h2>対象店ごとの結果</h2>
+          <span class="bnote">${c.stores.length}店　店をタップで詳細へ</span></div>
+        <div class="panel"><ul class="cmlist">${rowsHtml}</ul></div>
+      </section>` : "";
+  const moreInner = `${deptMixHtml}${campPeriodActual(c, !!deptMixHtml)}${campGelatoCompo(c)}${renderTargetReview(c)}${storeRows}${renderEnvEffect(id)}`;
+  const moreBlock = moreInner.trim()
+    ? `<details class="opendet" id="campmore">
+        <summary class="openbtn"><span class="openbtn-t">もっと見る（部門内訳・期間の実績・目標の振り返り・店別など）</span></summary>
+        ${moreInner}
+      </details>`
+    : "";
+
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button>
       <span class="sep">／</span><button class="linkbtn" data-view="campaigns">施策の効果</button></div>
@@ -3518,23 +4116,14 @@ function renderCampaign(id) {
     </section>
 
     <section class="block">
-      <div class="bhead"><h2>結果（全体）</h2>
-        <span class="bnote">${METRIC_LABELS[METRIC]}・確定月の全店合算／前年同月比（当月の暫定は除く）</span></div>
+      <div class="bhead"><h2>結果（前年比）</h2>
+        <span class="bnote">${METRIC_LABELS[METRIC]}・確定月／前年同月比（当月の暫定は除く）</span></div>
       <div class="panel">${overall}</div>
     </section>
 
-    ${deptMixHtml}
-    ${campPeriodActual(c, !!deptMixHtml)}
-    ${campGelatoCompo(c)}
-    ${renderTargetReview(c)}
     ${renderReview(c)}
 
-    ${(c.stores.length > 1 || c.kind === "lunch") ? `<section class="block">
-      <div class="bhead"><h2>対象店ごとの結果</h2>
-        <span class="bnote">${c.stores.length}店　店をタップで詳細へ</span></div>
-      <div class="panel"><ul class="cmlist">${rowsHtml}</ul></div>
-    </section>` : ""}
-    ${renderEnvEffect(id)}`;
+    ${moreBlock}`;
 }
 
 // ── 店舗管理（店舗ごとの施策一覧・進捗・結果）─────────────────────────────
@@ -3741,9 +4330,20 @@ function campVerdict(c) {
         : { tone: "warn", label: "要改善", signals: sig };
     }
     if (t) {
+      // 商品単位で前年が取れない（新商品）ときは、部門（バケット）の前年比を代理指標に。
+      // 結果（前年比）欄と同じ物差しにして「出せる/出せない」の食い違いを無くす。
+      const bk = c.bucket || campKindBucket(c.kind);
+      const hasItems = (c.items || []).filter(Boolean).length;
+      const tb = (hasItems && bk) ? campTargeted({ ...c, items: [] }) : null;
+      if (tb && tb.pct != null) {
+        const sig = [`${esc(bk)}部門 前年比 ${signed(tb.pct)}%（新商品のため部門で判定）`, `${t.label} ${man(t.cur)}円・確定${t.months}ヶ月`];
+        return tb.pct >= 0
+          ? { tone: "good", label: "効果あり", signals: sig }
+          : { tone: "warn", label: "要改善", signals: sig };
+      }
       return {
         tone: "flat", label: "前年比なし",
-        signals: [`${t.label} ${man(t.cur)}円`, "前年同月のABCが無いため前年比は出せません"],
+        signals: [`${t.label} ${man(t.cur)}円`, "前年同月の実績が無いため前年比は出せません"],
       };
     }
   }
@@ -3796,18 +4396,23 @@ function needsReview(c) {
 // 原価率・フード/ドリンク原価率は「低いほど良い」ので達成色を反転（達成=緑）。
 function fmtMetricVal(mt, v) {
   if (v == null) return "―";
+  if (mt.decimal) return (+v).toFixed(1) + mt.unit;
   if (mt.unit === "%") return (+v).toFixed(1) + "%";
   if (mt.unit === "人") return ten(v) + "人";
-  if (mt.key === "sales" || mt.key === "hour_sales") return man(v) + "円";
-  return ten(v) + "円"; // 客単価・時間帯客単価
+  if (mt.key === "sales" || mt.key === "hour_sales" || mt.key === "dept_sales" || mt.key === "prod_sales") return man(v) + "円";
+  if (mt.unit && mt.unit !== "円") return ten(v) + mt.unit; // 点など（部門別出数）は単位をそのまま使う
+  return ten(v) + "円"; // 客単価・時間帯客単価・部門別客単価
 }
 function renderTargetReview(c) {
   // 売上目標の達成は「達成サマリー」が主指標（対象の部門・商品）で正しく割って表示する。
   // ここで売上を出すと店全体売上÷目標になり達成率が跳ねる（例 331%）ので、売上は載せない。
   // この表は 客数・客単価・原価率など“売上以外”の指標だけを並べる。
-  const set = TARGET_METRICS.filter(mt => mt.key !== "sales")
-    .map(mt => ({ mt, target: targetMetricOf(c, mt.key) }))
-    .filter(x => x.target != null);
+  // 保存済みの全キー（時間帯バンド hour_sales#dinner 等も含む）から、売上以外を並べる。
+  const savedKeys = Object.keys(SERVER_TARGETS_M[campKey(c)] || SERVER_TARGETS_M[c.id] || {}).filter(k => k !== "sales");
+  const set = savedKeys.map(k => {
+    const mt = TARGET_METRICS.find(m => m.key === splitMetric(k).base);
+    return mt ? { mt, key: k, target: targetMetricOf(c, k) } : null;
+  }).filter(x => x && x.target != null);
   if (!set.length) {
     // 売上目標だけ（＝達成サマリーで表示済み）・対象外なら、この表自体を出さない。
     if (!goalEligible(c) || targetMetricOf(c, "sales") != null) return "";
@@ -3828,26 +4433,43 @@ function renderTargetReview(c) {
   const periodNote = openEnded ? `${sm}〜${em}（継続中）` : (sm === em ? sm : `${sm}〜${em}`);
 
   const isCostMetric = k => k === "cost_rate" || k === "food_cost_rate" || k === "drink_cost_rate";
-  const rows = set.map(({ mt, target }) => {
-    const actual = actualTargetValue(mt.key, code, sm, em, openEnded);
+  let hasHourCum = false;
+  const rows = set.map(({ mt, key, target }) => {
+    const actual = actualTargetValue(key, code, sm, em, openEnded);
     const ach = targetAchievement(mt, target, actual);
     const dir = mt.higher ? "" : `<span class="tr-dir" title="低いほど良い">↓が良い</span>`;
     // 原価率の実績が出ない店は「―」で終わらせず、理由（新レジ未接続など）を添える。
     const cr = (actual == null && isCostMetric(mt.key) && codes.length === 1) ? costReason(codes[0]) : null;
-    const actHtml = cr
-      ? `<span class="pf-cr" title="${esc(cr.tip)}">${esc(cr.label)}</span>`
-      : fmtMetricVal(mt, actual);
+    // 1日A/V指標（時間帯・部門別出数）は「累計を大きく・1日A/Vを小さく」。累計＝A/V×期間の営業日数の概算。
+    const baseM = splitMetric(key).base;
+    const isDailyM = !!mt.daily;
+    // 家族ごとに「その月の実績データがあるか」を判定（時間帯→hourly_by_month、部門→departments_monthly）。
+    const dailyHasData = (bm, cd, m) => HOUR_METRICS.has(bm)
+      ? !!(((DATA.hourly_by_month || {})[cd]) || {})[m]
+      : DEPT_METRICS.has(bm) ? !!(((DATA.departments_monthly || {})[cd]) || {})[m] : false;
+    const fmtCum = v => mt.unit === "円" ? money(v) : ten(v) + mt.unit;
+    let actHtml;
+    if (cr) actHtml = `<span class="pf-cr" title="${esc(cr.tip)}">${esc(cr.label)}</span>`;
+    else if (isDailyM && actual != null && baseM !== "hour_avg_check") {
+      const code0 = (Array.isArray(code) ? code[0] : code) || (c.stores || [])[0];
+      const mip = (openEnded ? monthsBetween(sm, campEndM(c)) : monthsBetween(sm, em))
+        .filter(m => m < CURRENT_MONTH && dailyHasData(baseM, code0, m));
+      const days = mip.reduce((a, m) => a + lastDayOfMonth(m), 0);
+      const cum = days ? Math.round(actual * days) : null;
+      if (cum) { hasHourCum = true; actHtml = `<b>累計 約${fmtCum(cum)}</b><div class="tr-sub">1日A/V ${fmtMetricVal(mt, actual)}</div>`; }
+      else actHtml = `${fmtMetricVal(mt, actual)}<div class="tr-sub">1日A/V</div>`;
+    } else actHtml = fmtMetricVal(mt, actual);
     const rateHtml = ach
       ? `<span class="tr-rate ${ach.good ? "good" : "bad"}">${ach.rate}%${ach.good ? " ✓" : ""}</span>`
       : `<span class="tr-rate muted">―</span>`;
     // 目標の変更ログ（誰がいつ）。あれば目標セルの下に控えめに出す。
-    const meta = targetMetaOf(c, mt.key);
+    const meta = targetMetaOf(c, key);
     const metaHtml = meta
       ? `<div class="tr-meta">${esc(meta.by || "—")}${meta.at ? "・" + shortYmd(meta.at) : ""}</div>`
       : "";
     return `<tr>
-      <td class="tr-l">${esc(mt.label)}${dir}</td>
-      <td class="tr-v">${fmtMetricVal(mt, target)}${metaHtml}</td>
+      <td class="tr-l">${esc(metricLabel(key))}${dir}</td>
+      <td class="tr-v">${fmtMetricVal(mt, target)}${isDailyM ? '<div class="tr-sub">1日A/V目標</div>' : ""}${metaHtml}</td>
       <td class="tr-v">${actHtml}</td>
       <td class="tr-a">${rateHtml}</td></tr>`;
   }).join("");
@@ -3860,7 +4482,7 @@ function renderTargetReview(c) {
         <thead><tr><th class="tr-l">指標</th><th class="tr-v">目標</th><th class="tr-v">実績</th><th class="tr-a">達成率</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
-      <div class="tr-note">実績は販促期間の確定月で集計（時間帯は期間内の1日平均＝A/V）。達成率は 客数・売上・客単価＝実績/目標、原価率＝目標/実績。</div>
+      <div class="tr-note">実績は販促期間の確定月で集計（時間帯・部門別出数は期間内の1日平均＝A/V）。達成率は 客数・売上・客単価＝実績/目標、原価率＝目標/実績。${hasHourCum ? "<br>「累計 約◯」＝1日A/V×期間の営業日数の概算（目標・達成率は1日A/Vで判定）。" : ""}${set.some(x => x.mt.percover) ? "<br>一人当たり出品数/出杯数＝アラカルト出品数÷アラカルト客数（客数＝お通しの点数、無い店は 全体客数−コース・ランチ・食べ放題・テイクアウト〈ドリンクは飲み放題・テイクアウト〉。お通しも1品として数えます）。" : ""}</div>
     </div></section>`;
 }
 function renderReview(c) {
@@ -3878,7 +4500,7 @@ function renderReview(c) {
     : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`;
   const nextHtml = prop && prop.next
     ? `<div class="rvnext">${escBr(prop.next)}<div class="rvby">— ${esc(prop.by || "AI")}${prop.at ? "・" + esc(prop.at) : ""}</div></div>`
-    : `<div class="rvnext muted">次回提案は未記入です。config/proposals.json に追記（AIに依頼も可）。</div>`;
+    : `<div class="rvnext muted">次回の一手はまだ未記入です。上の要因メモを書いて、次にどうするか一言残しましょう。</div>`;
   return `<section class="block">
     <div class="bhead"><h2>振り返り＆次回提案（PDCA）</h2>
       <span class="bnote">やりっぱなしにしない：実績→判定→次の一手${needsReview(c) ? "　⚠ 要振り返り" : ""}</span></div>
@@ -4529,7 +5151,7 @@ function storeHero(code) {
       budCard = `<div class="hcard hbig ${rate >= 100 ? "good" : "warn"}">
         <div class="hlbl">予算達成率（${latest.m}）</div>
         <div class="hval">${rate}<span class="hu">%</span></div>
-        <div class="hsub">予算 ${man(bud)} → 実績 ${man(sales)}円${y ? `・前年 ${signed(y.pct)}%` : ""}${ktSub}</div></div>`;
+        <div class="hsub">予算 ${money(bud)} → 実績 ${money(sales)}${y ? `・前年 ${signed(y.pct)}%` : ""}${ktSub}</div></div>`;
     } else {
       budCard = `<div class="hcard hbig">
         <div class="hlbl">直近売上（${latest.m}）</div>
@@ -4743,6 +5365,7 @@ function storeAnnualChart(code, year) {
     const inMonth = camps.filter(c => c.start.slice(0, 7) <= m && (c.end || c.start).slice(0, 7) >= m)
       .sort((a, b) => a.start < b.start ? -1 : 1);
     const crs = creativesForMonth(code, m);
+    if (!inMonth.length && !crs.length) return "";   // 販促もPOPも無い月はカードを出さない（縦の無駄を省く）
     const cls = (m === CURRENT_MONTH ? " now" : "") + (m > CURRENT_MONTH ? " prov" : "");
     // POP欄の空表示。これからの月（当月以降）の販促はPOP未作成＝「予定」、
     // 過ぎた月で無いものは「なし」。販促自体が無い月はプレースホルダを出さない。
@@ -4823,31 +5446,15 @@ function storeAnnualChart(code, year) {
          : "カードを<b>左右にスクロール</b>すると前後の月が両端にチラ見えします。上＝その月のPOP・制作物（押すと拡大）、下＝その月の販促（押すと詳細）。<b>◯月</b>を押すとその月の詳細（構成比・POP）へ。"}◎/△は対象区分の前年比で自動判定。</div>`
     : "";
 
-  // 年サマリ（確定分の売上合計・前年比・予算達成の平均・販促◎/△）。チャートの頭に置いて、
-  // 下までスクロールしなくても要約が分かるように。
-  const yConf = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, "0")}`)
-    .filter(m => m < CURRENT_MONTH && (DATA.monthly[code] || {})[m]);
-  let ySales = 0, yPrev = 0; const budRates = [];
-  for (const m of yConf) {
-    const sv = salesAtC(code, m); if (typeof sv !== "number") continue;
-    ySales += sv;
-    const pv = salesAtC(code, prevYearM(m)); if (typeof pv === "number") yPrev += pv;
-    const b = budgetAt(code, m); if (sv && b) budRates.push(sv / b * 100);
-  }
-  const yYoY = yPrev ? (ySales / yPrev - 1) * 100 : null;
-  const budAvg = budRates.length ? Math.round(budRates.reduce((a, b) => a + b, 0) / budRates.length) : null;
-  const cGood = camps.filter(c => { const e = storeCampEffect(c, code); return e.measured && e.pct >= 0; }).length;
-  const cWarn = camps.filter(c => { const e = storeCampEffect(c, code); return e.measured && e.pct < 0; }).length;
-  const yearSummary = `<div class="ysum">
-    <span class="ysum-i"><span class="ysl">${year}年 売上(確定)</span><b>${ySales ? man(ySales) + "円" : "―"}</b>${yYoY != null ? `<span class="${yYoY >= 0 ? "up" : "down"}">前年${signed(yYoY)}%</span>` : ""}</span>
-    ${budAvg != null ? `<span class="ysum-i"><span class="ysl">予算達成(平均)</span><b class="${budAvg >= 100 ? "up" : "down"}">${budAvg}%</b></span>` : ""}
-    <span class="ysum-i"><span class="ysl">販促の効き</span><b class="up">◎ ${cGood}</b> <b class="down">△ ${cWarn}</b></span>
-  </div>`;
-
-  return `${yearSummary}${storeYearMatrix(code, year)}
-    <div class="mmhd" style="margin-top:16px">販促 年間チャート<span class="mmhint">${pv === "gantt" ? "帯＝実施期間（横軸＝月）。帯や販促名を押すと詳細へ。" : "横スクロールで月移動（前後の月がチラ見え）。上＝POP、下＝販促。"}◎効いた/△要改善</span></div>
-    ${pvTabs}
-    ${promoBody}${legend}`;
+  // 年サマリ（売上・予算・販促◎/△）は「いまの状況」「販促一覧」と重複するため撤去。
+  // ここでは月次一覧（下の表）＋畳んだ年間チャートだけを出す。
+  return `${storeYearMatrix(code, year)}
+    <details class="chartfold" style="margin-top:14px">
+      <summary>販促 年間チャート（帯・カードで一望）を開く</summary>
+      <div class="mmhd" style="margin-top:10px">販促 年間チャート<span class="mmhint">${pv === "gantt" ? "帯＝実施期間（横軸＝月）。帯や販促名を押すと詳細へ。" : "横スクロールで月移動（前後の月がチラ見え）。上＝POP、下＝販促。"}◎効いた/△要改善</span></div>
+      ${pvTabs}
+      ${promoBody}${legend}
+    </details>`;
 }
 
 // 月次の推移を「1行＝1ヶ月」の一覧にする。年間まとめではなく、月ごとの結果（売上・前年比・
@@ -5315,6 +5922,162 @@ function storeProductSearch(code) {
   </section>`;
 }
 
+// 今年の累計（予算・実績・同期間の前年対比）＋客単価（前年・昨対）。販促アプリの店舗トップ用。
+// 確定月（当月・未来・空月は除く）だけを足す。前年比は前年の同じ月ぶんと比べる（1〜8月なら1〜8月）。
+function storeYearCumulative(code, year) {
+  const pre = String(year) + "-";
+  const ms = DATA.months.filter(m => m.startsWith(pre) && m < CURRENT_MONTH
+    && typeof salesAtC(code, m) === "number");
+  if (!ms.length) return null;
+  const prevM = m => { const [y, mo] = m.split("-"); return `${+y - 1}-${mo}`; };
+  let actual = 0, prev = 0, prevOk = true, budget = 0, bMonths = 0;
+  let curSC = 0, curCov = 0, prvSC = 0, prvCov = 0;   // 客単価用（客数のある月だけ）
+  for (const m of ms) {
+    const sVal = salesAtC(code, m) || 0; actual += sVal;
+    const b = budgetAt(code, m); if (typeof b === "number" && b) { budget += b; bMonths++; }
+    const pv = salesAtC(code, prevM(m)); if (typeof pv === "number") prev += pv; else prevOk = false;
+    const c = coversAt(code, m);
+    if (typeof c === "number" && c) {
+      curSC += sVal; curCov += c;
+      const pc = coversAt(code, prevM(m)), ps = salesAtC(code, prevM(m));
+      if (typeof pc === "number" && pc && typeof ps === "number") { prvSC += ps; prvCov += pc; }
+    }
+  }
+  const avg = curCov ? Math.round(curSC / curCov) : null;
+  const pAvg = prvCov ? Math.round(prvSC / prvCov) : null;
+  return {
+    first: ms[0], last: ms[ms.length - 1], n: ms.length,
+    actual, prev: prevOk ? prev : null,
+    pct: (prevOk && prev) ? (actual / prev - 1) * 100 : null,
+    budget: bMonths ? budget : null, bMonths,
+    budgetRate: (bMonths && budget) ? (actual / budget * 100) : null,
+    avg, prevAvg: pAvg, avgPct: (avg && pAvg) ? (avg / pAvg - 1) * 100 : null,
+  };
+}
+
+// 店舗トップの業績サマリー（累計 予算/実績/前年対比・客単価）。販促アプリなので数字は要点だけ。
+function storePromoHero(code) {
+  const year = +CURRENT_MONTH.slice(0, 4);
+  const cum = storeYearCumulative(code, year);
+  if (!cum) {
+    return `<section class="block" id="hero"><div class="bhead"><h2>${year}年 累計サマリー</h2></div>
+      <div class="panel"><div class="empty">${year}年の確定した売上がまだありません。</div></div></section>`;
+  }
+  const mlab = cum.first === cum.last ? `${+cum.first.slice(5)}月` : `${+cum.first.slice(5)}〜${+cum.last.slice(5)}月`;
+  // ひと目で分かる、やさしい言葉の判定（数字が読めなくても状況が分かるように）。
+  const verdict = (() => {
+    if (cum.budgetRate != null) {
+      if (cum.budgetRate >= 100) return { t: "順調です（目標を達成）", cls: "up" };
+      if (cum.budgetRate >= 95) return { t: "目標まであと少し", cls: "" };
+      return { t: "目標に届いていません", cls: "down" };
+    }
+    if (cum.pct != null) return cum.pct >= 0
+      ? { t: "順調です（前年より伸びています）", cls: "up" }
+      : { t: "前年を下回っています", cls: "down" };
+    return null;
+  })();
+  const budTile = cum.budget != null
+    ? `<div class="ph-tile"><div class="ph-l">目標に対して</div>
+        <div class="ph-big ${cum.budgetRate >= 100 ? "up" : "down"}">${cum.budgetRate.toFixed(0)}<span class="u">%</span></div>
+        <div class="ph-sub">目標 ${money(cum.budget)} → 実績 ${money(cum.actual)}</div></div>`
+    : `<div class="ph-tile"><div class="ph-l">売上（累計）</div>
+        <div class="ph-big">${money(cum.actual)}</div>
+        <div class="ph-sub muted">目標が未入力です</div></div>`;
+  const yoyTile = `<div class="ph-tile"><div class="ph-l">前年とくらべて</div>
+    <div class="ph-big ${cum.pct != null ? (cum.pct >= 0 ? "up" : "down") : ""}">${cum.pct != null ? signed(cum.pct) + "%" : "―"}</div>
+    <div class="ph-sub">${cum.prev != null ? `前年 ${money(cum.prev)} → 今年 ${money(cum.actual)}` : "前年データなし"}</div></div>`;
+  const ktTile = `<div class="ph-tile"><div class="ph-l">客単価（お客さん1人あたり）</div>
+    <div class="ph-big">${cum.avg != null ? yen(cum.avg) : "―"}</div>
+    <div class="ph-sub">${cum.prevAvg != null ? `前年 ${yen(cum.prevAvg)}` : "前年 ―"}${
+      cum.avgPct != null ? ` ・<span class="${cum.avgPct >= 0 ? "up" : "down"}">${signed(cum.avgPct)}%</span>` : ""}</div></div>`;
+  // 今の販促（実施中）を「いまの状況」に添える。押すとその販促の詳細（PDCA）へ。
+  const liveCamps = (DATA.campaigns || []).filter(c => c.stores.includes(code) && campStatus(c).k === "live")
+    .sort((a, b) => a.start < b.start ? -1 : 1);
+  const soonCamps = (DATA.campaigns || []).filter(c => c.stores.includes(code) && campStatus(c).k === "soon")
+    .sort((a, b) => a.start < b.start ? -1 : 1);
+  const nowChip = c => {
+    const k = kindOf(c.kind), e = storeCampEffect(c, code);
+    const eff = e.measured
+      ? `<span class="nowc-e ${e.tone}">${e.pct >= 0 ? "効果あり" : "見直し"}${e.pct != null ? " " + signed(e.pct) + "%" : ""}</span>` : "";
+    return `<button type="button" class="nowc" data-camp="${c.id}"><span class="tl-dot" style="background:${k.color}"></span>` +
+      `<span class="nowc-t">${esc(c.title)}</span>${eff}<span class="nowc-r">${shortRange(c)}</span></button>`;
+  };
+  const nowHtml = liveCamps.length
+    ? `<div class="nowpromo"><div class="nowpromo-h">今の販促（実施中 ${liveCamps.length}）</div>
+        ${liveCamps.map(nowChip).join("")}
+        ${soonCamps.length ? `<div class="nowpromo-h next">まもなく開始（${soonCamps.length}）</div>${soonCamps.slice(0, 2).map(nowChip).join("")}` : ""}</div>`
+    : soonCamps.length
+      ? `<div class="nowpromo"><div class="nowpromo-h">実施中の販促はありません。次はこちら</div>${soonCamps.slice(0, 2).map(nowChip).join("")}</div>`
+      : `<div class="nowpromo muted">いま実施中の販促はありません。</div>`;
+  return `<section class="block" id="hero">
+    <div class="bhead"><h2>${year}年 いまの状況</h2>
+      <span class="bnote">${mlab}まで（確定${cum.n}ヶ月分）</span></div>
+    <div class="panel">
+      ${verdict ? `<div class="ph-verdict ${verdict.cls}">${verdict.t}</div>` : ""}
+      <div class="ph-grid">${budTile}${yoyTile}${ktTile}</div>
+      ${nowHtml}</div>
+  </section>`;
+}
+
+// 来月のアクション：来月動く販促の準備（目標・POP）＋去年の同じ回の学びを反映。
+// 終了して振り返り未記入の「やりっぱなし」も、ここで解消を促す（去年を活かす仕組み）。
+function storeNextActions(code) {
+  const nextM = addMonth(CURRENT_MONTH, 1);
+  const monthLbl = `${+nextM.slice(5)}月`;
+  const camps = (DATA.campaigns || []).filter(c => c.stores.includes(code));
+  const startM = c => (c.start || "").slice(0, 7);
+  const endM = c => c.open_ended ? "9999-12" : (c.end || c.start || "").slice(0, 7);
+  const nextCamps = camps.filter(c => startM(c) <= nextM && endM(c) >= nextM)
+    .sort((a, b) => a.start < b.start ? -1 : 1);
+  const review = camps.filter(c => needsReview(c))
+    .sort((a, b) => (a.end || a.start) < (b.end || b.start) ? 1 : -1).slice(0, 5);
+  const canWrite = WRITE_OK;
+
+  // 動詞の「やること」チェックリスト（最初の一歩）。行を押すとその画面へ。責める言葉は使わない。
+  const items = [];
+  for (const c of nextCamps) {
+    if (goalEligible(c) && targetOf(c) == null)
+      items.push({ c, k: "goal", label: `${c.title} の目標を決める` });
+    if (!creativesForCampaign(c.id).length)
+      items.push({ c, k: "pop", label: `${c.title} の POP（店頭ポスター）を用意する` });
+  }
+  for (const c of review) items.push({ c, k: "memo", label: `${c.title} の結果を記録する（ふり返り）` });
+  const doRow = t => {
+    const attr = !canWrite ? "" : t.k === "goal" ? `data-goal="${campKey(t.c)}"`
+      : t.k === "pop" ? (CREATIVES_API_OK ? `data-upload="campaign:${t.c.id}"` : `data-camp="${t.c.id}"`)
+      : `data-memo="${campKey(t.c)}"`;
+    return `<li class="do-i" ${attr}><span class="do-c">☐</span><span class="do-t">${esc(t.label)}</span>${canWrite ? '<span class="do-go">→</span>' : ""}</li>`;
+  };
+  const doList = items.length
+    ? `<ul class="do-list">${items.map(doRow).join("")}</ul>`
+    : `<div class="do-ok">✓ 来月の準備はそろっています。いま手を動かすことはありません。</div>`;
+  // 去年の同じ販促がどうだったか（参考・畳む）。行を増やさない。
+  const learnBody = c => {
+    const prev = campPrevOccurrence(c);
+    if (!prev) return `<div class="na-m muted">去年の同じ販促の記録はありません。</div>`;
+    const e = storeCampEffect(prev, code);
+    const res = e.measured ? `<span class="cvm ${e.tone}">${e.pct >= 0 ? "効果あり" : "見直し"}${e.pct != null ? " " + signed(e.pct) + "%" : ""}</span>` : "";
+    const memo = memoOf(prev), nx = (proposalFor(prev.id) || {}).next || "";
+    if (!res && !memo && !nx) return `<div class="na-m muted">去年「${esc(prev.title)}」の記録はまだありません。</div>`;
+    return `<div class="na-learn-in"><b>去年「${esc(prev.title)}」</b> ${res}${
+      memo ? `<div class="na-m">${escBr(memo)}</div>` : ""}${
+      nx ? `<div class="na-n"><b>次はこうする</b> ${escBr(nx)}</div>` : ""}</div>`;
+  };
+  const refList = nextCamps.length
+    ? `<details class="na-ref"><summary>来月の販促 ${nextCamps.length}件と、去年どうだったか</summary>
+        <ul class="na-list">${nextCamps.map(c => `<li>
+          <div class="na-row" data-camp="${c.id}"><span class="tl-dot" style="background:${kindOf(c.kind).color}"></span>
+          <span class="na-nm">${c.title}</span><span class="tl-rg">${shortRange(c)}</span></div>
+          ${learnBody(c)}</li>`).join("")}</ul></details>`
+    : "";
+  return `<section class="block" id="actions">
+    <div class="bhead"><h2>来月（${monthLbl}）やること</h2>
+      <span class="bnote">上から順にやればOK。行を押すと、その画面へ進みます。</span>
+      ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋販促を追加</button>` : ""}</div>
+    <div class="panel">${doList}${refList}</div>
+  </section>`;
+}
+
 function renderStore(code) {
   const s = store(code);
   const months = DATA.months;
@@ -5333,7 +6096,7 @@ function renderStore(code) {
     const rate = latest.v / b * 100;
     return `<div class="kpi"><div class="lbl">予算対比（${latest.m}）</div>
         <div class="big ${rate >= 100 ? "up" : "down"}">${rate.toFixed(0)}%</div>
-        <div class="delta">予算 ${man(b)} → 実績 ${man(latest.v)}</div></div>`;
+        <div class="delta">予算 ${money(b)} → 実績 ${money(latest.v)}</div></div>`;
   })();
   // 前月比（直近確定月とその前月を比べる）
   const mom = (() => {
@@ -5443,157 +6206,65 @@ function renderStore(code) {
     const d = STATUS_ORDER[a.k] - STATUS_ORDER[b.k];   // 新しい順（実施中→予定→終了、各内は日付降順）
     return d !== 0 ? d : (a.c.start < b.c.start ? 1 : -1);
   });
-  const pTab = (val, label) =>
-    `<button class="ptab${val === PROMO_FILTER ? " on" : ""}" data-pfilter="${val}">${label}</button>`;
-  const pSort = (val, label) =>
-    `<button class="ptab${val === PROMO_SORT ? " on" : ""}" data-psort="${val}">${label}</button>`;
-  const promoSummary = `<div class="psum">
-    <span class="psum-i"><b class="up">◎ ${nGood}</b> 効いた</span>
-    <span class="psum-i"><b class="down">△ ${nWarn}</b> 要改善</span>
-    ${nWait ? `<span class="psum-i muted">確定待ち ${nWait}</span>` : ""}
-    ${nSoon ? `<span class="psum-i muted">予定 ${nSoon}</span>` : ""}
-    ${nNoBasis ? `<span class="psum-i muted">測り方未設定 ${nNoBasis}</span>` : ""}
-  </div>`;
-  const promoControls = `<div class="pctrl">
-    <div class="ptabs">${pTab("all", "すべて")}${pTab("live", "実施中")}${pTab("done", "終了")}</div>
-    <div class="ptabs"><span class="pctrl-l">並べ替え</span>${pSort("effect", "効果順")}${pSort("recent", "新しい順")}</div>
-  </div>
-  <div class="pterm">◎効いた=対象区分が前年同月より増／△要改善=減。<b>昨対比</b>=前年の同じ月と比較。<b>前回比</b>=前回の同じ枠と比較。</div>`;
+  // 販促一覧（縮小・1行）。行を押すとその販促の詳細（PDCA）へ。結果は測れた時だけ。
+  const effSummary = (nGood || nWarn || nWait)
+    ? `<div class="psum">今年：<b class="up">◎効いた ${nGood}</b>・<b class="down">△要改善 ${nWarn}</b>${nWait ? `<span class="muted">・集計中 ${nWait}</span>` : ""}</div>`
+    : "";
   const promoBlock = !myCamps.length
-    ? `<div class="empty">この店の施策はまだ登録されていません。config/schedule.yaml に追記すると、ここと上の売上グラフに並びます。</div>`
+    ? `<div class="empty">この店の販促はまだ登録されていません。${(PLANS_API_OK && WRITE_OK) ? "「＋起票」から追加できます。" : ""}</div>`
     : !sorted.length
-      ? `<div class="empty">この条件に当てはまる販促はありません。上のタブを「すべて」に戻してください。</div>`
-    : `<ul class="clist">${sorted.map(({ c, e }) => {
-        const k = kindOf(c.kind);
-        const range = campRange(c);
-        const st = campStatus(c);
-        const vmark = e.mark
-          ? `<span class="cvm ${e.tone}" title="対象区分の前年比 ${signed(e.pct)}%">${e.mark} ${e.text}${e.pct != null ? " " + signed(e.pct) + "%" : ""}</span>`
-          : `<span class="cvm wait">${e.state}</span>`;
-        // この店ぶんの主指標（その施策が効く部門・商品）。店全体の売上を出すと、
-        // 同じ店に重なっている施策が全部そろって同じ数字になる（1728 は6件重なる）。
-        const tgt1 = campTargeted(c, code);
-        const eff = campEffect(code, c);
-        let effHtml = "";
-        if (tgt1) {
-          // 昨対%は上のバッジ（◎/△ +X%）に集約したので、ここでは実績金額と前年金額だけ。
-          // このリストは「前回の同じ販促と比べてどうだったか＋目標・POP・メモ」を担当する。
-          const prevTxt = tgt1.prev != null ? `<span class="sub">（前年 ${man(tgt1.prev)}円）</span>` : "";
-          effHtml = `<div class="ceff">${esc(tgt1.label)}（確定${tgt1.months}ヶ月）<b>${man(tgt1.cur)}円</b>${prevTxt}</div>`;
-          // 前回比（同じ枠の前回の回と、この店ぶんで比べる）。一覧でも一目で分かるように。
-          const prevOcc = campPrevOccurrence(c);
-          if (tgt1.cur && prevOcc) {
-            const pb = campTargeted(prevOcc, code);
-            if (pb && pb.cur) {
-              const d = (tgt1.cur / pb.cur - 1) * 100;
-              effHtml += `<div class="ceff sub2">前回比 <span class="${d >= 0 ? "up" : "down"}">${signed(d)}%</span><span class="sub">（前回 ${esc(prevOcc.title)}｜${man(pb.cur)}→${man(tgt1.cur)}円）</span></div>`;
-            }
-          }
-        } else if (!campBasis(c)) {
-          effHtml = `<div class="ceff muted">この販促を何で測るか未設定 — 対象の部門（例: コース）か商品名を決めると数字が出ます</div>`;
-        }
-        if (eff && METRIC !== "sales") {
-          effHtml += `<div class="ceff sub2">店全体の${METRIC_LABELS[METRIC]} ${man(eff.cur)}円<span class="sub">（${esc(overlapNote(c))}）</span></div>`;
-        }
-        if (eff) {
-          // 集客（客数）の効果。売上表示のときだけ、同じ期間の客数を前年比・前月比で添える
-          if (METRIC === "sales") {
-            const cov = campCovers(code, c);
-            if (cov) {
-              const cy = cov.pct != null
-                ? `<span class="${cov.pct >= 0 ? "up" : "down"}">前年比 ${signed(cov.pct)}%</span>` : "前年 ―";
-              const cmom = cov.momPct != null
-                ? `・<span class="${cov.momPct >= 0 ? "up" : "down"}">前月比 ${signed(cov.momPct)}%</span>` : "";
-              effHtml += `<div class="ceff sub2">期間中の集客 <b>${nin(cov.cur)}</b>・${cy}${cmom}</div>`;
-            }
-          }
-        } else if (st.k !== "soon" && !isRatioMetric(METRIC)) {
-          effHtml = `<div class="ceff muted">確定した月の売上が出たら、前年同月比を表示します（月単位で集計）。</div>`;
-        }
-        // 目標対比（アプリ内で入力した目標／schedule.yaml の目標）
-        const tgt = targetOf(c);
-        let goalHtml = "";   // 目標対象外の販促では空（旧: undefined が文字列で出ていた）
-        if (tgt != null) {
-          // 目標は施策ぜんぶに対して立てたもの。店1軒の数字で割らない。
-          const gr1 = campGoalRate(c);
-          const actual = gr1 ? gr1.cur : null;
-          const rate = gr1 ? gr1.rate : null;
-          const prog = rate != null
-            ? ` ・ 実績(確定) ${man(actual)}円 ・ <span class="${rate >= 100 ? "up" : "down"}">達成 ${rate.toFixed(0)}%</span>`
-            : ` ・ <span class="sub">実績は確定月が出てから</span>`;
-          goalHtml = `<div class="cgoal">目標 <b>${man(tgt)}円</b>${prog} <button class="goalbtn" data-goal="${campKey(c)}" title="目標を編集">✎</button></div>`;
-        } else if (goalEligible(c)) {
-          goalHtml = `<div class="cgoal muted"><button class="goalbtn add" data-goal="${campKey(c)}">＋ 目標を入力</button></div>`;
-        }
-        // 要因メモ（アプリ内で入力・共有）。終了して未記入なら「振り返り未記入」を強調（PDCAのCheck）。
-        const memo = memoOf(c);
-        const memoHtml = memo
-          ? `<div class="cmemo">${escBr(memo)} <button class="goalbtn" data-memo="${campKey(c)}" title="メモを編集">✎</button></div>`
-          : (needsReview(c)
-            ? `<div class="cmemo warn"><button class="goalbtn add" data-memo="${campKey(c)}">⚠ 振り返り未記入 — ＋要因メモを書く</button></div>`
-            : `<div class="cmemo muted"><button class="goalbtn add" data-memo="${campKey(c)}">＋ 要因メモ</button></div>`);
-        // 前回（同じ枠の前回の回）の学び＝要因メモ＋次回提案を、今回のカードに引き継ぎ表示。
-        // 「去年こうだったから今年こうする」を、企画時に必ず目に入れる（PDCAのAct→次のPlan）。
-        const prevOcc2 = campPrevOccurrence(c);
-        let prevLearnHtml = "";
-        if (prevOcc2) {
-          const pMemo = memoOf(prevOcc2);
-          const pProp = proposalFor(prevOcc2.id);
-          const pNext = pProp && pProp.next ? pProp.next : "";
-          if (pMemo || pNext) {
-            prevLearnHtml = `<div class="cprev"><span class="cprev-l">前回「${esc(prevOcc2.title)}」の学び</span>${
-              pMemo ? `<div class="cprev-m">${escBr(pMemo)}</div>` : ""}${
-              pNext ? `<div class="cprev-n"><b>次回提案</b> ${escBr(pNext)}</div>` : ""}</div>`;
-          }
-        }
-        // 出したPOP・資料を結果のとなりに。押すと小窓でプレビュー。未登録は実施中/予定だけ促す。
-        const crs = creativesForCampaign(c.id);
-        const addPop = (CREATIVES_API_OK && WRITE_OK) ? ` <button class="upbtn sm" data-upload="campaign:${c.id}">＋追加</button>` : "";
-        const popHtml = crs.length
-          ? `<div class="cpop"><span class="cpop-l">POP・資料 ${crs.length}</span><div class="cgrid mini">${crs.map(creativeCard).join("")}</div></div>`
-          : (st.k !== "done" ? `<div class="cpop muted">POP未登録${addPop}</div>` : "");
-        return `<li data-camp="${c.id}">
-          <span class="kchip" style="--kc:${k.color}">${k.label}</span>
-          <div class="cbody">
-            <div class="ctitle">${c.title}${c.planned ? '<span class="plbadge">計画</span>' : ""}${c.scope_all ? '<span class="tagx">全店</span>' : ""}<span class="cvm-wrap">${vmark}</span>${statusControl(c, st.label, st.k)}</div>
-            ${c.note ? `<div class="cnote">${c.note}</div>` : ""}
-            ${c.planned && c.plan_note ? `<div class="cnote">${escBr(c.plan_note)}</div>` : ""}
-            ${c.planned && c.plan_goal ? `<div class="ceff">目標 <b>${man(c.plan_goal)}円</b><span class="sub">（計画）</span></div>` : ""}
-            ${effHtml}
-            ${popHtml}
-            ${campHeadline(c)}
-            ${goalHtml}
-            ${memoHtml}
-            ${prevLearnHtml}
-            ${(PLANS_API_OK && WRITE_OK) ? `<div class="pactions">${c.planned
-              ? `<button class="plbtn" data-planedit="${c.id}">✎ 編集</button>`
-              : `<button class="plbtn" data-plandup="${c.id}">⧉ 複製して起票</button>`}</div>` : ""}
-            <div class="cgo">詳細を確認 →</div>
-          </div>
-          <span class="crange">${range}</span>
-        </li>`;
+      ? `<div class="empty">この条件に当てはまる販促はありません。</div>`
+    : `<ul class="clist compact">${sorted.map(({ c, e }) => {
+        const k = kindOf(c.kind), st = campStatus(c);
+        const vmark = e.measured
+          ? `<span class="cvm ${e.tone}">${e.mark} ${e.text}${e.pct != null ? " " + signed(e.pct) + "%" : ""}</span>`
+          : "";
+        return `<li class="crow" data-camp="${c.id}">
+          <span class="tl-dot" style="background:${k.color}" title="${esc(k.label)}"></span>
+          <span class="crow-nm">${c.title}${c.planned ? '<span class="plbadge">計画</span>' : ""}</span>
+          ${vmark}<span class="cstat ${st.k}">${st.label}</span>
+          <span class="crow-rg">${shortRange(c)}</span></li>`;
       }).join("")}</ul>`;
 
-  // 各セクションを先に組んでおき、実在するものだけをジャンプナビに載せる。
-  const heroHtml = storeHero(code);
+  // 店舗トップ：既定は「いまの状況＋やること」だけ。販促一覧から下（詳細な販促一覧・
+  // チャート・基礎データ）は畳んでボタンで開く。中身は簡素化前のフル表示に戻す。
+  const summaryHtml = storePromoHero(code);
+  const actionsHtml = storeNextActions(code);
   const annualHtml = storeAnnual(code);
   const enginesHtml = storeEngines(code);
-  // ページが縦に長いので、上部に「どこへでも飛べる」固定ナビを置く（誰が触っても迷わない）。
+  const heroHtml = storeHero(code);
   const shareHtml = storeShareCard(code);
   const prodSearchHtml = storeProductSearch(code);
   const navItems = [
-    ["hero", "今の状況"],
-    shareHtml ? ["share", "共有"] : null,
-    annualHtml ? ["annual", "年間"] : null,
-    enginesHtml ? ["engines", "販促エンジン"] : null,
-    myCamps.length ? ["promos", "販促リスト"] : null,
-    myCreativesBlock ? ["creatives", "制作物"] : null,
-    prodSearchHtml ? ["prodsearch", "商品検索"] : null,
-    ["basics", "基礎データ"],
+    ["hero", "いまの状況"],
+    ["actions", "やること"],
+    annualHtml ? ["annual", "スケジュール"] : null,
+    myCamps.length ? ["promos", "販促一覧"] : null,
+    ["basics", "もっと見る"],
   ].filter(Boolean);
   const storeNav = `<nav class="snav" aria-label="店内ジャンプ">
     ${navItems.map(([id, label]) => `<button class="snavb" data-jump="${id}">${label}</button>`).join("")}
   </nav>`;
+
+  // 販促一覧（縮小・1行）。押すとその販促の詳細（PDCA）へ。既定表示（畳まない）。
+  // 行の左の色ドットは「販促の種類」。凡例を一覧の頭に出して、色だけで迷わせない。
+  const kindsPresent = [...new Set(myCamps.map(c => c.kind))];
+  const kindLegend = kindsPresent.length
+    ? `<div class="klegend">${kindsPresent.map(k =>
+        `<span class="kleg"><span class="tl-dot" style="background:${kindOf(k).color}"></span>${esc(kindOf(k).label)}</span>`).join("")}</div>`
+    : "";
+  // 「今の販促」は上の いまの状況 に出すので、全件の一覧は畳んでボタンで開く（縮小表示）。
+  const promoList = `<details class="opendet" id="promos">
+    <summary class="openbtn"><span class="openbtn-t">販促一覧（${myCamps.length}件）を見る</span></summary>
+    <section class="block">
+      <div class="bhead"><h2>販促一覧</h2>
+        <span class="bnote">実施中→予定→終了の順。行を押すと、その販促の詳細（PDCA）へ。</span>
+        ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋販促を追加</button>` : ""}</div>
+      ${effSummary}
+      ${kindLegend}
+      ${promoBlock}
+    </section>
+  </details>`;
 
   return `
     <div class="crumbs"><button class="linkbtn" data-view="schedule">← 全店スケジュール</button></div>
@@ -5603,21 +6274,17 @@ function renderStore(code) {
       ${homeBtnRow}
     </section>
     ${storeNav}
-    ${heroHtml}
-    ${shareHtml}
+    ${summaryHtml}
+    ${actionsHtml}
     ${annualHtml}
-    ${enginesHtml}
-    <section class="block" id="promos">
-      <div class="bhead"><h2>この店の販促（個別のPDCA）</h2>
-        <span class="bnote">${myCamps.length}件・各販促の効果◎/△・前回比・目標・POP・メモ。効いた/要改善で並べ替え。通年トレンドは上の「販促エンジン」で。</span>
-        ${(PLANS_API_OK && WRITE_OK) ? `<button class="plannew" data-plannew="${esc(code)}">＋ 販促を起票</button>` : ""}</div>
-      ${myCamps.length ? promoSummary + promoControls : ""}
-      ${promoBlock}
-    </section>
-    ${myCreativesBlock}
-    ${prodSearchHtml}
-    <details class="moredet" id="basics">
-      <summary>店の基礎データを見る（売上推移・部門・商品・時間帯・近隣）</summary>
+    ${promoList}
+    <details class="opendet" id="basics">
+      <summary class="openbtn"><span class="openbtn-t">もっと見る（売上推移・部門・商品・時間帯・近隣など）</span></summary>
+      ${heroHtml}
+      ${shareHtml}
+      ${enginesHtml}
+      ${myCreativesBlock}
+      ${prodSearchHtml}
       <section class="block">${kpis}${storeTargetChip(code)}</section>
       ${renderProfitability(code)}
       <section class="block">
