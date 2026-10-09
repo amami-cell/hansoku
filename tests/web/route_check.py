@@ -38,6 +38,25 @@ def ok(name, cond, got=""):
 with sync_playwright() as pw:
     b = pw.chromium.launch(executable_path=CHROME)
     ctx = b.new_context(viewport={"width":390,"height":844})
+    # 画面は CURRENT_MONTH を new Date() から決める。実時間に左右されないよう
+    # ブラウザの「現在時刻」を 2026-09-06 に固定する（fixture の最新データ月＝
+    # 2026-08 が「直近確定月」になる日付）。引数なし new Date()／Date.now() だけ
+    # 固定し、日付指定の new Date(x) は本物のまま。これが無いと暦が進むたびに
+    # 店舗詳細の先頭サマリ（月の売上・期間合計の畳み）が空になりテストが落ちる。
+    ctx.add_init_script(
+        """
+        (() => {
+          const FIXED = new Date('2026-09-06T00:00:00').getTime();
+          const _Date = Date;
+          const D = new Proxy(_Date, {
+            construct(t, a) { return a.length ? new t(...a) : new t(FIXED); },
+            apply(t, _th, a) { return a.length ? t(...a) : new t(FIXED).toString(); }
+          });
+          D.now = () => FIXED;
+          window.Date = D;
+        })();
+        """
+    )
     pg = ctx.new_page()
     pg.goto(BASE, wait_until="networkidle"); pg.wait_for_timeout(600)
 
@@ -51,7 +70,7 @@ with sync_playwright() as pw:
     print("戻るボタンが効く")
     pg.go_back(); pg.wait_for_timeout(400)
     ok("戻ると店舗詳細へ", pg.evaluate("() => VIEW.kind") == "store", pg.evaluate("()=>VIEW.kind"))
-    ok("画面も店舗詳細", "この店の販促" in pg.content())
+    ok("画面も店舗詳細", "いまの状況" in pg.content())
     pg.go_back(); pg.wait_for_timeout(400)
     ok("もう一度戻ると全店", pg.evaluate("() => VIEW.kind") == "schedule", pg.evaluate("()=>VIEW.kind"))
     pg.go_forward(); pg.wait_for_timeout(400)
@@ -82,15 +101,20 @@ with sync_playwright() as pw:
     # 「販促を最初の1画面に」は今の画面では満たしていない（店舗ページの
     # 「この店の販促」は 390px 幅で 1707px の位置）。**基準だけ実態に合わせて
     # 緑にすると、検査の名前と中身が食い違う**ので、やるなら画面を直すこと。
+    # 店舗詳細トップは「いまの状況＋やること」を先頭に出し、細かい数字（売上推移・
+    # 部門・商品・時間帯・近隣＝期間合計のKPI含む）は『もっと見る』(details#basics)に畳む。
+    # ※以前の .moredet / 「月の売上」マークアップは店舗ページ刷新で廃止済み。
     print("店舗詳細の先頭サマリ（店長が5秒で見るもの）")
     pg4 = ctx.new_page()
     pg4.goto(BASE + "#/store/1006", wait_until="networkidle"); pg4.wait_for_timeout(700)
     html = pg4.content()
-    ok("直近確定月の数字が先頭にある", "月の売上" in html)
+    ok("先頭サマリ『いまの状況』に数字が出る",
+       ("いまの状況" in html) and ("前年とくらべて" in html))
     ok("当月がまだ出ない理由を書いている", "締め後" in html)
-    ok("細かい数字は畳んである", pg4.evaluate("() => !!document.querySelector('.moredet')"))
+    ok("細かい数字は畳んである（もっと見る）",
+       pg4.evaluate("() => !!document.querySelector('details#basics .openbtn')"))
     ok("畳んだ中に期間合計がある",
-       pg4.evaluate("""() => { const d = document.querySelector('.moredet');
+       pg4.evaluate("""() => { const d = document.querySelector('details#basics');
          return !!d && d.textContent.includes('期間合計'); }"""))
     # 施策の行から施策詳細へ飛べるか（押せる見た目なら押せること）。
     #
