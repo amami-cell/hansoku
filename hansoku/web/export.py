@@ -991,6 +991,16 @@ def _build_abc_by_month(
                 synth, _unm = _departments_from_products(items, product_depts[code])
                 if synth:
                     departments_monthly.setdefault(code, {})[m] = _assemble_departments(synth)
+            # 部門方式の店で、商品にFW由来の部門タグ(group)が無い場合でも、分析用コードCSVの
+            # 『商品→部門』があれば group に載せる（区分→商品のドリル用）。FWが部門グリッドを
+            # 出さない店（dept_fill_from_products 系）でも、コードが入っている商品は明細が出せる。
+            # 既に group がある商品（FWのメニュー見出し由来）は上書きしない。
+            if rules and rules.get("classify_by") == "department":
+                pdep = (product_depts or {}).get(code) or {}
+                if pdep:
+                    for p in items:
+                        if not p.get("group") and pdep.get(p["name"]):
+                            p["group"] = pdep[p["name"]]
             # 品目区分（店ごとのルールがある店だけ）。全商品で束ねてから売れ筋を切る。
             if rules:
                 if rules.get("classify_by") == "department":

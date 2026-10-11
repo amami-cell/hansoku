@@ -100,6 +100,41 @@ def test_点数行のFW区分見出しが商品のgroupに焼かれる():
     assert kara.get("rank") == "A"            # ランクは売上行から維持
 
 
+def test_FW部門が無い店は分析用コードCSVの部門を商品のgroupに載せる():
+    """FWが部門グリッドを出さない店（dept_fill_from_products 系）でも、分析用コードCSVの
+    『商品→部門』があれば商品に group が付き、区分→商品でドリルできる。"""
+    d08 = date(2026, 8, 15)
+    rows = {
+        # 実FW部門は無い（部門グリッドが出ない店）。
+        _ex.METRIC_PRODUCT_SALES: [
+            {"store_code": "9003", "date": d08, "product_name": "フカヒレ春巻き",
+             "product_category": "A", "value": 20000.0},
+        ],
+        _ex.METRIC_PRODUCT_QTY: [
+            # 点数行の product_category はランク（FWは部門見出しを出さない）。
+            {"store_code": "9003", "date": d08, "product_name": "フカヒレ春巻き",
+             "product_category": "A", "value": 60.0},
+        ],
+    }
+
+    class FakeWH:
+        def aggregate(self, q):
+            return list(rows.get(q.metrics[0], []))
+
+    class FakeMaster:
+        active_codes = ["9003"]
+
+    cats = {"9003": {"name": "T", "other": "その他", "classify_by": "department",
+                     "dept_as_category": True, "dept_fill_from_products": True,
+                     "dept_other": []}}
+    pdepts = {"9003": {"フカヒレ春巻き": "05:前菜"}}
+    _dm, pm, _cm = _ex._build_abc_by_month(
+        FakeWH(), FakeMaster(), date(2026, 1, 1), date(2026, 12, 31), cats, pdepts
+    )
+    p = next(x for x in pm["9003"]["2026-08"] if x["name"] == "フカヒレ春巻き")
+    assert p.get("group") == "05:前菜"   # 分析用コードCSVの部門が group に載る
+
+
 # 0円サブ（選択メニュー内訳）を親メイン商品の下に畳む変換。zero_groups のある店だけ効く。
 ZERO_RULES = {
     "other": "その他",
