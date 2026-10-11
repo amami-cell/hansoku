@@ -58,6 +58,48 @@ def test_dept_fill_from_products_実部門が無い月だけ商品再構成で�
     assert any("フード" in n for n in jul), jul          # 7月は商品→部門で補完される
 
 
+def test_点数行のFW区分見出しが商品のgroupに焼かれる():
+    """部門方式(dept_as_category)の店で、点数行の product_category に FW区分見出し
+    ("NN:部門名") が載っていれば、products_monthly の商品に group が付く
+    （画面で「区分→商品」ドリルするための所属部門タグ）。売上行のランクは維持。"""
+    d08 = date(2026, 8, 15)
+    rows = {
+        _ex.METRIC_DEPT_SALES: [
+            {"store_code": "9002", "date": d08, "product_name": "10:唐揚げ",
+             "product_category": "25.0", "value": 50000.0},
+        ],
+        _ex.METRIC_DEPT_QTY: [
+            {"store_code": "9002", "date": d08, "product_name": "10:唐揚げ", "value": 120.0},
+        ],
+        _ex.METRIC_PRODUCT_SALES: [
+            {"store_code": "9002", "date": d08, "product_name": "特製唐揚げ",
+             "product_category": "A", "value": 30000.0},
+        ],
+        _ex.METRIC_PRODUCT_QTY: [
+            # 点数行の product_category = FW区分見出し（"NN:部門名"）。
+            {"store_code": "9002", "date": d08, "product_name": "特製唐揚げ",
+             "product_category": "10:唐揚げ", "value": 80.0},
+        ],
+    }
+
+    class FakeWH:
+        def aggregate(self, q):
+            return list(rows.get(q.metrics[0], []))
+
+    class FakeMaster:
+        active_codes = ["9002"]
+
+    cats = {"9002": {"name": "T", "other": "その他", "classify_by": "department",
+                     "dept_as_category": True, "dept_other": []}}
+    _dm, pm, _cm = _ex._build_abc_by_month(
+        FakeWH(), FakeMaster(), date(2026, 1, 1), date(2026, 12, 31), cats, {}
+    )
+    prods = pm["9002"]["2026-08"]
+    kara = next(p for p in prods if p["name"] == "特製唐揚げ")
+    assert kara.get("group") == "10:唐揚げ"   # 所属部門タグが付く（ドリル用）
+    assert kara.get("rank") == "A"            # ランクは売上行から維持
+
+
 # 0円サブ（選択メニュー内訳）を親メイン商品の下に畳む変換。zero_groups のある店だけ効く。
 ZERO_RULES = {
     "other": "その他",

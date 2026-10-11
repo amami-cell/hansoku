@@ -2889,6 +2889,31 @@ def ingest_abc_store(
             if prod_total and not dup_p:
                 seen_totals[("prod", prod_total)] = month
             mark = " ⚠同額" if (dup or dup_p) else ""
+            # 売れ筋（全商品）の点数行にも『所属部門（FW区分見出し "NN:名前"）』を載せる。
+            # メニュー分類で各商品の所属部門が取れているので、点数行の product_category を
+            # ランク→部門見出しへ差し替える（売上行のランクは据え置き＝ランク表示は維持）。
+            # これで部門方式の店でも「区分→商品」でドリルできる（Largo と同じ見せ方）。
+            # 部門が取れなかった商品は従来どおりランクのまま（＝部門行にフォールバック）。
+            grp_by_name: dict[str, str] = {}
+            for p in menu_rows:
+                g = (p.get("group") or "")[:60]
+                if g:
+                    grp_by_name.setdefault(p["name"][:80], g)
+            if grp_by_name:
+                import dataclasses as _dc
+                tagged = 0
+                for i2, r in enumerate(collected):
+                    if (
+                        r.metric == METRIC_PRODUCT_QTY
+                        and r.product_name in grp_by_name
+                        and r.product_category != grp_by_name[r.product_name]
+                    ):
+                        collected[i2] = _dc.replace(
+                            r, product_category=grp_by_name[r.product_name]
+                        )
+                        tagged += 1
+                if tagged:
+                    print(f"[ABC店] {code} {month} 点数行に部門見出しを付与 {tagged}件")
             _flush(month)
             print(
                 f"[ABC店] {code} {month} [{used_level}] 商品{len(products)}品→{n_prod}行"
