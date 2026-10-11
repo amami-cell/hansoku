@@ -45,6 +45,10 @@ from ..model import (
 PRODUCTS_TOP_N = 12
 # 月次シリーズ（施策・品目区分ドリル用）は、区分内の商品を辿れるよう多めに持つ。
 MONTHLY_PRODUCTS_N = 60
+# top-N を超えて残す商品（部門タグ付き／0円内訳）の上限。部門方式では全商品にgroupが
+# 付くため無制限だとペイロードが Cloudflare の資産上限(25MiB)を超える。売上→点数順で上位
+# だけ残す（実売れ商品が先に残る）。区分の売上合計は全件で算出済みなので絞っても不変。
+MONTHLY_EXTRA_CAP = 120
 from ..settings import ROOT
 from ..stores import StoreMaster
 
@@ -1012,15 +1016,23 @@ def _build_abc_by_month(
                     cats = _categories_for_month(items, rules, total)
                 if cats:
                     categories_monthly.setdefault(code, {})[m] = cats
-            # 売れ筋 top-N に加え、内訳（FW区分見出し付き＝選択商品）・内訳を畳んだ親
-            # （subs 持ち）・売価0円だが点数のある商品は必ず残す。内訳は点数が本体なので
-            # top-N から切れても消さない。
+            # 売れ筋 top-N に加え、区分→商品ドリル／内訳の表示に要る商品を残す。
+            #  - 内訳を畳んだ親(subs 持ち) … 常に（Largo等の入れ子表示に必要）
+            #  - 所属部門(group)付き、または売価0円だが点数のある内訳 … ドリル用
+            # ただし部門方式では全商品にgroupが付くため、0円内訳（コース内訳の選択等）まで
+            # 全部残すとペイロードが Cloudflare の資産上限(25MiB)を超える。売上→点数の順で
+            # 上位 MONTHLY_EXTRA_CAP までに絞る（区分の売上合計は上の items 全件で算出済みなので
+            # 絞っても合計は不変。実売れ商品が先に残り、0円内訳の長い裾だけが落ちる）。
             keep = items[:MONTHLY_PRODUCTS_N]
             kept = {id(p) for p in keep}
-            extra = [p for p in items[MONTHLY_PRODUCTS_N:]
-                     if id(p) not in kept
-                     and (p.get("group") or p.get("subs")
-                          or (not p.get("sales") and p.get("qty")))]
+            rest = [p for p in items[MONTHLY_PRODUCTS_N:] if id(p) not in kept]
+            subs_parents = [p for p in rest if p.get("subs")]
+            drill = [p for p in rest
+                     if not p.get("subs")
+                     and (p.get("group") or (not p.get("sales") and p.get("qty")))]
+            drill.sort(key=lambda p: ((p.get("sales") or 0), (p.get("qty") or 0)), reverse=True)
+            room = max(0, MONTHLY_EXTRA_CAP - len(subs_parents))
+            extra = subs_parents + drill[:room]
             products_monthly.setdefault(code, {})[m] = keep + extra
     return departments_monthly, products_monthly, categories_monthly
 
