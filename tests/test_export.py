@@ -135,6 +135,44 @@ def test_FW部門が無い店は分析用コードCSVの部門を商品のgroup�
     assert p.get("group") == "05:前菜"   # 分析用コードCSVの部門が group に載る
 
 
+def test_月次商品は上限で絞られ実売れが優先的に残る():
+    """部門方式では全商品に group が付くため、0円内訳まで無制限に残すと
+    ペイロードが肥大する。MONTHLY_EXTRA_CAP で上限を掛け、売上のある商品を優先的に残す。"""
+    d08 = date(2026, 8, 15)
+    cap = _ex.MONTHLY_EXTRA_CAP
+    n = _ex.MONTHLY_PRODUCTS_N
+    # 実売れ(売上あり)を n+5件、0円内訳(点数のみ)を cap+100件 作る。
+    psales, pqty = [], []
+    for i in range(n + 5):
+        psales.append({"store_code": "9004", "date": d08, "product_name": f"売れ筋{i}",
+                       "product_category": "A", "value": float(100000 - i)})
+        pqty.append({"store_code": "9004", "date": d08, "product_name": f"売れ筋{i}",
+                     "product_category": "10:主菜", "value": 10.0})
+    for j in range(cap + 100):
+        pqty.append({"store_code": "9004", "date": d08, "product_name": f"内訳{j}",
+                     "product_category": "10:主菜", "value": 1.0})  # 0円・点数のみ
+    rows = {_ex.METRIC_PRODUCT_SALES: psales, _ex.METRIC_PRODUCT_QTY: pqty}
+
+    class FakeWH:
+        def aggregate(self, q):
+            return list(rows.get(q.metrics[0], []))
+
+    class FakeMaster:
+        active_codes = ["9004"]
+
+    cats = {"9004": {"name": "T", "other": "その他", "classify_by": "department",
+                     "dept_as_category": True, "dept_other": []}}
+    _dm, pm, _cm = _ex._build_abc_by_month(
+        FakeWH(), FakeMaster(), date(2026, 1, 1), date(2026, 12, 31), cats, {}
+    )
+    prods = pm["9004"]["2026-08"]
+    assert len(prods) <= n + cap                 # 上限が効いている
+    names = {p["name"] for p in prods}
+    # 実売れ商品はすべて残る（0円内訳の裾だけが落ちる）。
+    for i in range(n + 5):
+        assert f"売れ筋{i}" in names
+
+
 # 0円サブ（選択メニュー内訳）を親メイン商品の下に畳む変換。zero_groups のある店だけ効く。
 ZERO_RULES = {
     "other": "その他",
