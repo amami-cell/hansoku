@@ -828,6 +828,55 @@ test("prodsInCat: その区分の商品だけを返す", () => {
   assert.equal(ps, ["マンゴーのパフェスノー", "メロンのパフェスノー"].sort().join("|"));
 });
 
+// 部門方式(dept_as_category)の店：商品に部門タグ(group)が付けば「区分→商品」でドリル。
+const deptStore = {
+  stores: [{ code: "1097", name: "ARATA" }],
+  campaigns: [], budget: {}, monthly: {},
+  store_categories: { 1097: { name: "ARATA", other: "その他", classify_by: "department", dept_as_category: true } },
+  departments_monthly: { 1097: {
+    "2026-08": { total_sales: 80000, buckets: [], raw: [
+      { name: "10:唐揚げ", sales: 50000, qty: 120 },
+      { name: "20:刺身",   sales: 30000, qty: 60 },
+    ] },
+    // 旧データ：部門rawはあるが商品にgroupが無い月
+    "2026-07": { total_sales: 40000, buckets: [], raw: [
+      { name: "10:唐揚げ", sales: 40000, qty: 100 },
+    ] },
+  } },
+  products_monthly: { 1097: {
+    "2026-08": [
+      { name: "特製唐揚げ", sales: 30000, qty: 80, rank: "A", group: "10:唐揚げ" },
+      { name: "手羽先",     sales: 12000, qty: 40, rank: "B", group: "10:唐揚げ" },
+      { name: "刺身盛合せ", sales: 28000, qty: 55, rank: "A", group: "20:刺身" },
+    ],
+    "2026-07": [
+      { name: "特製唐揚げ", sales: 40000, qty: 100, rank: "A" },   // group 無し（旧データ）
+    ],
+  } },
+  categories_monthly: { 1097: {
+    "2026-08": [
+      { name: "唐揚げ", sales: 50000, qty: 120, count: 1, share: 0.625 },
+      { name: "刺身",   sales: 30000, qty: 60,  count: 1, share: 0.375 },
+    ],
+  } },
+};
+
+test("prodsInCat: 部門方式でも group 付きの月は区分の商品を返す（Largoと同じドリル）", () => {
+  const ctx = loadApp(deptStore);
+  const ps = call(ctx, `prodsInCat("1097","2026-08","唐揚げ").map(p=>p.name).sort().join("|")`);
+  assert.equal(ps, ["手羽先", "特製唐揚げ"].sort().join("|"));
+  const dept = call(ctx, `prodsInCat("1097","2026-08","唐揚げ").every(p=>!p.dept)`);
+  assert.ok(dept, "商品行（dept フラグ無し）で返る");
+});
+
+test("prodsInCat: 部門方式で group 無しの月は部門の合計行にフォールバックする", () => {
+  const ctx = loadApp(deptStore);
+  const rows = call(ctx, `prodsInCat("1097","2026-07","唐揚げ")`);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, "唐揚げ");  // 部門行
+  assert.ok(rows[0].dept, "dept フラグ付きの部門行");
+});
+
 test("bucketOrCatAtM: 部門で引けなければ区分で引く（qtyは出数でないのでnull）", () => {
   const ctx = loadApp(luqa);
   const b = call(ctx, `bucketOrCatAtM("1160","2026-08","パフェ")`);

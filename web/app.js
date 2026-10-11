@@ -3054,7 +3054,13 @@ function deptsInCat(code, m, cat) {
 }
 const prodsInCat = (code, m, cat) => {
   const r = catRules(code);
-  if (r && r.classify_by === "department") return deptsInCat(code, m, cat);
+  if (r && r.classify_by === "department") {
+    // 商品に部門タグ(group="NN:部門名")が付いた月は「区分→商品」でドリル（Largoと同じ）。
+    // 取込で部門見出しを点数行に焼いた月はこれが出る。付かない月（旧データ）は
+    // 従来どおり部門の合計行を見せる（フォールバック）。
+    const ps = prodsAtM(code, m).filter(p => p.group && classifyCat(p.name, code, p.group) === cat);
+    return ps.length ? ps : deptsInCat(code, m, cat);
+  }
   return prodsAtM(code, m).filter(p => classifyCat(p.name, code, p.group) === cat);
 };
 
