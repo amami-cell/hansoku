@@ -1706,9 +1706,11 @@ function render() {
     }));
   app.querySelectorAll("[data-crurl]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); openCreativePreview(el.dataset.crurl, el.dataset.crmime, el.dataset.crtitle, el.dataset.cropen); }));
-  // 目標まとめ入力：売上はフォーカスを離れると保存、期間はボタンで保存。
+  // 目標まとめ入力：目標はフォーカスを離れると保存、期間はボタンで保存。
   app.querySelectorAll("[data-bulkgoal]").forEach(el =>
-    el.addEventListener("change", () => saveBulkGoal(el.dataset.bulkgoal, el.value, el)));
+    el.addEventListener("change", () => saveBulkGoal(el.dataset.bulkgoal, el.dataset.metric, el.value, el)));
+  app.querySelectorAll("[data-bulkmsel]").forEach(el =>
+    el.addEventListener("change", () => switchBulkMetric(el)));
   app.querySelectorAll("[data-bulkoe]").forEach(el =>
     el.addEventListener("change", () => {
       const em = el.closest(".bt-period") && el.closest(".bt-period").querySelector("[data-bulkend]");
@@ -1930,6 +1932,12 @@ function bulkSuggest(c) {
   return base ? Math.round(base * 1.02) : null;
 }
 
+// まとめ入力で選べる目標項目。既定は「販促の売上」。部門/商品/時間帯のように
+// 「もう1段（区分・商品・時間帯）を選ぶ」指標は細かい指定が要るので、一覧のインライン
+// 入力には出さない（従来の目標ダイアログで扱う）。
+const BULK_GOAL_METRICS = TARGET_METRICS.filter(m => !SUB_METRICS.has(m.key));
+const bulkMetricOf = k => TARGET_METRICS.find(m => m.key === k) || { unit: "", higher: true };
+
 function renderBulkTargets() {
   const rows = (DATA.campaigns || [])
     .filter(goalEligible)
@@ -1983,16 +1991,21 @@ function renderBulkTargets() {
         + (plan ? "" : `<span class="bt-note">（台帳）</span>`);
     }
 
-    // 目標（売上）セル。ログイン時のみ入力欄。開放時は現在値（あれば）を表示。
+    // 目標セル。既定は「販促の売上」。▽で目標項目を選べる（売上/原価率/客数…）。
+    // ログイン時のみ入力欄。開放時は売上目標（あれば）を表示。
     const cur = targetOf(c);
     let goalCell;
     if (WRITE_OK) {
       const suggest = bulkSuggest(c);
-      const ph = suggest != null ? `目安 ${Math.round(suggest).toLocaleString("ja-JP")}` : "売上（円）";
+      const salesPh = suggest != null ? `目安 ${Math.round(suggest).toLocaleString("ja-JP")}` : "目標値";
+      const metricOpts = BULK_GOAL_METRICS.map(m =>
+        `<option value="${esc(m.key)}">${esc(m.label)}（${esc(m.unit)}）</option>`).join("");
       goalCell = `<div class="bt-goal">
+        <select class="bt-in bt-msel" data-bulkmsel="${esc(key)}" aria-label="目標項目">${metricOpts}</select>
         <input class="bt-in bt-num" type="number" inputmode="numeric" min="0" step="1000"
-          data-bulkgoal="${esc(key)}" value="${cur != null ? cur : ""}" placeholder="${esc(ph)}" aria-label="目標売上（円）">
-        <span class="bt-unit">円</span>
+          data-bulkgoal="${esc(key)}" data-metric="sales" data-salesph="${esc(salesPh)}"
+          value="${cur != null ? cur : ""}" placeholder="${esc(salesPh)}" aria-label="目標値">
+        <span class="bt-unit" data-bulkunit="${esc(key)}">円</span>
         <span class="bt-ok" data-btok="goal:${esc(key)}"></span>
       </div>`;
     } else {
@@ -2012,8 +2025,8 @@ function renderBulkTargets() {
 
   return `<div class="wrap"><section class="block">
     <div class="bhead"><h2>目標まとめ入力</h2>
-      <span class="bnote">実績がまだ出ていない「実施中・予定」の販促に、期間と目標（売上）をまとめて入力します。
-        ${rows.length}件。目標は入力欄を離れると保存されます。</span>
+      <span class="bnote">実績がまだ出ていない「実施中・予定」の販促に、期間と目標をまとめて入力します。
+        目標は▽で項目を選べます（既定は販促の売上）。${rows.length}件。入力欄を離れると保存されます。</span>
       ${addBtn}</div>
     ${banner}
     <div class="panel"><div class="bulk-scroll"><table class="bulktbl">
@@ -2023,34 +2036,53 @@ function renderBulkTargets() {
   </section></div>`;
 }
 
-// 目標（売上）をその場で保存。editGoal と同じ /api/targets（id＝施策キー）。
-async function saveBulkGoal(key, raw, el) {
-  const cleaned = String(raw == null ? "" : raw).replace(/[,，円\s]/g, "");
+// 目標をその場で保存。指標（metric）を選べる（既定 sales）。/api/targets（id＝施策キー）。
+async function saveBulkGoal(key, metric, raw, el) {
+  metric = metric || "sales";
+  const mt = bulkMetricOf(metric);
+  const isRate = metric === "cost_rate" || metric === "food_cost_rate" || metric === "drink_cost_rate";
+  const cleaned = String(raw == null ? "" : raw).replace(/[,，円%\s]/g, "");
   let value = null;
   if (cleaned !== "") {
-    const n = parseInt(cleaned, 10);
-    if (isNaN(n) || n < 0) { flashBtOk("goal:" + key, "数値を入れてください", true); return; }
-    value = n;
+    const n = Number(cleaned);
+    if (!Number.isFinite(n) || n < 0) { flashBtOk("goal:" + key, "数値を入れてください", true); return; }
+    if (isRate && (n <= 0 || n > 100)) { flashBtOk("goal:" + key, "0〜100%で入れてください", true); return; }
+    value = mt.decimal ? n : Math.round(n);
   }
   try {
     const res = await fetch("/api/targets", {
       method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: key, target: value }),
+      body: JSON.stringify({ id: key, metric, target: value }),
     });
     if (res.status === 401) { flashBtOk("goal:" + key, "要ログイン", true); return; }
     if (!res.ok) { flashBtOk("goal:" + key, "保存失敗", true); return; }
+    SERVER_TARGETS_M[key] = SERVER_TARGETS_M[key] || {};
     if (value === null) {
-      delete SERVER_TARGETS[key];
-      if (SERVER_TARGETS_M[key]) delete SERVER_TARGETS_M[key].sales;
+      delete SERVER_TARGETS_M[key][metric];
+      if (metric === "sales") delete SERVER_TARGETS[key];
       flashBtOk("goal:" + key, "削除しました");
     } else {
       const cell = { value, by: "自分", at: new Date().toISOString() };
-      SERVER_TARGETS[key] = cell;
-      SERVER_TARGETS_M[key] = SERVER_TARGETS_M[key] || {};
-      SERVER_TARGETS_M[key].sales = cell;
+      SERVER_TARGETS_M[key][metric] = cell;
+      if (metric === "sales") SERVER_TARGETS[key] = cell;
       flashBtOk("goal:" + key, "保存しました ✓");
     }
   } catch (e) { flashBtOk("goal:" + key, "通信エラー", true); }
+}
+// 目標項目（▽）を切り替えたら、入力欄をその指標の保存値・単位・プレースホルダに合わせる。
+function switchBulkMetric(sel) {
+  const key = sel.dataset.bulkmsel, metric = sel.value;
+  const row = sel.closest(".bt-goal");
+  const inp = row && row.querySelector("[data-bulkgoal]");
+  const unit = row && row.querySelector("[data-bulkunit]");
+  if (!inp) return;
+  inp.dataset.metric = metric;
+  const mt = bulkMetricOf(metric);
+  const saved = (SERVER_TARGETS_M[key] || {})[metric];
+  inp.value = (saved && typeof saved.value === "number") ? saved.value : "";
+  if (unit) unit.textContent = mt.unit || "";
+  inp.placeholder = metric === "sales" ? (inp.dataset.salesph || "目標値") : "目標値";
+  flashBtOk("goal:" + key, "");
 }
 
 // プランの期間（開始月・終了月・継続）をその場で保存。/api/plans に既存プランを上書き。

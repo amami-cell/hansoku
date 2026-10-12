@@ -584,6 +584,7 @@ tbody tr:last-child td{border-bottom:0;}
   border-radius:6px;padding:5px 8px;}
 .bt-in:focus{outline:none;border-color:var(--accent);}
 .bt-mo{width:132px;}
+.bt-msel{max-width:210px;}
 .bt-num{width:128px;text-align:right;}
 .bt-in:disabled{opacity:.45;}
 .bt-dash{color:var(--ink-3);}

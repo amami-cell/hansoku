@@ -26,7 +26,7 @@ function loadForm(data) {
     setAttribute() {}, getAttribute() { return null; }, hasAttribute() { return false; },
     addEventListener() {}, appendChild() {}, remove() {}, focus() {},
     querySelector() { return mkEl(); }, querySelectorAll() { return []; },
-    classList: { add() {}, remove() {}, contains() { return false; } },
+    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
   });
   const getEl = (id) => (byId[id] = byId[id] || mkEl(id));
   const okJson = (obj) => Promise.resolve({
@@ -384,6 +384,36 @@ await test("新規起票：店舗＋販促名＋期間＋目標をまとめて�
   const tg = CAP.targets.find(t => t.target === 3000000);
   assert.ok(tg, "目標売上が保存される");
   assert.ok(String(tg.id).includes("@2026"), "鍵は開始年つき（" + tg.id + "）");
+});
+
+await test("まとめ入力：目標項目（指標）を▽で選べる／既定は売上", () => {
+  const h = loadForm(base);
+  h.call(`WRITE_OK=true; PLANS_API_OK=true;
+    DATA.campaigns=[{id:"c-live",stores:["1160"],title:"実施中の販促",kind:"dev",start:addMonth(CURRENT_MONTH,-1)+"-01",end:addMonth(CURRENT_MONTH,2)+"-28",open_ended:false}];`);
+  const html = h.call(`renderBulkTargets()`);
+  assert.ok(html.includes("data-bulkmsel"), "目標項目の▽（select）が出る");
+  assert.ok(html.includes("原価率"), "売上以外の指標も選べる（原価率など）");
+  assert.ok(html.includes('data-metric="sales"'), "既定の指標は売上");
+  // 部門/商品/時間帯のような“もう1段選ぶ”指標はインラインに出さない
+  assert.ok(!html.includes("部門別売上"), "部門別（区分選択が要る指標）はインラインに出さない");
+});
+
+await test("まとめ入力：選んだ指標で目標を保存する（原価率）", async () => {
+  const h = loadForm(base);
+  const { CAP, call } = h;
+  call(`WRITE_OK=true;`);
+  await call(`saveBulkGoal("c-x@2026","cost_rate","28")`);
+  const tg = CAP.targets.find(t => t.id === "c-x@2026" && t.metric === "cost_rate");
+  assert.ok(tg, "原価率の目標が /api/targets に渡る");
+  assert.equal(tg.target, 28, "値は28（%）");
+});
+
+await test("まとめ入力：原価率は0〜100%の範囲外を弾く", async () => {
+  const h = loadForm(base);
+  const { CAP, call } = h;
+  call(`WRITE_OK=true;`);
+  await call(`saveBulkGoal("c-y@2026","cost_rate","150")`);
+  assert.ok(!CAP.targets.find(t => t.id === "c-y@2026"), "範囲外(150%)は保存しない");
 });
 
 await test("新規起票：店舗・販促名・開始月が無いと保存しない", async () => {
