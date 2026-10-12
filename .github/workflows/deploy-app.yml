@@ -1,0 +1,97 @@
+name: 本番アプリURLを公開
+
+# Cloudflare Access の無い本番相当URL（hansoku-app）を公開する。
+# 旧 hansoku は前段に Access が残り毎回SSOを求められるため、Access 無しの新ホストで配る。
+# 中身は本番と同じ Worker コード・本番Neonデータ・本番R2。毎晩データを作り直して反映。
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 毎日 11:15 JST (= 02:15 UTC)。本番(02:00)・プレビュー(02:10)の直後に走らせ、
+    # 同じ本番Neonからデータを作り直してこのURLにも反映する。
+    - cron: '15 2 * * *'
+
+# トークンは読み取りだけでよい（push もコメントもしない）。
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: DBスキーマを最新化（冪等・目標の指標拡張などのマイグレーション適用）
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python -m hansoku.cli init-schema
+
+      - name: 制作物（POP画像/PDF）をR2へ揃える（冪等）
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: python -m hansoku.cli creatives-sync
+
+      - name: データを書き出す
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: |
+          python -m hansoku.cli export-web \
+            --date-from 2023-01-01 --date-to 2026-12-31 --out web/data
+
+      - name: 依存（worker用 npm）をインストール
+        run: npm install
+
+      - name: Cloudflare へ公開（Accessなし・合言葉ログイン）
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          COOKIE_SECRET: ${{ secrets.HANSOKU_COOKIE_SECRET }}
+          APP_PASSWORD: ${{ secrets.HANSOKU_APP_PASSWORD }}
+        run: |
+          set -o pipefail
+          # 静的アセット(styles.css/app.js/dashboard.js)のキャッシュ破棄：毎デプロイで一意化。
+          BUILD="$(date +%s)"
+          sed -i "s/__BUILD__/${BUILD}/g" web/index.html web/panel.html
+          TOKEN="$(printf '%s' "$CF_TOKEN" | tr -d '[:space:]\"'"'")"
+          ACCOUNT="$(printf '%s' "$CF_ACCOUNT" | tr -d '[:space:]\"'"'")"
+          npm install -g wrangler@4
+          export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT"
+          npx wrangler deploy --config wrangler-app.toml 2>&1 | tee /tmp/wr.log
+          url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/wr.log | head -1 || true)
+          # /api/*（POP一覧・目標・メモ）を動かすため DATABASE_URL を入れる
+          if [ -n "$NEON_DATABASE_URL" ]; then
+            printf '%s' "$NEON_DATABASE_URL" | npx wrangler secret put DATABASE_URL --config wrangler-app.toml 2>&1 | tail -2 || \
+              echo "::warning::DATABASE_URL の設定に失敗"
+          fi
+          if [ -n "$COOKIE_SECRET" ]; then
+            printf '%s' "$COOKIE_SECRET" | npx wrangler secret put COOKIE_SECRET --config wrangler-app.toml 2>&1 | tail -2 || true
+          fi
+          # 合言葉（打ち込みログイン）。
+          if [ -n "$APP_PASSWORD" ]; then
+            printf '%s' "$APP_PASSWORD" | npx wrangler secret put APP_PASSWORD --config wrangler-app.toml 2>&1 | tail -2 || true
+          else
+            echo "::warning::HANSOKU_APP_PASSWORD 未設定。打ち込みログインは無効です。"
+          fi
+          [ -n "$url" ] && { echo "## 本番アプリURL（Accessなし）" >> "$GITHUB_STEP_SUMMARY"; echo "**$url**" >> "$GITHUB_STEP_SUMMARY"; }
