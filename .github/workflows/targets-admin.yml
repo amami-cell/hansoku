@@ -1,0 +1,74 @@
+name: targets-admin
+
+# 目標（promo_targets）の確認・取り消し用。
+#  action=dump  … いま入っている目標を「新しい順」で店名・施策名つきで一覧（読み取りのみ・ログイン不要）。
+#  action=clear … 指定した campaign_id（＋指標）の目標を削除（合言葉ログインが要る）。
+# ランナーは workers.dev に到達できるため、ここから実URLに対して確認・修正する。
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "対象URL"
+        required: false
+        default: "https://hansoku-app.amami-c1e.workers.dev/"
+      action:
+        description: "dump=一覧 / clear=削除"
+        type: choice
+        options: [dump, clear]
+        default: dump
+      campaign_id:
+        description: "clear時：対象キー（例 r1006-bounenkai@2026）"
+        required: false
+        default: ""
+      metric:
+        description: "clear時：指標（既定 sales）"
+        required: false
+        default: "sales"
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 実行
+        env:
+          URL: ${{ github.event.inputs.url }}
+          ACTION: ${{ github.event.inputs.action }}
+          CID: ${{ github.event.inputs.campaign_id }}
+          METRIC: ${{ github.event.inputs.metric }}
+          APP_PASSWORD: ${{ secrets.HANSOKU_APP_PASSWORD }}
+        run: |
+          set -uo pipefail
+          U="${URL%/}"
+          curl -sS "$U/api/targets" -o targets.json
+          curl -sS "$U/api/plans" -o plans.json || echo '{"plans":[]}' > plans.json
+          curl -sS "$U/data/dashboard.json" -o dash.json
+          echo "== 現在の目標（新しい順・上から直近に入力されたもの）=="
+          jq -s '
+            .[0] as $t | .[1] as $p | .[2] as $d |
+            ( ($d.campaigns // []) + ( ($p.plans // []) | map({id:.id, title:.title, stores:[.store_code], start:.start}) ) )
+              | map({ (.id): {title:.title, stores:.stores} }) | add as $byid |
+            ( ($d.stores // []) | map({ (.code): .name }) | add ) as $nm |
+            ( $t.targets_by_metric // {} ) | to_entries | map(
+              ( .key ) as $cid | ( .value ) | to_entries | map({
+                cid: $cid, metric: .key, value: .value.value, by: .value.by, at: .value.at,
+                title: ( $byid[($cid|split("@")[0])].title // "(不明)" ),
+                stores: ( ( $byid[($cid|split("@")[0])].stores // [] ) | map( $nm[.] // . ) )
+              })
+            ) | add | sort_by(.at) | reverse | .[:25]
+          ' targets.json plans.json dash.json
+          if [ "$ACTION" = "clear" ]; then
+            [ -n "${CID:-}" ] || { echo "::error::campaign_id を指定してください"; exit 1; }
+            [ -n "${APP_PASSWORD:-}" ] || { echo "::error::HANSOKU_APP_PASSWORD 未設定"; exit 1; }
+            echo "== 合言葉ログイン =="
+            code=$(curl -sS -c cj -o /dev/null -w "%{http_code}" --data-urlencode "name=本部(目標修正)" --data-urlencode "password=$APP_PASSWORD" "$U/login" || echo 000)
+            echo "login HTTP=$code (303=成功)"
+            echo "== 削除：$CID #$METRIC =="
+            curl -sS -b cj -X POST -H 'content-type: application/json' -d "{\"id\":\"$CID\",\"metric\":\"$METRIC\",\"target\":null}" "$U/api/targets"; echo
+            echo "== 削除後の確認 =="
+            curl -sS "$U/api/targets" | jq --arg k "$CID" '.targets_by_metric[$k] // "この施策の目標は残っていません（削除OK）"'
+          fi
