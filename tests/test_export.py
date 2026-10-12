@@ -743,3 +743,19 @@ def test_通称と読みがなが画面に渡る(payload, master):
     # マスタに通称が入っている店が実際にある（空配列だけ通って気づかない、を防ぐ）
     assert any(row["aliases"] for row in payload["stores"])
     assert any(row["yomi"] for row in payload["stores"])
+
+
+def test_dept_merge_containsで食べ放題飲み放題を1区分に束ねる():
+    """門真Largo：食べ放題/飲み放題 を含む部門（食べ飲み放題plus・食べ放題フード・
+    飲み放題【ﾚｷﾞｭﾗｰ】など、売上0で原価だけの部門も）を『食べ飲み放題』1区分にまとめる。
+    デザート等の他部門はそのまま。"""
+    rules = {
+        "dept_as_category": True,
+        "other": "その他",
+        "dept_merge_contains": [["食べ放題", "食べ飲み放題"], ["飲み放題", "食べ飲み放題"]],
+    }
+    for n in ["04798:【ﾗﾙｺﾞ】食べ飲み放題plus", "04799:【ﾗﾙｺﾞ】食べ放題フード",
+              "04800:【ﾗﾙｺﾞ】飲み放題【ﾚｷﾞｭﾗｰ】", "07236:【ﾗﾙｺﾞ】食べ放題 オールドファッション"]:
+        assert classify_category(n, rules, group=n) == "食べ飲み放題"
+    assert classify_category("05573:【ラルゴ】デザート", rules, group="05573:【ラルゴ】デザート") == "デザート"
+    assert classify_category("03583:【ﾗﾙｺﾞ】ｱﾙｺｰﾙ", rules, group="03583:【ﾗﾙｺﾞ】ｱﾙｺｰﾙ") == "ｱﾙｺｰﾙ"
