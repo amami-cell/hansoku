@@ -327,6 +327,33 @@ await test("目標未入力の販促だけならスコアボードは非表示",
   assert.equal(call(`renderTargetBoard()`), "", "目標ゼロならパネルごと出さない");
 });
 
+console.log("目標まとめ入力（renderBulkTargets）");
+
+await test("まとめ入力は実施中・予定（実績なし）だけを出す／終了・実績ありは出さない", () => {
+  const h = loadForm(base);
+  // 日付に依存しないよう、現在月を基準に相対で施策を作る。
+  h.call(`WRITE_OK=true;
+    DATA.campaigns=[
+      {id:"c-live",stores:["1160"],title:"実施中の販促",kind:"dev",start:addMonth(CURRENT_MONTH,-1)+"-01",end:addMonth(CURRENT_MONTH,2)+"-28",open_ended:false},
+      {id:"c-soon",stores:["1160"],title:"予定の販促",kind:"dev",start:addMonth(CURRENT_MONTH,2)+"-01",end:addMonth(CURRENT_MONTH,3)+"-28",open_ended:false},
+      {id:"c-done",stores:["1160"],title:"終了した販促",kind:"dev",start:addMonth(CURRENT_MONTH,-3)+"-01",end:addMonth(CURRENT_MONTH,-2)+"-28",open_ended:false}
+    ];`);
+  const html = h.call(`renderBulkTargets()`);
+  assert.ok(html.includes("実施中の販促"), "実施中は出す");
+  assert.ok(html.includes("予定の販促"), "予定は出す");
+  assert.ok(!html.includes("終了した販促"), "終了は出さない");
+  assert.ok(html.includes("data-bulkgoal"), "ログイン時は目標入力欄が出る");
+});
+
+await test("まとめ入力：開放（閲覧専用）は入力欄を出さず注意バナーを出す", () => {
+  const h = loadForm(base);
+  h.call(`WRITE_OK=false;
+    DATA.campaigns=[{id:"c-live",stores:["1160"],title:"実施中の販促",kind:"dev",start:addMonth(CURRENT_MONTH,-1)+"-01",end:addMonth(CURRENT_MONTH,2)+"-28",open_ended:false}];`);
+  const html = h.call(`renderBulkTargets()`);
+  assert.ok(html.includes("閲覧専用"), "開放時は閲覧専用バナーを出す");
+  assert.ok(!html.includes("data-bulkgoal"), "開放時は入力欄を出さない");
+});
+
   console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
   process.exit(failed ? 1 : 0);
 }

@@ -1578,6 +1578,7 @@ function render() {
   else if (VIEW.kind === "overview") app.innerHTML = renderOverview();
   else if (VIEW.kind === "list") app.innerHTML = renderList();
   else if (VIEW.kind === "campaigns") app.innerHTML = renderCampaigns();
+  else if (VIEW.kind === "bulk") app.innerHTML = renderBulkTargets();
   else if (VIEW.kind === "year") app.innerHTML = renderYear();
   else if (VIEW.kind === "cross") app.innerHTML = renderCross();
   else if (VIEW.kind === "gallery") app.innerHTML = renderGallery();
@@ -1705,6 +1706,16 @@ function render() {
     }));
   app.querySelectorAll("[data-crurl]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); openCreativePreview(el.dataset.crurl, el.dataset.crmime, el.dataset.crtitle, el.dataset.cropen); }));
+  // 目標まとめ入力：売上はフォーカスを離れると保存、期間はボタンで保存。
+  app.querySelectorAll("[data-bulkgoal]").forEach(el =>
+    el.addEventListener("change", () => saveBulkGoal(el.dataset.bulkgoal, el.value, el)));
+  app.querySelectorAll("[data-bulkoe]").forEach(el =>
+    el.addEventListener("change", () => {
+      const em = el.closest(".bt-period") && el.closest(".bt-period").querySelector("[data-bulkend]");
+      if (em) em.disabled = el.checked;   // 継続なら終了月は不要
+    }));
+  app.querySelectorAll("[data-bulkperiod]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); saveBulkPeriod(el.dataset.bulkperiod); }));
   // 販促カルーセルは、開いたとき現在月のカードを中央に寄せる（前後の月が両端にチラ見え）。
   app.querySelectorAll(".pcar").forEach(car => {
     const now = car.querySelector(".pcar-mo.now") || car.querySelector(".pcar-mo");
@@ -1899,6 +1910,189 @@ function packLanes(list) {
   return { placed, laneCount: Math.max(1, laneEnd.length) };
 }
 
+// ── 目標まとめ入力 ───────────────────────────────────────────────────────────
+// まだ実績の出ていない「実施中／予定」の販促だけを一覧にして、期間と目標（売上）を
+// その場で打ち込めるようにする。終わった販促・すでに実績の出ている販促は出さない
+// （振り返りで見るものなので、ここでの入力対象にしない）。
+// 期間はプラン（promo_plans 由来）だけ変更できる。台帳の販促は期間が固定なので読み取り。
+
+// この販促の「おすすめ目標」＝直近の同じ長さの実績×102%。基準（部門/商品）が無い
+// 開発系プランなどは実績の物差しが無いので null（＝薄字の目安なし）。
+function bulkSuggest(c) {
+  const latest = addMonth(CURRENT_MONTH, -1);
+  const len = goalIsMonthly(c) ? 1 : Math.max(1, monthsBetween(c.start.slice(0, 7), campEndM(c)).length);
+  const rng = { from: addMonth(latest, -(len - 1)), to: latest };
+  let tr = null;
+  try { tr = campTargeted(c, null, rng); } catch (e) { tr = null; }
+  const base = (tr && tr.cur > 0) ? tr.cur : null;
+  return base ? Math.round(base * 1.02) : null;
+}
+
+function renderBulkTargets() {
+  const rows = (DATA.campaigns || [])
+    .filter(goalEligible)
+    .map(c => ({ c, s: campStatus(c), sum: campaignSummary(c) }))
+    // 実施中・予定のみ。終了は対象外。すでに実績（売上>0）が出ている分も対象外。
+    .filter(r => (r.s.k === "live" || r.s.k === "soon") && !(r.sum && r.sum.cur > 0));
+  // 実施中→予定→開始の早い順に並べる（打ち込む順に迷わないよう）。
+  const SORD = { live: 0, soon: 1 };
+  rows.sort((a, b) => (SORD[a.s.k] - SORD[b.s.k]) || String(a.c.start).localeCompare(String(b.c.start)));
+
+  const banner = WRITE_OK ? "" :
+    `<div class="bulk-warn">※ いまは閲覧専用（開放モード）です。打ち込むにはログインが必要です。
+       右上の「ログイン」から入ると、ここで期間と目標を入力できます。</div>`;
+
+  if (!rows.length) {
+    return `<div class="wrap"><section class="block">
+      <div class="bhead"><h2>目標まとめ入力</h2>
+        <span class="bnote">実績がまだ出ていない「実施中・予定」の販促に、期間と目標（売上）をまとめて入力します。</span></div>
+      ${banner}
+      <div class="panel"><div class="empty">いま入力対象の販促はありません（終了・実績が出ている分は出しません）。</div></div>
+    </section></div>`;
+  }
+
+  const body = rows.map(({ c, s }) => {
+    const codes = (c.stores || []).filter(hasData);
+    const store = codes.length === 1 ? storeName(codes[0])
+      : (codes.length ? `${codes.length}店` : (c.stores && c.stores.length ? storeName(c.stores[0]) : "—"));
+    const key = campKey(c);
+    const plan = isPlan(c);
+
+    // 期間セル。プランのみ編集可（開始月・終了月・継続）。台帳の販促は読み取り。
+    let periodCell;
+    if (plan && WRITE_OK) {
+      const sm = (c.start || "").slice(0, 7);
+      const em = c.open_ended ? "" : (c.end || "").slice(0, 7);
+      periodCell = `<div class="bt-period" data-bulkcid="${esc(c.id)}">
+        <input class="bt-in bt-mo" type="month" value="${esc(sm)}" data-bulkstart aria-label="開始月">
+        <span class="bt-dash">〜</span>
+        <input class="bt-in bt-mo" type="month" value="${esc(em)}" data-bulkend aria-label="終了月"${c.open_ended ? " disabled" : ""}>
+        <label class="bt-oe"><input type="checkbox" data-bulkoe${c.open_ended ? " checked" : ""}> 継続</label>
+        <button class="bt-save" type="button" data-bulkperiod="${esc(c.id)}">期間を保存</button>
+        <span class="bt-ok" data-btok="period:${esc(c.id)}"></span>
+      </div>`;
+    } else {
+      periodCell = `<span class="bt-ro">${esc(campRange(c))}</span>`
+        + (plan ? "" : `<span class="bt-note">（台帳）</span>`);
+    }
+
+    // 目標（売上）セル。ログイン時のみ入力欄。開放時は現在値（あれば）を表示。
+    const cur = targetOf(c);
+    let goalCell;
+    if (WRITE_OK) {
+      const suggest = bulkSuggest(c);
+      const ph = suggest != null ? `目安 ${Math.round(suggest).toLocaleString("ja-JP")}` : "売上（円）";
+      goalCell = `<div class="bt-goal">
+        <input class="bt-in bt-num" type="number" inputmode="numeric" min="0" step="1000"
+          data-bulkgoal="${esc(key)}" value="${cur != null ? cur : ""}" placeholder="${esc(ph)}" aria-label="目標売上（円）">
+        <span class="bt-unit">円</span>
+        <span class="bt-ok" data-btok="goal:${esc(key)}"></span>
+      </div>`;
+    } else {
+      goalCell = cur != null ? `<b>${money(cur)}</b>` : `<span class="muted">—</span>`;
+    }
+
+    return `<tr>
+      <td class="bt-c-name">
+        <span class="cstat ${s.k}">${s.label}</span>
+        <b>${esc(c.title)}</b>
+        <span class="bt-store">${esc(store)}</span>
+      </td>
+      <td class="bt-c-period">${periodCell}</td>
+      <td class="bt-c-goal">${goalCell}</td>
+    </tr>`;
+  }).join("");
+
+  return `<div class="wrap"><section class="block">
+    <div class="bhead"><h2>目標まとめ入力</h2>
+      <span class="bnote">実績がまだ出ていない「実施中・予定」の販促に、期間と目標（売上）をまとめて入力します。
+        ${rows.length}件。目標は入力欄を離れると保存されます。</span></div>
+    ${banner}
+    <div class="panel"><div class="bulk-scroll"><table class="bulktbl">
+      <thead><tr><th>施策</th><th>期間</th><th>目標（売上）</th></tr></thead>
+      <tbody>${body}</tbody>
+    </table></div></div>
+  </section></div>`;
+}
+
+// 目標（売上）をその場で保存。editGoal と同じ /api/targets（id＝施策キー）。
+async function saveBulkGoal(key, raw, el) {
+  const cleaned = String(raw == null ? "" : raw).replace(/[,，円\s]/g, "");
+  let value = null;
+  if (cleaned !== "") {
+    const n = parseInt(cleaned, 10);
+    if (isNaN(n) || n < 0) { flashBtOk("goal:" + key, "数値を入れてください", true); return; }
+    value = n;
+  }
+  try {
+    const res = await fetch("/api/targets", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: key, target: value }),
+    });
+    if (res.status === 401) { flashBtOk("goal:" + key, "要ログイン", true); return; }
+    if (!res.ok) { flashBtOk("goal:" + key, "保存失敗", true); return; }
+    if (value === null) {
+      delete SERVER_TARGETS[key];
+      if (SERVER_TARGETS_M[key]) delete SERVER_TARGETS_M[key].sales;
+      flashBtOk("goal:" + key, "削除しました");
+    } else {
+      const cell = { value, by: "自分", at: new Date().toISOString() };
+      SERVER_TARGETS[key] = cell;
+      SERVER_TARGETS_M[key] = SERVER_TARGETS_M[key] || {};
+      SERVER_TARGETS_M[key].sales = cell;
+      flashBtOk("goal:" + key, "保存しました ✓");
+    }
+  } catch (e) { flashBtOk("goal:" + key, "通信エラー", true); }
+}
+
+// プランの期間（開始月・終了月・継続）をその場で保存。/api/plans に既存プランを上書き。
+async function saveBulkPeriod(cid) {
+  const box = document.querySelector(`.bt-period[data-bulkcid="${(window.CSS && CSS.escape) ? CSS.escape(cid) : cid}"]`);
+  const p = planById(cid);
+  if (!box || !p) { flashBtOk("period:" + cid, "見つかりません", true); return; }
+  const sm = (box.querySelector("[data-bulkstart]") || {}).value || "";
+  const emInp = box.querySelector("[data-bulkend]");
+  const oe = !!(box.querySelector("[data-bulkoe]") || {}).checked;
+  const em = emInp ? emInp.value : "";
+  if (!sm) { flashBtOk("period:" + cid, "開始月を入れてください", true); return; }
+  if (!oe && !em) { flashBtOk("period:" + cid, "終了月か継続を", true); return; }
+  if (!oe && em < sm) { flashBtOk("period:" + cid, "終了は開始より後に", true); return; }
+  const payload = {
+    id: p.id, store_code: p.store_code, title: p.title,
+    kind: p.kind || "dev", bucket: p.bucket || "",
+    start: `${sm}-01`,
+    end: oe ? `${sm}-01` : `${em}-${String(lastDayOfMonth(em)).padStart(2, "0")}`,
+    open_ended: oe, owner: p.owner || "", goal: p.goal != null ? p.goal : null,
+    note: p.note || "", source_id: p.source_id || "",
+  };
+  try {
+    const res = await fetch("/api/plans", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
+    });
+    if (res.status === 401) { flashBtOk("period:" + cid, "要ログイン", true); return; }
+    if (!res.ok) { flashBtOk("period:" + cid, "保存失敗", true); return; }
+    const data = await res.json().catch(() => ({}));
+    if (data && data.plan) {
+      const i = PLANS.findIndex(x => x.id === data.plan.id);
+      if (i >= 0) PLANS[i] = data.plan; else PLANS.push(data.plan);
+      applyPlans();
+    }
+    flashBtOk("period:" + cid, "保存しました ✓");
+    // 期間が変わると対象行の判定（実施中/予定）も変わりうるので、少し置いて描き直す。
+    setTimeout(render, 700);
+  } catch (e) { flashBtOk("period:" + cid, "通信エラー", true); }
+}
+
+// 行ごとの保存結果を小さく表示（data-btok="goal:KEY" / "period:CID"）。
+function flashBtOk(okKey, msg, isErr) {
+  const sel = `[data-btok="${(window.CSS && CSS.escape) ? CSS.escape(okKey) : okKey}"]`;
+  const el = document.querySelector(sel);
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle("err", !!isErr);
+  if (!isErr) setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 2500);
+}
+
 function renderSchedule() {
   const camps = DATA.campaigns || [];
   const activeCodes = new Set(DATA.stores.map(s => s.code));
@@ -1989,6 +2183,8 @@ function renderSchedule() {
       <button class="linkbtn" data-view="year">年間販促 →</button>
       <span class="sep">／</span>
       <button class="linkbtn" data-view="cross">販促ターゲット（横断）→</button>
+      <span class="sep">／</span>
+      <button class="linkbtn" data-view="bulk">目標まとめ入力 →</button>
       <span class="sep">／</span>
       <button class="linkbtn" data-view="manage">店舗管理 →</button>
       <span class="sep">／</span>
