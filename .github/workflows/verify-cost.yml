@@ -1,0 +1,83 @@
+name: verify-cost
+
+# 倉庫(Neon)の product_cost を店×月で合計し、しきい値で合否を出す（読み取りのみ）。
+# ログ/サマリは blob で手元から読めないので、合計値を ::notice:: 注釈にも出す
+# （チェックラン注釈はAPIで読める）。合否は run の conclusion で判る。
+
+on:
+  workflow_dispatch:
+    inputs:
+      store:
+        description: "店コード"
+        required: true
+        default: "1713"
+      date_from:
+        description: "開始日 YYYY-MM-DD"
+        required: true
+        default: "2026-09-01"
+      date_to:
+        description: "終了日 YYYY-MM-DD"
+        required: true
+        default: "2026-09-30"
+      metric:
+        description: "指標"
+        required: false
+        default: "product_cost"
+      min_expected:
+        description: "この値以上なら合格（取りこぼし修正の確認用）"
+        required: false
+        default: "2000000"
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+      - name: 倉庫の合計を出して注釈にする
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          STORE: ${{ inputs.store }}
+          DF: ${{ inputs.date_from }}
+          DT: ${{ inputs.date_to }}
+          METRIC: ${{ inputs.metric }}
+          MIN: ${{ inputs.min_expected }}
+        run: |
+          set -o pipefail
+          OUT="$(python -m hansoku.cli aggregate --metric "$METRIC" \
+                  --date-from "$DF" --date-to "$DT" --store "$STORE" --group-by date)"
+          echo "$OUT"
+          # 「合計 N  (…行)」の N を取り出す（カンマ除去）。
+          TOTAL="$(printf '%s\n' "$OUT" | sed -n 's/^合計 \([0-9,]*\).*/\1/p' | tr -d ',')"
+          [ -n "$TOTAL" ] || TOTAL=0
+          echo "::notice title=${STORE} ${DF}..${DT} ${METRIC}::合計=${TOTAL}（基準 ${MIN} 以上で合格）"
+          {
+            echo "## verify-cost ${STORE} ${DF}..${DT} ${METRIC}"
+            echo ''
+            echo '```'
+            echo "$OUT"
+            echo "合計=${TOTAL} / 基準=${MIN}"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY" >/dev/null
+          if [ "$TOTAL" -ge "$MIN" ]; then
+            echo "✅ 合格：合計 ${TOTAL} ≥ ${MIN}"
+          else
+            echo "::error title=verify-cost 不合格::合計 ${TOTAL} が基準 ${MIN} 未満"
+            exit 1
+          fi
