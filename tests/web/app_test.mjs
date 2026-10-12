@@ -1433,6 +1433,51 @@ test("年間一覧：理論原価が無い月でもFW部門別原価率で原価
   assert.equal(cr.src, "dept", "理論原価が無い月は部門別原価率にフォールバック");
 });
 
+// ── 年間一覧：ABC実原価を原価率に優先して使う（食べ放題の消費フード込み）──────────
+const abcCostData = () => {
+  const months = ["2026-06", "2026-07", "2026-08"];
+  const monthly = { 1713: {} }, cm = { 1713: {} }, dm = { 1713: {} };
+  for (const m of months) {
+    // 理論原価は無い（9月同様）。F/D売上はあるのでFD比は出る。
+    monthly[1713][m] = { sales: 5000000, food_sales: 3000000, drink_sales: 1500000 };
+    // 食べ飲み放題：ABC実原価（消費フード込み）cost=1,450,000 / cost_sales=800,000 → 181.3%。
+    // コース：ABC実原価は無い（cost未付与）→ FW部門別原価率へフォールバック。
+    cm[1713][m] = [
+      { name: "食べ飲み放題", sales: 800000, count: 4, share: 0.16, cost: 1450000, cost_sales: 800000 },
+      { name: "デザート", sales: 300000, count: 2, share: 0.06, cost: 90000, cost_sales: 300000 },
+      { name: "コース", sales: 2000000, count: 20, share: 0.4 },
+    ];
+    dm[1713][m] = { buckets: [{ name: "コース", sales: 2000000, cost_rate: 41.6, cost_coverage: 1 }], raw: [] };
+  }
+  return { ...base, months, stores: [{ code: "1713", name: "門真Largo", region: "大阪", neighbors: [] }],
+    monthly, categories_monthly: cm, departments_monthly: dm, products_monthly: {} };
+};
+
+test("年間一覧：原価率行は理論原価が無い月にABC実原価を使う（FW部門別より優先）", () => {
+  const ctx = loadApp(abcCostData());
+  const cr = call(ctx, `storeCostRate("1713","2026-07")`);
+  assert.equal(cr.src, "abc", "理論原価が無くABCがあればABC実原価を使う");
+  // Σ原価(1,450,000+90,000)=1,540,000 ÷ Σ売上(800,000+300,000)=1,100,000 = 140%
+  assert.equal(cr.rate, 140, "ABC実原価の合計から原価率(140%)");
+  const html = call(ctx, `storeYearMatrix("1713", 2026)`);
+  const row = (html.match(/<tr class="ymxcost">[\s\S]*?<\/tr>/) || [""])[0];
+  assert.ok(row.includes("140%"), "原価率行にABC実原価の率(140%)が出る");
+  assert.ok(row.includes("ABC実原価"), "出所の注記がABC実原価");
+});
+
+test("年間一覧：品目構成比の原価は食べ飲み放題でABC実原価金額・率を出す", () => {
+  const ctx = loadApp(abcCostData());
+  call(ctx, `ANNUAL_COMPO_COST = true;`);
+  const cost = call(ctx, `storeYearMatrix("1713", 2026)`);
+  const tabe = (cost.match(/食べ飲み放題<\/th>[\s\S]*?<\/tr>/) || [""])[0];
+  assert.ok(tabe.includes("181.3%"), "食べ飲み放題のABC実原価率(1,450,000/800,000=181.3%)");
+  assert.ok(tabe.includes("145万"), "食べ飲み放題のABC実原価金額(145万)");
+  assert.ok(tabe.includes("ABC実原価"), "ツールチップがABC実原価");
+  // コースはABC実原価が無い → FW部門別原価率へフォールバック（41.6%）。
+  const course = (cost.match(/コース<\/th>[\s\S]*?<\/tr>/) || [""])[0];
+  assert.ok(course.includes("41.6%") || course.includes("42%"), "ABCの無い区分はFW部門別原価率で出る");
+});
+
 test("classifyCat：dept_merge_contains で食べ放題/飲み放題を食べ飲み放題に束ねる（門真Largo）", () => {
   const d = { ...base, store_categories: { 1713: {
     dept_as_category: true, other: "その他",

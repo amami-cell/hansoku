@@ -781,3 +781,57 @@ def test_bucket_mergeで飲み放題と食べ放題を食べ飲み放題バケ�
     # raw 部門は統合先バケットのタグが付く
     tags = {r["name"]: r["bucket"] for r in out["raw"]}
     assert tags["04799:食べ放題フード"] == "食べ飲み放題"
+
+
+def test_区分別ABC実原価が売上0の消費フードまで含めて集計される():
+    """門真Largo：品目構成比の区分に、ABC実原価（cost・cost_sales＝税抜）を付ける。
+    食べ放題フード（売上0・原価だけ）の原価も食べ飲み放題へ合算される（取りこぼさない）。"""
+    d09 = date(2026, 9, 15)
+    rows = {
+        _ex.METRIC_DEPT_SALES: [
+            # 区分（食べ飲み放題／デザート）は部門売上から作る。product_category＝FW原価率。
+            {"store_code": "1713", "date": d09, "product_name": "04798:食べ飲み放題plus",
+             "product_category": "13.9", "value": 881927.0},
+            {"store_code": "1713", "date": d09, "product_name": "05573:デザート",
+             "product_category": "28.6", "value": 336750.0},
+        ],
+        _ex.METRIC_PRODUCT_SALES: [
+            {"store_code": "1713", "date": d09, "product_name": "04798:【ﾗﾙｺﾞ】食べ飲み放題plus",
+             "product_category": "A", "value": 881927.0},
+            {"store_code": "1713", "date": d09, "product_name": "05573:【ﾗﾙｺﾞ】デザート",
+             "product_category": "A", "value": 336750.0},
+        ],
+        _ex.METRIC_PRODUCT_COST: [
+            {"store_code": "1713", "date": d09, "product_name": "04798:【ﾗﾙｺﾞ】食べ飲み放題plus",
+             "value": 110000.0},
+            # 売上0・原価だけの消費フード。従来は取込で捨てられていた分。
+            {"store_code": "1713", "date": d09, "product_name": "04799:【ﾗﾙｺﾞ】食べ放題フード",
+             "value": 1485000.0},
+            {"store_code": "1713", "date": d09, "product_name": "05573:【ﾗﾙｺﾞ】デザート",
+             "value": 96360.0},
+        ],
+    }
+
+    class FakeWH:
+        def aggregate(self, q):
+            return list(rows.get(q.metrics[0], []))
+
+    class FakeMaster:
+        active_codes = ["1713"]
+
+    cats = {"1713": {"name": "門真Largo", "other": "その他", "classify_by": "department",
+                     "dept_as_category": True, "dept_other": [],
+                     "dept_merge_contains": [["食べ放題", "食べ飲み放題"], ["飲み放題", "食べ飲み放題"]]}}
+    _dm, _pm, cm = _ex._build_abc_by_month(
+        FakeWH(), FakeMaster(), date(2026, 1, 1), date(2026, 12, 31), cats, {}
+    )
+    by = {c["name"]: c for c in cm["1713"]["2026-09"]}
+    assert "食べ飲み放題" in by, by.keys()
+    # plus原価100,000＋フード原価1,350,000（いずれも税抜＝税込÷1.10）＝1,450,000。
+    assert by["食べ飲み放題"]["cost"] == round(110000 / 1.10) + round(1485000 / 1.10)
+    # 分母は区分の商品売上（税抜）。フードは売上0なので plus のみ。
+    assert by["食べ飲み放題"]["cost_sales"] == round(881927 / 1.10)
+    # デザートは実原価がそのまま付く。
+    assert by["デザート"]["cost"] == round(96360 / 1.10)
+    # 食べ放題フードは独立した区分ではなく食べ飲み放題へ畳まれる。
+    assert "食べ放題フード" not in by and "その他" not in by

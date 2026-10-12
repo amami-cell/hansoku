@@ -974,15 +974,28 @@ def _build_abc_by_month(
                     it["gross"] = round(gross_map[key])
                 if key in group_map:
                     it["group"] = group_map[key]
-    # 売価0円だが点数がある商品（例: テイクアウトジェラートの内訳）を、点数だけの
-    # 商品として追加する（売上行が無いので上のループには入っていない）。所属区分も付ける。
-    for (code, m, name), q in qty_map.items():
-        if (code, m, name) in seen or not q:
+    # 売上行の無い商品（売価0円の内訳、食べ放題の消費フード＝売上0・原価だけ 等）を、
+    # 点数／原価のある商品として追加する。原価率の分子（原価金額）を落とさないよう、
+    # 点数だけでなく原価・粗利も載せる。所属区分も付ける。
+    for key in set(qty_map) | set(cost_map):
+        if key in seen:
             continue
-        prod_tmp.setdefault(code, {}).setdefault(m, []).append(
-            {"name": name, "sales": 0, "rank": None, "qty": round(q),
-             "group": group_map.get((code, m, name))}
-        )
+        code, m, name = key
+        q = qty_map.get(key) or 0
+        c = cost_map.get(key)
+        g = gross_map.get(key)
+        if not q and c is None:
+            continue
+        row = {"name": name, "sales": 0, "rank": None,
+               "group": group_map.get(key)}
+        if q:
+            row["qty"] = round(q)
+        if c is not None:
+            row["cost"] = round(c)
+        if g is not None:
+            row["gross"] = round(g)
+        prod_tmp.setdefault(code, {}).setdefault(m, []).append(row)
+        seen.add(key)
 
     products_monthly: dict[str, dict[str, list]] = {}
     categories_monthly: dict[str, dict[str, list]] = {}
@@ -1035,6 +1048,23 @@ def _build_abc_by_month(
                     total = sum(p["sales"] for p in items)
                     cats = _categories_for_month(items, rules, total)
                 if cats:
+                    # 区分ごとのABC実原価（金額・売上, いずれも税抜）。商品名を同じ品目区分
+                    # ルールで束ねて合算し、原価率＝実原価÷売上 を出せるようにする。FWの
+                    # 部門別原価率は食べ放題の消費フード（売上0・原価だけ）を取りこぼして
+                    # 低く出るため、取れている区分は実原価を優先する（画面側で判定）。
+                    acost: dict[str, float] = {}
+                    asales: dict[str, float] = {}
+                    has_cost: set[str] = set()
+                    for it in items:
+                        cat = classify_category(it.get("name", ""), rules, it.get("group"))
+                        asales[cat] = asales.get(cat, 0.0) + (it.get("sales") or 0)
+                        if "cost" in it:
+                            acost[cat] = acost.get(cat, 0.0) + it["cost"]
+                            has_cost.add(cat)
+                    for c in cats:
+                        if c["name"] in has_cost:
+                            c["cost"] = round(acost[c["name"]])
+                            c["cost_sales"] = round(asales.get(c["name"], 0.0))
                     categories_monthly.setdefault(code, {})[m] = cats
             # 売れ筋 top-N に加え、区分→商品ドリル／内訳の表示に要る商品を残す。
             #  - 内訳を畳んだ親(subs 持ち) … 常に（Largo等の入れ子表示に必要）

@@ -19,6 +19,10 @@ on:
         description: "対象月。空欄=前月／複数可 '2025-11,2025-12'／範囲 '2024-09..2026-07'"
         required: false
         default: ''
+      store:
+        description: "店コード（カンマ区切り）。空欄=全稼働FW店。例 '1713'（門真Largoだけ再取込）"
+        required: false
+        default: ''
   schedule:
     # 毎月6日 05:20 JST (= 前日 20:20 UTC)。前月ぶんが締まった頃に前月ABCを取り込む。
     - cron: '20 20 5 * *'
@@ -45,9 +49,11 @@ jobs:
         run: pip install pyyaml
       - id: gen
         name: 稼働店コードを列挙
+        env:
+          ONLY: ${{ inputs.store }}
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, yaml
+          import json, os, yaml
           data = yaml.safe_load(open("config/stores.yaml")) or {}
           # FW未連動の店（pos が fw 以外）はABCの元データがFWに無い。回しても
           # 空のグリッドを1ヶ月ずつ待ち続けてジョブのタイムアウトを食うだけなので外す。
@@ -56,6 +62,10 @@ jobs:
               for s in data.get("stores", [])
               if s.get("active") and (s.get("pos") or "fw") == "fw"
           ]
+          # store 入力があれば、その店だけに絞る（例 '1713'：門真Largoだけ再取込）。
+          only = {c.strip() for c in (os.environ.get("ONLY") or "").split(",") if c.strip()}
+          if only:
+              codes = [c for c in codes if c in only]
           print("stores=" + json.dumps(codes))
           PY
 
