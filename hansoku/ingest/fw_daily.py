@@ -1657,6 +1657,98 @@ def probe_abc_dom(artifacts: Path, *, store: str) -> int:
     return 0
 
 
+def probe_abc_cost(artifacts: Path, *, store: str, d_from: str, d_to: str) -> int:
+    """原価の取りこぼし診断（読み取りのみ・倉庫に書かない）。
+
+    全商品グリッドとメニュー内訳の『原価金額』を行レベルで集計し、どこに取込との差が
+    あるかを ::notice:: 注釈に出す（ログ/サマリは blob で手元から読めないため）。
+    d_from/d_to は YYYY/MM/DD。store は店名（モーダル左リストと一致させる）。
+    """
+    import sys as _sys
+
+    try:
+        _sys.stdout.reconfigure(line_buffering=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+    def _cost(p):
+        return p["ints"][_ABC_COST] if len(p["ints"]) > _ABC_COST else 0
+
+    def _sales(p):
+        return p["ints"][_ABC_SALES] if len(p["ints"]) > _ABC_SALES else 0
+
+    with fw_session(artifacts) as session:
+        try:
+            session.page.set_default_timeout(9000)
+            session.page.set_default_navigation_timeout(15000)
+        except Exception:  # noqa: BLE001
+            pass
+        _open_abc(session)
+        _select_date_preset(session, _ABC_PRESET_LASTMONTH)
+        _set_date_range(session, d_from, d_to)
+        hit = _abc_open_store_modal_and_select_one(session, store)
+        print(f"[原価診断] 店舗={store} 期間={d_from}〜{d_to} hit={hit}")
+        if hit is None:
+            print("::error title=原価診断::店舗選択に失敗")
+            return 1
+        _set_date_range(session, d_from, d_to)
+
+        # --- 全商品 ---
+        _abc_click_radio(session.page, "全商品")
+        _abc_search_and_rows(session)
+        products = _extract_product_grid(session)
+        products.sort(key=_sales, reverse=True)
+        n_all = len(products)
+        all_cost = sum(_cost(p) for p in products)
+        top_cost = sum(_cost(p) for p in products[:_ABC_TOP_N])
+        beyond_cost = all_cost - top_cost
+        zero_sales_cost = sum(_cost(p) for p in products if _sales(p) <= 0)
+        picked_names = {p["name"] for p in products[:_ABC_TOP_N]}
+        by_cost = sorted(products, key=_cost, reverse=True)
+        top_lines = " / ".join(
+            f"{p['name'][:16]}:売{_sales(p)}原{_cost(p)}" for p in by_cost[:12]
+        )
+
+        # --- メニュー内訳（全商品に無い行だけ）---
+        menu_rows: list[dict] = []
+        try:
+            if _abc_click_radio(session.page, "グループ"):
+                _abc_search_and_rows(session)
+            if _abc_click_radio(session.page, "メニュー"):
+                _abc_search_and_rows(session)
+                stable = 0
+                for _ in range(12):
+                    cur = _extract_product_grid_grouped(session)
+                    if len(cur) > len(menu_rows):
+                        menu_rows = cur
+                        stable = 0
+                    else:
+                        stable += 1
+                        if stable >= 3:
+                            break
+                    time.sleep(1.2)
+        except Exception as e:  # noqa: BLE001
+            print(f"[原価診断] メニュー取得失敗（無害）: {e}")
+        menu_extra = [r for r in menu_rows if r["name"] not in picked_names]
+        menu_cost = sum(_cost(r) for r in menu_extra)
+        menu_lines = " / ".join(
+            f"{r['name'][:16]}:売{_sales(r)}原{_cost(r)}"
+            for r in sorted(menu_extra, key=_cost, reverse=True)[:12]
+        )
+
+        now_ingest = top_cost + menu_cost  # 現状の取込が焼いている原価（全商品top40＋内訳）
+        print(f"[原価診断] 全商品 {n_all}品 Σ原価={all_cost} top{_ABC_TOP_N}={top_cost} "
+              f"top外={beyond_cost} 売上0の原価={zero_sales_cost}")
+        print(f"[原価診断] メニュー内訳(全商品以外) {len(menu_extra)}件 Σ原価={menu_cost}")
+        print(f"[原価診断] 現状取込(全商品top40+内訳)={now_ingest}")
+        print(f"::notice title=全商品::{n_all}品 Σ原価{all_cost} / top{_ABC_TOP_N}={top_cost} / top外={beyond_cost} / 売上0原価={zero_sales_cost}")
+        print(f"::notice title=メニュー内訳::{len(menu_extra)}件 Σ原価{menu_cost}")
+        print(f"::notice title=現状取込::全商品top40({top_cost})+内訳({menu_cost})={now_ingest}")
+        print(f"::notice title=全商品原価上位::{top_lines}")
+        print(f"::notice title=内訳原価上位::{menu_lines or '（なし）'}")
+    return 0
+
+
 def coverage_in_scope(*, cannot: str | None, has_any: bool) -> bool:
     """この店をカバレッジの分母に数えるか。
 

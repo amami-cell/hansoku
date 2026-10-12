@@ -387,6 +387,18 @@ def cmd_fw_daily(args: argparse.Namespace) -> int:
             Path(args.artifacts),
             store=args.abc_store or "ひよこ飯店",
         )
+    if args.mode == "abc-cost-probe":
+        from .ingest.fw_daily import probe_abc_cost
+
+        def _slash(d: str | None) -> str:
+            return (d or "").replace("-", "/")
+
+        return probe_abc_cost(
+            Path(args.artifacts),
+            store=args.abc_store or "門真Largo",
+            d_from=_slash(args.abc_from),
+            d_to=_slash(args.abc_to),
+        )
     if args.mode == "monthly-coverage":
         from .ingest.fw_daily import report_monthly_coverage
 
