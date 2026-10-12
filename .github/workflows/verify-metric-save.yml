@@ -1,0 +1,63 @@
+name: verify-metric-save
+
+# 本番URLに合言葉ログインし、「目標項目（指標）を切り替えて保存」できることを実際に流して確認する。
+#  売上以外の指標（原価率・客数）を保存→指標ごとに読み戻し→最後に必ず削除（後始末）。
+#  テスト用キーは実在の施策に当たらない名前を使うので、画面には出ない。
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "対象URL"
+        required: false
+        default: "https://hansoku-app.amami-c1e.workers.dev/"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: ログイン→指標切替で保存→読み戻し→後始末
+        env:
+          URL: ${{ github.event.inputs.url }}
+          APP_PASSWORD: ${{ secrets.HANSOKU_APP_PASSWORD }}
+        run: |
+          set -uo pipefail
+          U="${URL%/}"
+          J="$(mktemp)"
+          FAIL=0
+          KEY="zz-metric-check-$(date +%s)@2026"
+          [ -n "${APP_PASSWORD:-}" ] || { echo "::error::HANSOKU_APP_PASSWORD 未設定"; exit 1; }
+
+          echo "== 1) 合言葉ログイン =="
+          code=$(curl -sS -c "$J" -o /dev/null -w "%{http_code}" --data-urlencode "name=本部(指標確認)" --data-urlencode "password=$APP_PASSWORD" "$U/login" || echo 000)
+          echo "login HTTP=$code (303=成功)"; [ "$code" = "303" ] || FAIL=1
+
+          echo "== 2) 目標項目を『原価率』に切り替えて保存（28%） KEY=$KEY =="
+          r1=$(curl -sS -b "$J" -X POST -H 'content-type: application/json' -d "{\"id\":\"$KEY\",\"metric\":\"cost_rate\",\"target\":28}" "$U/api/targets" || true)
+          echo "$r1"; echo "$r1" | grep -q '"ok":true' || FAIL=1
+
+          echo "== 3) 続けて『客数』に切り替えて保存（5000人）=="
+          r2=$(curl -sS -b "$J" -X POST -H 'content-type: application/json' -d "{\"id\":\"$KEY\",\"metric\":\"covers\",\"target\":5000}" "$U/api/targets" || true)
+          echo "$r2"; echo "$r2" | grep -q '"ok":true' || FAIL=1
+
+          echo "== 4) 指標ごとに読み戻し =="
+          got=$(curl -sS "$U/api/targets" | jq --arg k "$KEY" '.targets_by_metric[$k]')
+          echo "$got"
+          cr=$(printf '%s' "$got" | jq -r '.cost_rate.value // empty')
+          cv=$(printf '%s' "$got" | jq -r '.covers.value // empty')
+          echo "原価率=$cr / 客数=$cv"
+          { [ "$cr" = "28" ] && [ "$cv" = "5000" ]; } && echo "指標別の保存＝OK" || { echo "::error::指標別に読み戻せない"; FAIL=1; }
+
+          echo "== 5) 後始末（テスト目標を削除）=="
+          curl -sS -b "$J" -X POST -H 'content-type: application/json' -d "{\"id\":\"$KEY\",\"metric\":\"cost_rate\",\"target\":null}" "$U/api/targets" >/dev/null && echo "原価率を削除"
+          curl -sS -b "$J" -X POST -H 'content-type: application/json' -d "{\"id\":\"$KEY\",\"metric\":\"covers\",\"target\":null}" "$U/api/targets" >/dev/null && echo "客数を削除"
+          after=$(curl -sS "$U/api/targets" | jq --arg k "$KEY" '.targets_by_metric[$k] // "削除OK（キー無し）"')
+          echo "後始末の確認: $after"
+          printf '%s' "$after" | grep -q "削除OK" || { echo "::warning::テスト目標が残っています（$KEY）"; }
+
+          echo
+          if [ "$FAIL" = "0" ]; then echo "✅ ログイン→目標項目を切り替えて保存→読み戻し まで成功"; else echo "❌ 失敗あり"; exit 1; fi
