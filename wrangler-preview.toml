@@ -24,8 +24,9 @@ bucket_name = "hansoku-creatives"
 
 # 入口＝合言葉ログイン（お名前＋合言葉）。前段に Cloudflare Access が無いので、
 # 店長はこの URL に お名前＋合言葉 だけで入れる（編集も可）。データ・POPは本番Neon/R2。
-#   "0" = 合言葉ログイン必須（いまはこれ）／ "1" = 誰でも閲覧の開放モード。
+#   "0" = 合言葉ログイン必須／ "1" = 誰でも閲覧の開放モード（いまはこれ）。
+# 前段に Cloudflare Access が無いので、"1" なら URL だけでログイン不要で開ける（閲覧専用）。
 # OWNER_NAME はオーナー（管理権限）の表示名。
 [vars]
-OPEN_ACCESS = "0"
+OPEN_ACCESS = "1"
 OWNER_NAME = "天見 真悟"
