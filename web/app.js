@@ -3418,14 +3418,12 @@ function storeCostRate(code, m) {
       dr: (typeof dc === "number" && ds > 0) ? Math.round(dc / ds * 100) : null,
     };
   }
-  // ② ABC実原価（区分別に取れている実原価の合計）。FW部門別原価率は食べ放題の消費
-  //    フード（売上0・原価だけ）を取りこぼして低く出るので、理論原価が無い月は
-  //    こちらを優先する（門真Largo 9月など）。
-  const cm = ((DATA.categories_monthly || {})[code] || {})[m] || [];
-  let ac = 0, as = 0;
-  for (const c of cm) { if (typeof c.cost === "number" && c.cost_sales > 0) { ac += c.cost; as += c.cost_sales; } }
-  if (as > 0) {
-    return { rate: Math.round(ac / as * 100), num: Math.round(ac), den: Math.round(as), src: "abc", fr: null, dr: null };
+  // ② ABC実原価（商品原価の店×月合計／export の abc_cost・税抜）。FW部門別原価率は
+  //    食べ放題の消費フード（売上0・原価だけ）を取りこぼして低く出るので、理論原価が
+  //    無い月はこちらを優先する（門真Largo 9月など）。品目区分の分類に依存しない。
+  const ab = ((DATA.abc_cost || {})[code] || {})[m];
+  if (ab && typeof ab.cost === "number" && ab.sales > 0) {
+    return { rate: Math.round(ab.cost / ab.sales * 100), num: Math.round(ab.cost), den: Math.round(ab.sales), src: "abc", fr: null, dr: null };
   }
   // ③ FW部門別原価率の売上加重平均（ABCの実原価も無い月のフォールバック）。
   const dm = ((DATA.departments_monthly || {})[code] || {})[m];
