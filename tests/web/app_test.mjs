@@ -1380,5 +1380,42 @@ test("reviewProgressStrip：全店 予算達成タイルを出す（予算があ
   assert.ok(html.includes('data-listsort="budget"'), "予算達成順で店舗一覧へ");
 });
 
+// ── 年間一覧：原価率行（FD比の下）＋ 品目構成比の「原価」切替（食べ放題の原価率）──
+const costData = () => {
+  const months = ["2026-06", "2026-07", "2026-08"];
+  const monthly = { 1713: {} }, cm = { 1713: {} }, dm = { 1713: {} };
+  for (const m of months) {
+    // 原価率 = (F理論原価+D理論原価)/(F売上+D売上) = (1,050,000+450,000)/(3,000,000+1,500,000) = 33%
+    monthly[1713][m] = { sales: 5000000, food_sales: 3000000, drink_sales: 1500000, food_theory_cost: 1050000, drink_theory_cost: 450000 };
+    cm[1713][m] = [{ name: "食べ放題", sales: 1000000, count: 12, share: 0.2 }, { name: "コース", sales: 2000000, count: 20, share: 0.4 }];
+    dm[1713][m] = { buckets: [{ name: "食べ放題", sales: 1000000, cost_rate: 40.7, cost_coverage: 1 }, { name: "コース", sales: 2000000, cost_rate: 41.6, cost_coverage: 1 }], raw: [] };
+  }
+  return { ...base, months, stores: [{ code: "1713", name: "門真Largo", region: "大阪", neighbors: [] }],
+    monthly, categories_monthly: cm, departments_monthly: dm, products_monthly: {} };
+};
+
+test("年間一覧：FD比の下に原価率行（F/D理論原価）が出る", () => {
+  const ctx = loadApp(costData());
+  const html = call(ctx, `storeYearMatrix("1713", 2026)`);
+  assert.ok(/class="ymxcost"/.test(html), "原価率行がある");
+  const row = (html.match(/<tr class="ymxcost">[\s\S]*?<\/tr>/) || [""])[0];
+  assert.ok(row.includes("33%"), "原価率は33%（F/D理論原価÷F/D売上）");
+});
+
+test("年間一覧：品目構成比に『原価を見る』→区分ごとの原価金額・原価率（食べ放題）", () => {
+  const ctx = loadApp(costData());
+  const amount = call(ctx, `storeYearMatrix("1713", 2026)`);
+  assert.ok(amount.includes("品目構成比（金額）") && amount.includes("原価を見る"), "既定は金額＋原価ボタン");
+  call(ctx, `ANNUAL_COMPO_COST = true;`);
+  const cost = call(ctx, `storeYearMatrix("1713", 2026)`);
+  assert.ok(cost.includes("品目構成比（原価）") && cost.includes("金額に戻す"), "原価モードに切替");
+  const tabe = (cost.match(/食べ放題<\/th>[\s\S]*?<\/tr>/) || [""])[0];
+  assert.ok(tabe.includes("40.7%"), "食べ放題の原価率(40.7%)が出る");
+  assert.ok(tabe.includes("41万"), "食べ放題の原価金額(1,000,000×40.7%≈41万)が出る");
+  // 原価率が取れない区分は「―」になる（departments に無い区分）
+  const r = call(ctx, `catCostRate("1713","2026-07","存在しない区分")`);
+  assert.equal(r, null, "部門原価率が無い区分は null");
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);
