@@ -979,7 +979,7 @@ def cmd_uleji_import(args: argparse.Namespace) -> int:
 
     settings = load_settings()
     with get_warehouse(settings) as warehouse:
-        return ingest_uleji_abc(
+        ingest_uleji_abc(
             warehouse,
             args.store,
             args.month,
@@ -988,6 +988,7 @@ def cmd_uleji_import(args: argparse.Namespace) -> int:
             covers=args.covers,
             dry_run=args.dry_run,
         )
+    return 0   # 取込件数は戻り値に使わない（終了コードに化けるため）
 
 
 # ── パーサ ──────────────────────────────────────────────────────────────────
