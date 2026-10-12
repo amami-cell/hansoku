@@ -1,0 +1,50 @@
+name: inspect-monthly
+
+# 本番が配信している dashboard.json の monthly[店] を月ごとに表示する。
+# FD比が空欄などの「画面に出ているデータ」の調査用（読み取りのみ）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "対象URL"
+        required: false
+        default: "https://hansoku-app.amami-c1e.workers.dev/"
+      stores:
+        description: "店コード（カンマ区切り）"
+        required: false
+        default: "1713,1160"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: dashboard.json の monthly を見る
+        env:
+          URL: ${{ github.event.inputs.url }}
+          STORES: ${{ github.event.inputs.stores }}
+        run: |
+          set -uo pipefail
+          U="${URL%/}"
+          curl -sS "$U/data/dashboard.json" -o d.json
+          echo "dashboard.json bytes=$(wc -c < d.json | tr -d ' ')"
+          IFS=',' read -ra SS <<< "$STORES"
+          for s in "${SS[@]}"; do
+            s="$(echo "$s" | tr -d ' ')"
+            [ -z "$s" ] && continue
+            echo
+            echo "===== 店 $s ：月 → 売上 / フード / ドリンク / (FD比%) ====="
+            jq -r --arg s "$s" '
+              (.monthly[$s] // {}) | to_entries | sort_by(.key)[] |
+              .key as $m | .value as $v |
+              ( ($v.food_sales // null) ) as $f | ( ($v.drink_sales // null) ) as $d |
+              "\($m)  売上=\(($v.sales // "―"))  F=\($f // "―")  D=\($d // "―")  FD=\(
+                if ($f != null and $d != null and ($f + $d) > 0) then (($f/($f+$d)*100)|floor|tostring + "/" + ((100-($f/($f+$d)*100))|floor|tostring)) else "空欄(―)" end)"
+            ' d.json
+            echo "--- この店の monthly にある指標キー（先頭月）---"
+            jq -r --arg s "$s" '(.monthly[$s] // {}) | to_entries | sort_by(.key) | (.[0].value // {}) | keys | join(", ")' d.json
+          done
