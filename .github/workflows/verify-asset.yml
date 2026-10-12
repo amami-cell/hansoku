@@ -1,0 +1,55 @@
+name: verify-asset
+
+# 本番URLが実際に配信している静的アセット（app.js など）に、指定の目印が含まれるか確認する。
+# サンドボックスは workers.dev に届かないため、ランナーから実URLの中身を検証する用。
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "対象URL（末尾スラッシュ可）"
+        required: false
+        default: "https://hansoku-app.amami-c1e.workers.dev/"
+      path:
+        description: "確認するアセットのパス"
+        required: false
+        default: "app.js"
+      needles:
+        description: "含まれていてほしい文字列（カンマ区切り）"
+        required: false
+        default: "data-bulkmsel,switchBulkMetric,BULK_GOAL_METRICS,目標項目"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: アセットを取得して目印を確認
+        env:
+          URL: ${{ github.event.inputs.url }}
+          APATH: ${{ github.event.inputs.path }}
+          NEEDLES: ${{ github.event.inputs.needles }}
+        run: |
+          set -uo pipefail
+          U="${URL%/}"
+          code=$(curl -sS -o asset.txt -w "%{http_code}" "$U/$APATH" || echo 000)
+          echo "GET $U/$APATH -> HTTP=$code"
+          bytes=$(wc -c < asset.txt | tr -d ' ')
+          echo "受信バイト数=$bytes"
+          [ "$code" = "200" ] || { echo "::error::取得に失敗 (HTTP=$code)"; exit 1; }
+          FAIL=0
+          IFS=',' read -ra NS <<< "$NEEDLES"
+          for n in "${NS[@]}"; do
+            n_trimmed="$(echo "$n" | sed 's/^ *//;s/ *$//')"
+            [ -z "$n_trimmed" ] && continue
+            if grep -qF -- "$n_trimmed" asset.txt; then
+              echo "  ✅ 含む: $n_trimmed"
+            else
+              echo "  ❌ 無い: $n_trimmed"; FAIL=1
+            fi
+          done
+          echo
+          if [ "$FAIL" = "0" ]; then echo "✅ 本番配信アセットに目標項目セレクトの機能が含まれています"; else echo "❌ 目印が見つかりません（未反映の可能性）"; exit 1; fi
