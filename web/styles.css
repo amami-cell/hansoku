@@ -1322,8 +1322,17 @@ html{overflow-anchor:none;}
 .ymxt td.fdcell{cursor:pointer;font-weight:600;}
 .ymxt td.fdcell:hover{background:var(--accent-soft);color:var(--accent);}
 .ymxt tr.ymxfd th{color:var(--ink-2);}
+/* 原価率行（FD比の下）。少し控えめに。 */
+.ymxt tr.ymxcost th{color:var(--ink-2);}
+.ymxt tr.ymxcost td{color:var(--ink-2);}
 /* 品目構成比セルで販促がある月は色付け */
 .ymxt td.ymxcompo-c.promo{background:color-mix(in srgb, var(--accent) 14%, transparent);color:var(--accent);font-weight:700;}
+/* 原価モードの小さな原価率（金額の下に添える） */
+.ymxt .ccr{display:block;font-size:9.5px;font-weight:600;color:var(--ink-3);line-height:1.1;margin-top:1px;}
+/* 「原価を見る/金額に戻す」トグル */
+.compomode{font:inherit;font-size:10.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);
+  border:1px solid var(--accent-line);border-radius:5px;padding:1px 7px;margin-left:6px;cursor:pointer;vertical-align:middle;}
+.compomode:hover{background:var(--accent);color:#fff;}
 .fwin.fw-flash{animation:fwflash .6s ease;}
 @keyframes fwflash{0%,100%{box-shadow:0 10px 34px rgba(0,0,0,.30);}50%{box-shadow:0 0 0 3px var(--accent);}}
 /* 携帯：下から出るシート＋タブ（複数はタブで切替・重ならない） */

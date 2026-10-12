@@ -77,6 +77,7 @@ let STORE_ANNUAL_VIEW = "chart"; // 店ページ年間スケジュールの表�
 let PROMO_CHART_VIEW = "carousel"; // 販促チャートの表示：carousel=月ごと（カード・既定） / gantt=年間チャート（帯・一覧）
 let PANEL_SORT = "share";          // 品目構成比パネルの並び：share=売上構成比順（既定） / qty=出品数(点数)順
 let PANEL_PCT = "dept";            // 品目構成比パネルの％基準：dept=部門別構成比（既定） / total=売上構成比（その月の全体比）
+let ANNUAL_COMPO_COST = false;     // 年間一覧の品目構成比：false=金額（既定） / true=原価（金額＋原価率）
 let ANNUAL_OPEN = {};              // カレンダー一覧の開閉状態（"code:month" と "code:month:区分" を鍵に）
 let MONTH_PICK_OPEN = false;       // 月詳細の月ピッカーを開いているか
 // 0円サブ（選択メニュー内訳）を親メイン商品の下に畳んで表示。開いている親の鍵
@@ -1645,6 +1646,8 @@ function render() {
     }));
   app.querySelectorAll("[data-savw]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); STORE_ANNUAL_VIEW = el.dataset.savw; render(); }));
+  app.querySelectorAll("[data-compomode]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); ANNUAL_COMPO_COST = !ANNUAL_COMPO_COST; render(); }));
   app.querySelectorAll("[data-pcview]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); PROMO_CHART_VIEW = el.dataset.pcview; render(); }));
   app.querySelectorAll("[data-syear]").forEach(el =>
@@ -3378,6 +3381,22 @@ function deptsInCat(code, m, cat) {
     .filter(d => classifyCat(cleanDeptName(d.name), code, d.name) === cat)
     .filter(d => (d.sales || 0) > 0)   // 0円の“飲み放題用/コース用”部門は隠す（HQ 2026-09・②A）
     .map(d => ({ name: cleanDeptName(d.name), sales: d.sales || 0, qty: d.qty || 0, dept: true }));
+}
+// その区分の「理論原価率(%)」。FW部門別の原価率から出す。無ければ null（＝原価が取れていない）。
+//  1) 区分名がバケット（コース/ランチ/アラカルト/飲み放題/食べ放題）に一致 → そのバケットの原価率。
+//  2) 無ければ、その区分に属する生部門を、原価率の取れている売上で加重平均。
+// 門真Largo の「食べ放題」など、FWが部門別原価率を持つ区分で値が出る。
+function catCostRate(code, m, cat) {
+  const dm = ((DATA.departments_monthly || {})[code] || {})[m];
+  if (!dm) return null;
+  const bk = (dm.buckets || []).find(b => b.name === cat);
+  if (bk && typeof bk.cost_rate === "number") return bk.cost_rate;
+  const raw = (dm.raw || []).filter(d => classifyCat(cleanDeptName(d.name), code, d.name) === cat);
+  let cost = 0, rated = 0;
+  for (const d of raw) {
+    if (typeof d.cost_rate === "number") { cost += (d.sales || 0) * (d.cost_rate / 100); rated += (d.sales || 0); }
+  }
+  return rated > 0 ? Math.round(cost / rated * 1000) / 10 : null;
 }
 const prodsInCat = (code, m, cat) => {
   const r = catRules(code);
@@ -5843,24 +5862,48 @@ function storeYearMatrix(code, year) {
   const catNames = [...yearAgg.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
   // その月に販促がある区分（色付けに使う）。
   const monthHits = rows.map(r => promoHitsForMonth(code, r.m));
+  // 品目構成比（金額）。原価ボタンで「原価金額＋原価率」表示に切り替える（中身＝区分はそのまま）。
+  const costMode = ANNUAL_COMPO_COST;
+  const compoTitle = costMode ? "品目構成比（原価）" : "品目構成比（金額）";
+  const compoToggle = `<button class="compomode" data-compomode="1" title="金額と原価（原価金額・原価率）を切り替え">${costMode ? "金額に戻す" : "原価を見る"}</button>`;
   const compoSec = catNames.length
-    ? `<tr class="ymxsec"><th>品目構成比（金額）</th>${months.map((m, i) => `<td class="${cellCls(i)}"></td>`).join("")}<td class="ymxsum"></td></tr>`
+    ? `<tr class="ymxsec"><th>${compoTitle} ${compoToggle}</th>${months.map((m, i) => `<td class="${cellCls(i)}"></td>`).join("")}<td class="ymxsum"></td></tr>`
     : "";
   const compoRows = catNames.map(n => {
     const cells = rows.map(r => {
       const tot = r.cats.reduce((a, x) => a + (x.sales || 0), 0);
       const c = r.cats.find(x => x.name === n);
       if (!(r.has && c && c.sales)) return `<td class="${cellCls(r.i)} ymxcompo-c">―</td>`;
-      const pct = tot ? Math.round(c.sales / tot * 100) : 0;
       const promo = monthHits[r.i].cats.has(n);   // その月に販促がある区分 → 色付け
+      if (costMode) {
+        // 原価モード：原価金額（大）＋原価率（小）。原価率が取れない区分は「―」。
+        const rate = catCostRate(code, r.m, n);
+        if (rate == null) return `<td class="${cellCls(r.i)} ymxcompo-c${promo ? " promo" : ""}" data-tip="${esc(`${n}｜原価率が取れていません（売上 ${man(c.sales)}円）`)}">―</td>`;
+        const cost = Math.round(c.sales * rate / 100);
+        const tip = `${n}｜原価率 ${rate}%｜原価 ${man(cost)}円｜売上 ${man(c.sales)}円（税抜・理論原価）`;
+        return `<td class="${cellCls(r.i)} ymxcompo-c${promo ? " promo" : ""}" data-tip="${esc(tip)}">${man(cost)}<span class="ccr">${rate}%</span></td>`;
+      }
+      const pct = tot ? Math.round(c.sales / tot * 100) : 0;
       // カーソルを合わせると 構成比(%)・出品数・金額。押すと商品内訳の小窓が開く。
       const tip = `${n}｜構成比 ${pct}%｜${c.count || 0}品｜${man(c.sales)}円${promo ? "｜販促あり" : ""}（押すと商品内訳）`;
       return `<td class="${cellCls(r.i)} ymxcompo-c ymxcompo-click${promo ? " promo" : ""}" data-compocell="${code}:${r.m}:${encodeURIComponent(n)}" data-tip="${esc(tip)}">${man(c.sales)}</td>`;
     }).join("");
-    const yAmt = yearAgg.get(n) || 0;
-    const yPct = yTot ? Math.round(yAmt / yTot * 100) : null;
-    const yTip = yPct != null ? `${n}｜年間シェア ${yPct}%｜${man(yAmt)}円` : "";
-    return `<tr class="ymxcompo-row"><th><span class="ymxcdot" style="background:${catColor(n)}"></span>${esc(n)}</th>${cells}<td class="ymxsum"${yTip ? ` data-tip="${esc(yTip)}"` : ""}>${yAmt ? man(yAmt) : "―"}</td></tr>`;
+    let ysumCell;
+    if (costMode) {
+      // 年計：確定分の 区分売上×原価率 を合計 ÷ 原価率の取れた売上 ＝ 年間の原価率。
+      let yCost = 0, yRated = 0;
+      for (const r of conf) { const c = r.cats.find(x => x.name === n); const rate = catCostRate(code, r.m, n); if (c && c.sales && rate != null) { yCost += c.sales * rate / 100; yRated += c.sales; } }
+      const yRate = yRated > 0 ? Math.round(yCost / yRated * 100) : null;
+      ysumCell = yRate != null
+        ? `<td class="ymxsum" data-tip="${esc(`${n}｜年間 原価率 ${yRate}%｜原価 ${man(Math.round(yCost))}円`)}">${man(Math.round(yCost))}<span class="ccr">${yRate}%</span></td>`
+        : `<td class="ymxsum">―</td>`;
+    } else {
+      const yAmt = yearAgg.get(n) || 0;
+      const yPct = yTot ? Math.round(yAmt / yTot * 100) : null;
+      const yTip = yPct != null ? `${n}｜年間シェア ${yPct}%｜${man(yAmt)}円` : "";
+      ysumCell = `<td class="ymxsum"${yTip ? ` data-tip="${esc(yTip)}"` : ""}>${yAmt ? man(yAmt) : "―"}</td>`;
+    }
+    return `<tr class="ymxcompo-row"><th><span class="ymxcdot" style="background:${catColor(n)}"></span>${esc(n)}</th>${cells}${ysumCell}</tr>`;
   }).join("");
 
   // フード/ドリンク比（店長会シート・税抜）。押すとその月の「部門別」小窓が開く。
@@ -5877,6 +5920,28 @@ function storeYearMatrix(code, year) {
   const fdYsum = (sumF + sumD) > 0 ? `${Math.round(sumF / (sumF + sumD) * 100)}/${100 - Math.round(sumF / (sumF + sumD) * 100)}` : "―";
   const fdRow = `<tr class="ymxfd"><th>F/D比</th>${rows.map(fdCell).join("")}<td class="ymxsum">${fdYsum}</td></tr>`;
 
+  // 原価率（フード・ドリンクの理論原価 ÷ F売上+D売上。店長会シート・税抜）。FD比の下に添える。
+  const costRateCell = r => {
+    const mm = (DATA.monthly[code] || {})[r.m] || {};
+    const fc = mm.food_theory_cost, dc = mm.drink_theory_cost;
+    const fs = mm.food_sales || 0, ds = mm.drink_sales || 0;
+    if (!(typeof fc === "number" && typeof dc === "number") || (fs + ds) <= 0) return `<td class="${cellCls(r.i)}">―</td>`;
+    const rate = Math.round((fc + dc) / (fs + ds) * 100);
+    const fr = fs > 0 ? Math.round(fc / fs * 100) : null;
+    const dr = ds > 0 ? Math.round(dc / ds * 100) : null;
+    const tip = `${+r.m.slice(5, 7)}月 原価率 ${rate}%（フード ${fr == null ? "―" : fr + "%"} / ドリンク ${dr == null ? "―" : dr + "%"}）税抜・理論原価`;
+    return `<td class="${cellCls(r.i)}" data-tip="${esc(tip)}">${rate}%</td>`;
+  };
+  let cF = 0, cD = 0, cFs = 0, cDs = 0;
+  for (const r of rows) {
+    const mm = (DATA.monthly[code] || {})[r.m] || {};
+    if (typeof mm.food_theory_cost === "number" && typeof mm.drink_theory_cost === "number" && ((mm.food_sales || 0) + (mm.drink_sales || 0)) > 0) {
+      cF += mm.food_theory_cost; cD += mm.drink_theory_cost; cFs += mm.food_sales || 0; cDs += mm.drink_sales || 0;
+    }
+  }
+  const costYsum = (cFs + cDs) > 0 ? `${Math.round((cF + cD) / (cFs + cDs) * 100)}%` : "―";
+  const costRow = `<tr class="ymxcost"><th>原価率</th>${rows.map(costRateCell).join("")}<td class="ymxsum">${costYsum}</td></tr>`;
+
   // 予算未入力の月（売上はあるが予算が無い確定月）を明示。FW入力を促す。
   const budMissing = rows.filter(r => r.has && r.m < CURRENT_MONTH && !(typeof r.bud === "number" && r.bud));
   const budHint = budMissing.length
@@ -5884,9 +5949,9 @@ function storeYearMatrix(code, year) {
     : "";
 
   return `<div class="ymx">
-    <div class="mmhd">${year}年 一覧（縦＝指標／横＝月）<span class="mmhint">金額はすべて税抜。月(列見出し)を押すとその月の詳細へ。品目構成比の金額を押すと商品内訳の小窓が開く（複数可）。緑=前年超/赤=前年割れ・薄い列＝暫定/未取込・右端＝年計</span></div>
+    <div class="mmhd">${year}年 一覧（縦＝指標／横＝月）<span class="mmhint">金額はすべて税抜。月(列見出し)を押すとその月の詳細へ。品目構成比の金額を押すと商品内訳の小窓が開く（複数可）。「原価を見る」で区分ごとの原価金額・原価率に切替。FD比の下に原価率（F/D理論原価）。緑=前年超/赤=前年割れ・薄い列＝暫定/未取込・右端＝年計</span></div>
     <div class="ymxwrap"><table class="ymxt"><thead><tr>${th}</tr></thead>
-      <tbody>${rowSales}${rowYoY}${rowBud}${rowCov}${rowKt}${fdRow}${compoSec}${compoRows}</tbody></table></div>
+      <tbody>${rowSales}${rowYoY}${rowBud}${rowCov}${rowKt}${fdRow}${costRow}${compoSec}${compoRows}</tbody></table></div>
     ${budHint}</div>`;
 }
 
