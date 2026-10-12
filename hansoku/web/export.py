@@ -995,16 +995,19 @@ def _build_abc_by_month(
                 synth, _unm = _departments_from_products(items, product_depts[code])
                 if synth:
                     departments_monthly.setdefault(code, {})[m] = _assemble_departments(synth)
-            # 部門方式の店で、商品にFW由来の部門タグ(group)が無い場合でも、分析用コードCSVの
-            # 『商品→部門』があれば group に載せる（区分→商品のドリル用）。FWが部門グリッドを
-            # 出さない店（dept_fill_from_products 系）でも、コードが入っている商品は明細が出せる。
-            # 既に group がある商品（FWのメニュー見出し由来）は上書きしない。
+            # 部門方式の店の「区分→商品」ドリル用に、各商品へ所属部門(区分)のタグを載せる。
+            # 区分は部門グリッド（例「ピザメニュー」「ウィスキー」等・細かい）由来だが、FWの
+            # メニュー見出し(group)は粗い別軸（フード/ドリンク/コース/おすすめ…）で区分に一致
+            # しない。分析用コードCSVの『商品→部門』は部門グリッドと同じ部門名なので、コードの
+            # ある商品は product_depts で group を上書きして区分に合わせる（これで明細が出る）。
+            # コードが無い商品は従来の group のまま（区分に当たらなければ部門行にフォールバック）。
             if rules and rules.get("classify_by") == "department":
                 pdep = (product_depts or {}).get(code) or {}
                 if pdep:
                     for p in items:
-                        if not p.get("group") and pdep.get(p["name"]):
-                            p["group"] = pdep[p["name"]]
+                        d = pdep.get(p["name"])
+                        if d:
+                            p["group"] = d
             # 品目区分（店ごとのルールがある店だけ）。全商品で束ねてから売れ筋を切る。
             if rules:
                 if rules.get("classify_by") == "department":
