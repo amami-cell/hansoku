@@ -3398,6 +3398,31 @@ function catCostRate(code, m, cat) {
   }
   return rated > 0 ? Math.round(cost / rated * 1000) / 10 : null;
 }
+// 店の月次「理論原価率」の材料（原価金額・売上・率）。無ければ null。
+//  1) 店長会シートの理論原価（フード/ドリンク。取れている側だけで加重）。
+//  2) 無ければ FW部門別原価率の売上加重平均（FD比のある店でも理論原価が未取込の月を拾う）。
+function storeCostRate(code, m) {
+  const mm = ((DATA.monthly || {})[code] || {})[m] || {};
+  const fc = mm.food_theory_cost, dc = mm.drink_theory_cost;
+  const fs = mm.food_sales || 0, ds = mm.drink_sales || 0;
+  let num = 0, den = 0;
+  if (typeof fc === "number" && fs > 0) { num += fc; den += fs; }
+  if (typeof dc === "number" && ds > 0) { num += dc; den += ds; }
+  if (den > 0) {
+    return {
+      rate: Math.round(num / den * 100), num, den, src: "theory",
+      fr: (typeof fc === "number" && fs > 0) ? Math.round(fc / fs * 100) : null,
+      dr: (typeof dc === "number" && ds > 0) ? Math.round(dc / ds * 100) : null,
+    };
+  }
+  const dm = ((DATA.departments_monthly || {})[code] || {})[m];
+  if (dm) {
+    let c = 0, r = 0;
+    for (const b of (dm.buckets || [])) { if (typeof b.cost_rate === "number") { c += (b.sales || 0) * (b.cost_rate / 100); r += (b.sales || 0); } }
+    if (r > 0) return { rate: Math.round(c / r * 100), num: Math.round(c), den: r, src: "dept", fr: null, dr: null };
+  }
+  return null;
+}
 const prodsInCat = (code, m, cat) => {
   const r = catRules(code);
   if (r && r.classify_by === "department") {
@@ -5920,26 +5945,19 @@ function storeYearMatrix(code, year) {
   const fdYsum = (sumF + sumD) > 0 ? `${Math.round(sumF / (sumF + sumD) * 100)}/${100 - Math.round(sumF / (sumF + sumD) * 100)}` : "―";
   const fdRow = `<tr class="ymxfd"><th>F/D比</th>${rows.map(fdCell).join("")}<td class="ymxsum">${fdYsum}</td></tr>`;
 
-  // 原価率（フード・ドリンクの理論原価 ÷ F売上+D売上。店長会シート・税抜）。FD比の下に添える。
+  // 原価率。FD比の下に添える。店長会シートの理論原価（フード/ドリンク）を基本に、
+  // 取れていない月は FW部門別原価率の加重平均で補う（FD比のある店で空かないように）。
   const costRateCell = r => {
-    const mm = (DATA.monthly[code] || {})[r.m] || {};
-    const fc = mm.food_theory_cost, dc = mm.drink_theory_cost;
-    const fs = mm.food_sales || 0, ds = mm.drink_sales || 0;
-    if (!(typeof fc === "number" && typeof dc === "number") || (fs + ds) <= 0) return `<td class="${cellCls(r.i)}">―</td>`;
-    const rate = Math.round((fc + dc) / (fs + ds) * 100);
-    const fr = fs > 0 ? Math.round(fc / fs * 100) : null;
-    const dr = ds > 0 ? Math.round(dc / ds * 100) : null;
-    const tip = `${+r.m.slice(5, 7)}月 原価率 ${rate}%（フード ${fr == null ? "―" : fr + "%"} / ドリンク ${dr == null ? "―" : dr + "%"}）税抜・理論原価`;
-    return `<td class="${cellCls(r.i)}" data-tip="${esc(tip)}">${rate}%</td>`;
+    const cr = storeCostRate(code, r.m);
+    if (!cr) return `<td class="${cellCls(r.i)}">―</td>`;
+    const tail = cr.src === "theory"
+      ? `（フード ${cr.fr == null ? "―" : cr.fr + "%"} / ドリンク ${cr.dr == null ? "―" : cr.dr + "%"}）税抜・理論原価`
+      : `（FW部門別原価率の加重平均）税抜`;
+    return `<td class="${cellCls(r.i)}" data-tip="${esc(`${+r.m.slice(5, 7)}月 原価率 ${cr.rate}% ${tail}`)}">${cr.rate}%</td>`;
   };
-  let cF = 0, cD = 0, cFs = 0, cDs = 0;
-  for (const r of rows) {
-    const mm = (DATA.monthly[code] || {})[r.m] || {};
-    if (typeof mm.food_theory_cost === "number" && typeof mm.drink_theory_cost === "number" && ((mm.food_sales || 0) + (mm.drink_sales || 0)) > 0) {
-      cF += mm.food_theory_cost; cD += mm.drink_theory_cost; cFs += mm.food_sales || 0; cDs += mm.drink_sales || 0;
-    }
-  }
-  const costYsum = (cFs + cDs) > 0 ? `${Math.round((cF + cD) / (cFs + cDs) * 100)}%` : "―";
+  let cNum = 0, cDen = 0;
+  for (const r of rows) { const cr = storeCostRate(code, r.m); if (cr && cr.den > 0) { cNum += cr.num; cDen += cr.den; } }
+  const costYsum = cDen > 0 ? `${Math.round(cNum / cDen * 100)}%` : "―";
   const costRow = `<tr class="ymxcost"><th>原価率</th>${rows.map(costRateCell).join("")}<td class="ymxsum">${costYsum}</td></tr>`;
 
   // 予算未入力の月（売上はあるが予算が無い確定月）を明示。FW入力を促す。

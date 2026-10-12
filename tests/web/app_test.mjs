@@ -1417,5 +1417,21 @@ test("年間一覧：品目構成比に『原価を見る』→区分ごとの�
   assert.equal(r, null, "部門原価率が無い区分は null");
 });
 
+test("年間一覧：理論原価が無い月でもFW部門別原価率で原価率を出す（FD比のある店が空かない）", () => {
+  const d = costData();
+  // 理論原価を外し、F/D売上とFW部門別原価率だけ残す（＝店長会の理論原価タブ未入力の想定）
+  for (const m of Object.keys(d.monthly[1713])) {
+    delete d.monthly[1713][m].food_theory_cost;
+    delete d.monthly[1713][m].drink_theory_cost;
+  }
+  const ctx = loadApp(d);
+  const html = call(ctx, `storeYearMatrix("1713", 2026)`);
+  const row = (html.match(/<tr class="ymxcost">[\s\S]*?<\/tr>/) || [""])[0];
+  // 部門加重：食べ放題40.7%(100万)＋コース41.6%(200万)＝(407000+832000)/3000000=41%
+  assert.ok(row.includes("41%"), "理論原価が無くても部門別原価率の加重で原価率(41%)が出る");
+  const cr = call(ctx, `storeCostRate("1713","2026-07")`);
+  assert.equal(cr.src, "dept", "理論原価が無い月は部門別原価率にフォールバック");
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);
