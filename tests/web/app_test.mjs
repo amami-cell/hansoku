@@ -1436,7 +1436,7 @@ test("年間一覧：理論原価が無い月でもFW部門別原価率で原価
 // ── 年間一覧：ABC実原価を原価率に優先して使う（食べ放題の消費フード込み）──────────
 const abcCostData = () => {
   const months = ["2026-06", "2026-07", "2026-08"];
-  const monthly = { 1713: {} }, cm = { 1713: {} }, dm = { 1713: {} };
+  const monthly = { 1713: {} }, cm = { 1713: {} }, dm = { 1713: {} }, abc = { 1713: {} };
   for (const m of months) {
     // 理論原価は無い（9月同様）。F/D売上はあるのでFD比は出る。
     monthly[1713][m] = { sales: 5000000, food_sales: 3000000, drink_sales: 1500000 };
@@ -1448,17 +1448,19 @@ const abcCostData = () => {
       { name: "コース", sales: 2000000, count: 20, share: 0.4 },
     ];
     dm[1713][m] = { buckets: [{ name: "コース", sales: 2000000, cost_rate: 41.6, cost_coverage: 1 }], raw: [] };
+    // 店×月のABC実原価（export の abc_cost）。区分の分類に依存せず店全体の原価率を出す。
+    abc[1713][m] = { cost: 1540000, sales: 1100000, rate: 140 };
   }
   return { ...base, months, stores: [{ code: "1713", name: "門真Largo", region: "大阪", neighbors: [] }],
-    monthly, categories_monthly: cm, departments_monthly: dm, products_monthly: {} };
+    monthly, categories_monthly: cm, departments_monthly: dm, abc_cost: abc, products_monthly: {} };
 };
 
 test("年間一覧：原価率行は理論原価が無い月にABC実原価を使う（FW部門別より優先）", () => {
   const ctx = loadApp(abcCostData());
   const cr = call(ctx, `storeCostRate("1713","2026-07")`);
   assert.equal(cr.src, "abc", "理論原価が無くABCがあればABC実原価を使う");
-  // Σ原価(1,450,000+90,000)=1,540,000 ÷ Σ売上(800,000+300,000)=1,100,000 = 140%
-  assert.equal(cr.rate, 140, "ABC実原価の合計から原価率(140%)");
+  // abc_cost: 原価1,540,000 ÷ 売上1,100,000 = 140%
+  assert.equal(cr.rate, 140, "ABC実原価（店合計）から原価率(140%)");
   const html = call(ctx, `storeYearMatrix("1713", 2026)`);
   const row = (html.match(/<tr class="ymxcost">[\s\S]*?<\/tr>/) || [""])[0];
   assert.ok(row.includes("140%"), "原価率行にABC実原価の率(140%)が出る");

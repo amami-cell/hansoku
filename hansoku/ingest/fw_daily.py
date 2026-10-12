@@ -2732,7 +2732,10 @@ def ingest_abc_store(
                 ints = prod["ints"]
                 q = ints[_ABC_QTY] if len(ints) > _ABC_QTY else 0
                 s = ints[_ABC_SALES] if len(ints) > _ABC_SALES else 0
-                if q <= 0 and s <= 0:
+                c = ints[_ABC_COST] if len(ints) > _ABC_COST else 0
+                # 点数も売上も原価も無い内訳だけ捨てる。食べ放題の消費フードのように
+                # 売上0でも原価が計上される内訳（＝実際に消費した食材原価）は残す。
+                if q <= 0 and s <= 0 and c == 0:
                     continue
                 grp = (prod.get("group") or "")[:60] or None
                 if nm in ("ピスタチオ", "リッチミルク"):  # TOジェラートの+50円風味の所属確認用
@@ -2770,6 +2773,27 @@ def ingest_abc_store(
                             ingested_at=ingested_at,
                         )
                     )
+                # 内訳の原価金額・粗利金額（例: 食べ放題で消費したフードの実原価）。全商品で
+                # 採った商品は上の dedup で除いてあるので二重計上にならない。値のある指標だけ焼く。
+                for _m, _i in (
+                    (METRIC_PRODUCT_COST, _ABC_COST),
+                    (METRIC_PRODUCT_GROSS, _ABC_GROSS),
+                ):
+                    if len(ints) > _i and ints[_i] != 0:
+                        collected.append(
+                            ActualRow(
+                                store_code=code,
+                                date=rep_date,
+                                grain=GRAIN_MONTH,
+                                metric=_m,
+                                value=float(ints[_i]),
+                                product_name=nm[:80],
+                                product_category=None,
+                                kind=KIND_FINAL,
+                                source=source,
+                                ingested_at=ingested_at,
+                            )
+                        )
                 picked_names.add(nm)
                 n_break += 1
             if n_break:

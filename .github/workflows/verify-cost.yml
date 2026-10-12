@@ -1,32 +1,46 @@
 name: verify-cost
 
-# 倉庫(Neon)の product_cost を店×月で合計し、しきい値で合否を出す（読み取りのみ）。
-# ログ/サマリは blob で手元から読めないので、合計値を ::notice:: 注釈にも出す
-# （チェックラン注釈はAPIで読める）。合否は run の conclusion で判る。
+# 原価の取り込み／表示を確認する（読み取りのみ）。合否は run の conclusion で判り、
+# 実数は ::notice:: 注釈に出す（ログ/サマリは blob で手元から読めないため）。
+#  mode=warehouse … 倉庫(Neon)の product_cost を店×月で合計し、しきい値で合否。
+#  mode=dashboard … 配信中の dashboard.json の abc_cost[店][月] と品目区分の原価を見る。
 
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "warehouse（倉庫を集計）/ dashboard（配信JSONを見る）"
+        type: choice
+        options: [warehouse, dashboard]
+        default: warehouse
       store:
         description: "店コード"
         required: true
         default: "1713"
       date_from:
-        description: "開始日 YYYY-MM-DD"
-        required: true
+        description: "[warehouse] 開始日 YYYY-MM-DD"
+        required: false
         default: "2026-09-01"
       date_to:
-        description: "終了日 YYYY-MM-DD"
-        required: true
+        description: "[warehouse] 終了日 YYYY-MM-DD"
+        required: false
         default: "2026-09-30"
       metric:
-        description: "指標"
+        description: "[warehouse] 指標"
         required: false
         default: "product_cost"
       min_expected:
-        description: "この値以上なら合格（取りこぼし修正の確認用）"
+        description: "[warehouse] この値以上なら合格"
         required: false
         default: "2000000"
+      month:
+        description: "[dashboard] 対象月 YYYY-MM"
+        required: false
+        default: "2026-09"
+      url:
+        description: "[dashboard] 対象URL"
+        required: false
+        default: "https://hansoku-app.amami-c1e.workers.dev/"
 
 permissions:
   contents: read
@@ -41,12 +55,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        if: ${{ inputs.mode == 'warehouse' }}
         with:
           python-version: "3.12"
           cache: pip
       - name: 依存パッケージをインストール
+        if: ${{ inputs.mode == 'warehouse' }}
         run: pip install -r requirements.txt
+
       - name: 倉庫の合計を出して注釈にする
+        if: ${{ inputs.mode == 'warehouse' }}
         env:
           HANSOKU_ENV: cloud
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
@@ -63,21 +81,41 @@ jobs:
           OUT="$(python -m hansoku.cli aggregate --metric "$METRIC" \
                   --date-from "$DF" --date-to "$DT" --store "$STORE" --group-by date)"
           echo "$OUT"
-          # 「合計 N  (…行)」の N を取り出す（カンマ除去）。
           TOTAL="$(printf '%s\n' "$OUT" | sed -n 's/^合計 \([0-9,]*\).*/\1/p' | tr -d ',')"
           [ -n "$TOTAL" ] || TOTAL=0
           echo "::notice title=${STORE} ${DF}..${DT} ${METRIC}::合計=${TOTAL}（基準 ${MIN} 以上で合格）"
-          {
-            echo "## verify-cost ${STORE} ${DF}..${DT} ${METRIC}"
-            echo ''
-            echo '```'
-            echo "$OUT"
-            echo "合計=${TOTAL} / 基準=${MIN}"
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY" >/dev/null
           if [ "$TOTAL" -ge "$MIN" ]; then
             echo "✅ 合格：合計 ${TOTAL} ≥ ${MIN}"
           else
             echo "::error title=verify-cost 不合格::合計 ${TOTAL} が基準 ${MIN} 未満"
+            exit 1
+          fi
+
+      - name: 配信JSONの原価を出して注釈にする
+        if: ${{ inputs.mode == 'dashboard' }}
+        env:
+          URL: ${{ inputs.url }}
+          STORE: ${{ inputs.store }}
+          MONTH: ${{ inputs.month }}
+        run: |
+          set -uo pipefail
+          U="${URL%/}"
+          curl -sS "$U/data/dashboard.json" -o d.json
+          echo "dashboard.json bytes=$(wc -c < d.json | tr -d ' ')"
+          # 店×月のABC実原価（原価率行に使う値）。
+          AB="$(jq -c --arg s "$STORE" --arg m "$MONTH" '(.abc_cost[$s][$m]) // null' d.json)"
+          echo "abc_cost[$STORE][$MONTH] = $AB"
+          RATE="$(jq -r --arg s "$STORE" --arg m "$MONTH" '(.abc_cost[$s][$m].rate) // empty' d.json)"
+          # 品目区分ごとのABC実原価（食べ飲み放題などのセル）。
+          CATS="$(jq -r --arg s "$STORE" --arg m "$MONTH" \
+            '[(.categories_monthly[$s][$m] // [])[] | select(.cost!=null) | "\(.name):原価\(.cost)/売上\(.cost_sales)"] | join(" / ")' d.json)"
+          echo "品目区分の原価: $CATS"
+          echo "::notice title=${STORE} ${MONTH} 店ABC原価率::${AB}"
+          echo "::notice title=${STORE} ${MONTH} 区分別ABC原価::${CATS:-（なし）}"
+          # 原価率が出ていれば合格（空＝abc_cost未配信なら不合格）。
+          if [ -n "$RATE" ]; then
+            echo "✅ 配信JSONに abc_cost あり：原価率 ${RATE}%"
+          else
+            echo "::error title=dashboard 不合格::abc_cost[${STORE}][${MONTH}] が配信JSONに無い"
             exit 1
           fi

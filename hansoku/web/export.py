@@ -1391,6 +1391,33 @@ def build(
     departments_monthly, products_monthly, categories_monthly = _build_abc_by_month(
         warehouse, master, date_from, date_to, store_categories, product_depts
     )
+    # 店×月の ABC実原価（商品原価の合計）と商品売上の合計（いずれも税抜）。品目区分の
+    # 分類に依存せず、倉庫の商品原価をそのまま合算するので「食べ放題の消費フードまで
+    # 入った実際の原価率」を店全体で確実に出せる（理論原価が無い月の原価率行に使う）。
+    abc_cost: dict[str, dict[str, dict]] = {}
+    _abc_acc: dict[tuple[str, str], dict[str, float]] = {}
+    for _metric, _key in ((METRIC_PRODUCT_COST, "cost"), (METRIC_PRODUCT_SALES, "sales")):
+        for row in warehouse.aggregate(
+            AggregateQuery(
+                date_from=date_from,
+                date_to=date_to,
+                grain=GRAIN_MONTH,
+                metrics=[_metric],
+                store_codes=master.active_codes,
+                group_by=("store_code", "date"),
+            )
+        ):
+            m = row["date"].strftime("%Y-%m")
+            _abc_acc.setdefault((row["store_code"], m), {"cost": 0.0, "sales": 0.0})[_key] += (
+                row["value"] / NET_DIVISOR
+            )
+    for (code, m), v in _abc_acc.items():
+        if v["cost"] > 0 and v["sales"] > 0:
+            abc_cost.setdefault(code, {})[m] = {
+                "cost": round(v["cost"]),
+                "sales": round(v["sales"]),
+                "rate": round(v["cost"] / v["sales"] * 100, 1),
+            }
     # 施策の販売時期実績（abc-campaign 由来）。登録期間レンジで取った施策別の実績。
     campaign_actuals = _build_campaign_actuals(warehouse, master, date_from, date_to)
 
@@ -1497,6 +1524,9 @@ def build(
         # 実原価（金額と率）。理論原価率(cost_rate)と並べると差＝不明ロスが見える。
         # {店コード: {"YYYY-MM": {food, drink, total, rate}}}
         "actual_cost": actual_cost,
+        # ABC実原価（商品原価の店×月合計・税抜）。{店:{"YYYY-MM":{cost,sales,rate}}}。
+        # 品目区分に依存せず合算するので、理論原価が無い月の原価率行に確実に使える。
+        "abc_cost": abc_cost,
         # 原価率（損益）が出ない店の理由。{code:{status,months,latest}}。
         # status: pos=新レジ未接続 / new=新店・反映待ち / none=FW未反映 / partial=直近のみ。
         "cost_status": cost_status,

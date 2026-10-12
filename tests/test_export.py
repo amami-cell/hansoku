@@ -680,6 +680,42 @@ def test_原価粗利未取込なら商品にcostキーが無い(loaded, master)
     assert got and "cost" not in got[0] and "gross" not in got[0]
 
 
+def test_abc_costに店月のABC実原価合計と原価率が出る(loaded, master):
+    """build は abc_cost に 店×月の 商品原価合計／商品売上合計／原価率（税抜）を出す。
+    品目区分に依存しないので、理論原価の無い月の原価率行に確実に使える。"""
+    from datetime import datetime, timezone
+
+    from hansoku.model import (
+        GRAIN_MONTH,
+        KIND_FINAL,
+        METRIC_PRODUCT_COST,
+        METRIC_PRODUCT_SALES,
+        ActualRow,
+    )
+
+    code = master.active_codes[0]
+    now = datetime.now(timezone.utc)
+
+    def row(metric, value, name):
+        return ActualRow(store_code=code, date=date(2026, 7, 1), grain=GRAIN_MONTH,
+                         metric=metric, value=value, product_name=name,
+                         product_category="A", kind=KIND_FINAL, source="fw_abc", ingested_at=now)
+
+    loaded.replace_actuals([
+        row(METRIC_PRODUCT_SALES, 682000.0, "生ビール中"),
+        row(METRIC_PRODUCT_COST, 110000.0, "生ビール中"),
+        # 売上0・原価だけの消費フード（従来は落ちていた分）も店合計に入る。
+        row(METRIC_PRODUCT_COST, 220000.0, "食べ放題フード"),
+    ])
+    payload = build(loaded, master, date_from=date(2025, 1, 1), date_to=date(2026, 12, 31))
+    ab = payload["abc_cost"].get(code, {}).get("2026-07")
+    assert ab, payload["abc_cost"]
+    # 原価＝(110,000+220,000)/1.10＝300,000、売上＝682,000/1.10＝620,000、率＝48.4%。
+    assert ab["cost"] == round(330000 / 1.10)
+    assert ab["sales"] == round(682000 / 1.10)
+    assert ab["rate"] == round((330000 / 1.10) / (682000 / 1.10) * 100, 1)
+
+
 def test_全店の売れ筋がproducts_groupに焼かれる(loaded, master):
     """ABC分析の全店集計（擬似店舗 _group）が products_group に売上順で出る。"""
     from datetime import datetime, timezone
