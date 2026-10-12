@@ -1,0 +1,65 @@
+name: probe-abc-cost
+
+# FWのABC画面を1店・1期間ぶん開き、全商品グリッドとメニュー内訳の『原価金額』を
+# 行レベルで集計して ::notice:: 注釈に出す（読み取りのみ・倉庫に書かない）。
+# 取りこぼし（取込との差）がどのグリッド／どの行かを手元から確認するための診断。
+
+on:
+  workflow_dispatch:
+    inputs:
+      store:
+        description: "店名（モーダル左リストと一致）"
+        required: false
+        default: "門真Largo"
+      date_from:
+        description: "開始日 YYYY-MM-DD"
+        required: true
+        default: "2026-09-01"
+      date_to:
+        description: "終了日 YYYY-MM-DD"
+        required: true
+        default: "2026-09-30"
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 依存パッケージをインストール
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: 原価の取りこぼし診断
+        env:
+          FOODIST_JOURNAL_USER_ID: ${{ secrets.FOODIST_JOURNAL_USER_ID }}
+          FOODIST_JOURNAL_PASSWORD: ${{ secrets.FOODIST_JOURNAL_PASSWORD }}
+          HANSOKU_ENV: cloud
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          STORE: ${{ inputs.store }}
+          DF: ${{ inputs.date_from }}
+          DT: ${{ inputs.date_to }}
+        run: |
+          set -o pipefail
+          xvfb-run -a python -m hansoku.cli fw-daily --mode abc-cost-probe \
+            --abc-store "$STORE" --abc-from "$DF" --abc-to "$DT" --artifacts fw-artifacts
+      - name: 記録をアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-abc-cost
+          path: fw-artifacts/
+          retention-days: 7
+          if-no-files-found: ignore
