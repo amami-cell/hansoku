@@ -1433,5 +1433,18 @@ test("年間一覧：理論原価が無い月でもFW部門別原価率で原価
   assert.equal(cr.src, "dept", "理論原価が無い月は部門別原価率にフォールバック");
 });
 
+test("classifyCat：dept_merge_contains で食べ放題/飲み放題を食べ飲み放題に束ねる（門真Largo）", () => {
+  const d = { ...base, store_categories: { 1713: {
+    dept_as_category: true, other: "その他",
+    dept_merge_contains: [["食べ放題", "食べ飲み放題"], ["飲み放題", "食べ飲み放題"]],
+  } } };
+  const ctx = loadApp(d);
+  const cc = (n) => call(ctx, `classifyCat(${JSON.stringify(n)}, "1713", ${JSON.stringify(n)})`);
+  assert.equal(cc("04798:【ﾗﾙｺﾞ】食べ飲み放題plus"), "食べ飲み放題");
+  assert.equal(cc("04799:【ﾗﾙｺﾞ】食べ放題フード"), "食べ飲み放題");
+  assert.equal(cc("04800:【ﾗﾙｺﾞ】飲み放題【ﾚｷﾞｭﾗｰ】"), "食べ飲み放題");
+  assert.equal(cc("05573:【ラルゴ】デザート"), "デザート");
+});
+
 console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
 process.exit(failed ? 1 : 0);

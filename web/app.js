@@ -3335,6 +3335,8 @@ function classifyCat(name, code, group) {
     if (!base) return r.other || "その他";
     if ((r.dept_other || []).includes(base)) return r.other || "その他";
     if ((r.dept_merge || {})[base]) return r.dept_merge[base];
+    // キーワード包含で束ねる（門真Largo：食べ放題/飲み放題 を含む部門 → 食べ飲み放題）。
+    for (const pair of (r.dept_merge_contains || [])) { if (pair[0] && base.includes(pair[0])) return pair[1]; }
     return (r.dept_rename || {})[base] || base;
   }
   // 内訳（全商品に出ない0円の選択商品）は素の風味名では区分を当てられないので、

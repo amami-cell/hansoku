@@ -109,6 +109,10 @@ def classify_category(name: str, rules: dict, group: str | None = None) -> str:
         merge = rules.get("dept_merge") or {}
         if base in merge:
             return merge[base]
+        # キーワード包含で区分を束ねる（例 門真Largo：食べ放題/飲み放題 を含む部門 → 食べ飲み放題）。
+        for kw, target in (rules.get("dept_merge_contains") or []):
+            if kw and kw in base:
+                return target
         return (rules.get("dept_rename") or {}).get(base, base)
     gmap = rules.get("groups") or {}
     if group:

@@ -47,4 +47,10 @@ jobs:
             ' d.json
             echo "--- この店の monthly にある指標キー（先頭月）---"
             jq -r --arg s "$s" '(.monthly[$s] // {}) | to_entries | sort_by(.key) | (.[0].value // {}) | keys | join(", ")' d.json
+            # 直近の departments_monthly（バケット＋生部門）を、売上と原価率つきで見る。
+            lm=$(jq -r --arg s "$s" '(.departments_monthly[$s] // {}) | keys | sort | last // empty' d.json)
+            echo "--- departments_monthly 直近月=$lm：バケット（区分） 名 / 売上 / 原価率 / cost_coverage ---"
+            jq -r --arg s "$s" --arg m "$lm" '(.departments_monthly[$s][$m].buckets // [])[] | "  [\(.name)] 売上=\(.sales)  原価率=\(.cost_rate // "―")  cov=\(.cost_coverage // "―")"' d.json
+            echo "--- 生部門 raw（売上0でも原価率があるものを含む）---"
+            jq -r --arg s "$s" --arg m "$lm" '(.departments_monthly[$s][$m].raw // [])[] | "  \(.name)  売上=\(.sales)  原価率=\(.cost_rate // "―")"' d.json
           done
