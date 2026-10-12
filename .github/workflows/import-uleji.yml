@@ -1,0 +1,66 @@
+name: uレジABCを取り込む
+# FW未連動店（1766 ぎふや福岡天神）の商品別ABC CSVを手動取込する。
+# CSVはリポジトリの imports/uleji/ に置き、ここから読む（読取のみ・Neonへ書込）。
+on:
+  workflow_dispatch:
+    inputs:
+      store:
+        description: "店コード"
+        required: true
+        default: "1766"
+      month:
+        description: "対象年月 YYYY-MM"
+        required: true
+        default: "2026-09"
+      csv:
+        description: "CSVのパス（リポジトリ内）"
+        required: true
+        default: "imports/uleji/1766_2026-09.csv"
+      sales:
+        description: "月の売上(税込・任意・トップライン保険)"
+        required: false
+        default: ""
+      covers:
+        description: "月の客数（任意）"
+        required: false
+        default: ""
+      dry_run:
+        description: "true なら書き込まず件数だけ"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+env:
+  TZ: Asia/Tokyo
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 依存をインストール
+        run: pip install -r requirements.txt
+      - name: 取込
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          set -o pipefail
+          SARG=""; [ -n "${{ inputs.sales }}" ] && SARG="--sales ${{ inputs.sales }}"
+          CARG=""; [ -n "${{ inputs.covers }}" ] && CARG="--covers ${{ inputs.covers }}"
+          DRY=""; [ "${{ inputs.dry_run }}" = "true" ] && DRY="--dry-run"
+          {
+            echo "## uレジABC取込 ${{ inputs.store }} / ${{ inputs.month }}"
+            echo '```'
+            python -m hansoku.cli uleji-import \
+              --store "${{ inputs.store }}" --month "${{ inputs.month }}" \
+              --csv "${{ inputs.csv }}" $SARG $CARG $DRY
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

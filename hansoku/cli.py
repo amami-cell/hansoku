@@ -973,6 +973,23 @@ def _month_range(start: str, end: str) -> list[str]:
     return out
 
 
+def cmd_uleji_import(args: argparse.Namespace) -> int:
+    """uレジの商品別ABC CSVを1店・1ヶ月ぶん取り込む（FW未連動店用）。"""
+    from .ingest.uleji_csv import ingest_uleji_abc
+
+    settings = load_settings()
+    with get_warehouse(settings) as warehouse:
+        return ingest_uleji_abc(
+            warehouse,
+            args.store,
+            args.month,
+            Path(args.csv),
+            sales_total=args.sales,
+            covers=args.covers,
+            dry_run=args.dry_run,
+        )
+
+
 # ── パーサ ──────────────────────────────────────────────────────────────────
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="hansoku", description=__doc__)
@@ -1030,6 +1047,17 @@ def build_parser() -> argparse.ArgumentParser:
     ip.add_argument("--spreadsheet", help="書込先スプレッドシートID（既定 POS_SPREADSHEET_ID）")
     ip.add_argument("--lenient", action="store_true", help="取りこぼしがあっても中断しない")
     ip.set_defaults(func=cmd_ingest_pos)
+
+    ul = sub.add_parser(
+        "uleji-import", help="uレジの商品別ABC CSVを取り込む（FW未連動店・1店1ヶ月）"
+    )
+    ul.add_argument("--store", required=True, help="店コード（例 1766）")
+    ul.add_argument("--month", required=True, help="対象年月 YYYY-MM（例 2026-09）")
+    ul.add_argument("--csv", required=True, help="ABC CSVのパス")
+    ul.add_argument("--sales", type=int, default=None, help="月の売上(税込・任意）トップライン保険")
+    ul.add_argument("--covers", type=int, default=None, help="月の客数（任意）")
+    ul.add_argument("--dry-run", action="store_true", help="書き込まず件数だけ出す")
+    ul.set_defaults(func=cmd_uleji_import)
 
     pz = sub.add_parser(
         "purge-zeros",
