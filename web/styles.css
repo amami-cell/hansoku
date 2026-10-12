@@ -567,6 +567,35 @@ tbody tr:last-child td{border-bottom:0;}
 .stbtn{font:inherit;font-size:10.5px;font-weight:600;color:var(--ink-3);background:none;
   border:1px dashed var(--line-strong);border-radius:4px;padding:1px 6px;cursor:pointer;margin-left:2px;line-height:1.6;}
 .stbtn:hover{color:var(--accent);border-color:var(--accent);}
+
+/* 目標まとめ入力 */
+.bulk-warn{background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent);
+  border-radius:var(--radius);padding:10px 14px;font-size:13px;line-height:1.7;margin-bottom:12px;}
+.bulk-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.bulktbl{width:100%;border-collapse:collapse;font-size:13px;}
+.bulktbl th,.bulktbl td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle;}
+.bulktbl th{font-size:11.5px;font-weight:600;color:var(--ink-3);white-space:nowrap;}
+.bulktbl tbody tr:hover{background:var(--surface-2);}
+.bt-c-name{min-width:220px;}
+.bt-c-name b{margin:0 8px 0 6px;}
+.bt-store{font-size:11.5px;color:var(--ink-3);}
+.bt-period,.bt-goal{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.bt-in{font:inherit;font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--line-strong);
+  border-radius:6px;padding:5px 8px;}
+.bt-in:focus{outline:none;border-color:var(--accent);}
+.bt-mo{width:132px;}
+.bt-num{width:128px;text-align:right;}
+.bt-in:disabled{opacity:.45;}
+.bt-dash{color:var(--ink-3);}
+.bt-unit{color:var(--ink-3);font-size:12px;}
+.bt-oe{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:var(--ink-2);white-space:nowrap;}
+.bt-save{font:inherit;font-size:12px;font-weight:600;color:var(--accent);background:var(--accent-soft);
+  border:1px solid var(--accent-line);border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap;}
+.bt-save:hover{background:var(--accent);color:#fff;}
+.bt-ro{color:var(--ink-2);}
+.bt-note{font-size:11px;color:var(--ink-3);margin-left:4px;}
+.bt-ok{font-size:11.5px;color:var(--accent);white-space:nowrap;}
+.bt-ok.err{color:var(--warning-ink);}
 .ceff{font-size:12px;color:var(--ink-2);margin-top:5px;font-variant-numeric:tabular-nums;}
 .ceff b{color:var(--ink);font-weight:700;}
 .ceff.muted{color:var(--ink-3);}
