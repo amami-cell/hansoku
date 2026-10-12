@@ -1,0 +1,32 @@
+# 本番アプリURL（Cloudflare Access なし・誰でも閲覧／打ち込みは合言葉ログイン）。
+# 旧 hansoku ワーカーには前段に Cloudflare Access（SSO）が残っており毎回サインインを
+# 求められるため、Access の付いていない新しいホスト名で本番相当を配る。
+# 中身は本番と同じ Worker コード・本番Neonデータ・本番R2。
+#   URL: https://hansoku-app.<サブドメイン>.workers.dev
+# 不要になったら `wrangler delete --name hansoku-app` で消す。
+name = "hansoku-app"
+main = "worker/index.js"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./web"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+# 全リクエストをまず Worker に通す。これが無いと静的アセット（HTML・app.js・
+# data/dashboard.js＝実データ）が Worker の入口チェックを飛ばして直接配信され、
+# 合言葉ログインにしても中身が誰でも取れてしまう。Worker 先行＝データも合言葉で保護。
+run_worker_first = true
+
+# 制作物（POP）の実体は本番と同じ R2 バケットから返す。
+[[r2_buckets]]
+binding = "CREATIVES"
+bucket_name = "hansoku-creatives"
+
+# 入口の方式。前段に Cloudflare Access が無いので、
+#   "1" = 誰でも閲覧の開放モード（いまはこれ）／打ち込みは右上ログイン（合言葉＋お名前）で可。
+#   "0" = 合言葉ログイン必須（閲覧も要ログイン）。
+# OWNER_NAME はオーナー（管理権限）の表示名。
+[vars]
+OPEN_ACCESS = "1"
+OWNER_NAME = "天見 真悟"
