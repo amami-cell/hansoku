@@ -354,6 +354,49 @@ await test("まとめ入力：開放（閲覧専用）は入力欄を出さず�
   assert.ok(!html.includes("data-bulkgoal"), "開放時は入力欄を出さない");
 });
 
+await test("まとめ入力：ログイン時は＋新規販促ボタンを出す／開放時は出さない", () => {
+  const h = loadForm(base);
+  h.call(`WRITE_OK=true; PLANS_API_OK=true; DATA.campaigns=[];`);
+  assert.ok(h.call(`renderBulkTargets()`).includes("data-bulknew"), "ログイン時は起票ボタンを出す");
+  h.call(`WRITE_OK=false;`);
+  assert.ok(!h.call(`renderBulkTargets()`).includes("data-bulknew"), "開放時は起票ボタンを出さない");
+});
+
+await test("新規起票：店舗＋販促名＋期間＋目標をまとめて保存する", async () => {
+  const h = loadForm(base);
+  const { getEl, CAP, call } = h;
+  call(`WRITE_OK=true; PLANS_API_OK=true;`);
+  getEl("bnp-store").value = "1160";
+  getEl("bnp-title").value = "冬の鍋フェア";
+  getEl("bnp-start").value = "2026-12";
+  getEl("bnp-end").value = "2027-01";
+  getEl("bnp-oe").checked = false;
+  getEl("bnp-goal").value = "3000000";
+  await call(`saveBulkNewPlan()`);
+  assert.equal(CAP.plans.length, 1, "プランが1件起票される");
+  const p = CAP.plans[0];
+  assert.equal(p.store_code, "1160");
+  assert.equal(p.title, "冬の鍋フェア");
+  assert.equal(p.start, "2026-12-01", "開始は月初");
+  assert.equal(p.end, "2027-01-31", "終了は月末");
+  assert.equal(p.open_ended, false);
+  // 目標は施策キー（id@開始年）で /api/targets に保存される
+  const tg = CAP.targets.find(t => t.target === 3000000);
+  assert.ok(tg, "目標売上が保存される");
+  assert.ok(String(tg.id).includes("@2026"), "鍵は開始年つき（" + tg.id + "）");
+});
+
+await test("新規起票：店舗・販促名・開始月が無いと保存しない", async () => {
+  const h = loadForm(base);
+  const { getEl, CAP, call } = h;
+  call(`WRITE_OK=true; PLANS_API_OK=true;`);
+  getEl("bnp-store").value = "";   // 店舗未選択
+  getEl("bnp-title").value = "名無し";
+  getEl("bnp-start").value = "2026-12";
+  await call(`saveBulkNewPlan()`);
+  assert.equal(CAP.plans.length, 0, "必須が欠けたら /api/plans を叩かない");
+});
+
   console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
   process.exit(failed ? 1 : 0);
 }

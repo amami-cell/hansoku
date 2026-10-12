@@ -1716,6 +1716,8 @@ function render() {
     }));
   app.querySelectorAll("[data-bulkperiod]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); saveBulkPeriod(el.dataset.bulkperiod); }));
+  app.querySelectorAll("[data-bulknew]").forEach(el =>
+    el.addEventListener("click", e => { e.stopPropagation(); openBulkNewPlan(); }));
   // 販促カルーセルは、開いたとき現在月のカードを中央に寄せる（前後の月が両端にチラ見え）。
   app.querySelectorAll(".pcar").forEach(car => {
     const now = car.querySelector(".pcar-mo.now") || car.querySelector(".pcar-mo");
@@ -1941,13 +1943,18 @@ function renderBulkTargets() {
   const banner = WRITE_OK ? "" :
     `<div class="bulk-warn">※ いまは閲覧専用（開放モード）です。打ち込むにはログインが必要です。
        右上の「ログイン」から入ると、ここで期間と目標を入力できます。</div>`;
+  // 新規販促の起票ボタン（店舗＋販促名＋期間＋目標のみの簡易フォーム）。ログイン時のみ。
+  const addBtn = (WRITE_OK && PLANS_API_OK)
+    ? `<button class="plannew" data-bulknew="1">＋新規販促を追加</button>` : "";
 
   if (!rows.length) {
     return `<div class="wrap"><section class="block">
       <div class="bhead"><h2>目標まとめ入力</h2>
-        <span class="bnote">実績がまだ出ていない「実施中・予定」の販促に、期間と目標（売上）をまとめて入力します。</span></div>
+        <span class="bnote">実績がまだ出ていない「実施中・予定」の販促に、期間と目標（売上）をまとめて入力します。</span>
+        ${addBtn}</div>
       ${banner}
-      <div class="panel"><div class="empty">いま入力対象の販促はありません（終了・実績が出ている分は出しません）。</div></div>
+      <div class="panel"><div class="empty">いま入力対象の販促はありません（終了・実績が出ている分は出しません）。
+        ${addBtn ? "新しく起票する場合は上の「＋新規販促を追加」から。" : ""}</div></div>
     </section></div>`;
   }
 
@@ -2006,7 +2013,8 @@ function renderBulkTargets() {
   return `<div class="wrap"><section class="block">
     <div class="bhead"><h2>目標まとめ入力</h2>
       <span class="bnote">実績がまだ出ていない「実施中・予定」の販促に、期間と目標（売上）をまとめて入力します。
-        ${rows.length}件。目標は入力欄を離れると保存されます。</span></div>
+        ${rows.length}件。目標は入力欄を離れると保存されます。</span>
+      ${addBtn}</div>
     ${banner}
     <div class="panel"><div class="bulk-scroll"><table class="bulktbl">
       <thead><tr><th>施策</th><th>期間</th><th>目標（売上）</th></tr></thead>
@@ -2091,6 +2099,97 @@ function flashBtOk(okKey, msg, isErr) {
   el.textContent = msg;
   el.classList.toggle("err", !!isErr);
   if (!isErr) setTimeout(() => { if (el.textContent === msg) el.textContent = ""; }, 2500);
+}
+
+// 新規販促の簡易起票フォーム（店舗＋販促名＋期間＋目標売上のみ）。
+// 種別・区分・担当・メモなどは既定のまま起票し、必要なら後から通常の編集画面で足せる。
+function openBulkNewPlan() {
+  if (!PLANS_API_OK || !WRITE_OK) { alert("販促の起票は本番（ログイン済み）でのみ使えます。"); return; }
+  let ov = document.getElementById("bulknew"); if (ov) ov.remove();
+  ov = document.createElement("div");
+  ov.id = "bulknew"; ov.className = "crprev";
+  const storeOpts = ['<option value="">店舗を選ぶ…</option>']
+    .concat((DATA.stores || []).map(st => `<option value="${esc(st.code)}">${esc(st.name)}（${esc(st.code)}）</option>`)).join("");
+  ov.innerHTML = `<div class="crprev-bd" data-bnpclose></div>
+    <div class="crprev-box planbox" role="dialog" aria-modal="true">
+      <div class="crprev-bar"><span class="crprev-title">販促を新規起票</span>
+        <button class="crprev-x" type="button" data-bnpclose aria-label="閉じる">×</button></div>
+      <div class="planform">
+        <label class="pf-l">店舗<select class="pf-in" id="bnp-store">${storeOpts}</select></label>
+        <label class="pf-l">販促名（標題）<input class="pf-in" id="bnp-title" type="text" placeholder="例：秋のパフェフェア"></label>
+        <div class="pf-row">
+          <label class="pf-l">開始月<input class="pf-in" id="bnp-start" type="month"></label>
+          <label class="pf-l">終了月<span class="pf-hint">未入力＝常設</span><input class="pf-in" id="bnp-end" type="month"></label>
+        </div>
+        <label class="bt-oe"><input type="checkbox" id="bnp-oe"> 終了日なし（常設）にする</label>
+        <label class="pf-l">目標（売上・任意）<input class="pf-in" id="bnp-goal" type="number" inputmode="numeric" min="0" step="1000" placeholder="円（後から入力でも可）"></label>
+        <div class="pf-msg" id="bnp-msg" hidden></div>
+        <div class="pf-actions"><span></span><div>
+          <button class="pf-cancel" type="button" data-bnpclose>キャンセル</button>
+          <button class="pf-save" type="button" id="bnp-save">起票する</button>
+        </div></div>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov.addEventListener("click", e => { if (e.target.hasAttribute("data-bnpclose")) ov.remove(); });
+  ov.querySelector("#bnp-save").addEventListener("click", saveBulkNewPlan);
+  ov.querySelector("#bnp-oe").addEventListener("change", e => {
+    const em = ov.querySelector("#bnp-end"); if (em) { em.disabled = e.target.checked; if (e.target.checked) em.value = ""; }
+  });
+  const t = ov.querySelector("#bnp-title"); if (t) t.focus();
+}
+async function saveBulkNewPlan() {
+  const g = id => document.getElementById(id);
+  const msg = g("bnp-msg");
+  const show = m => { if (msg) { msg.textContent = m; msg.hidden = false; } };
+  const code = g("bnp-store").value;
+  const title = (g("bnp-title").value || "").trim();
+  const sm = g("bnp-start").value;
+  const oe = !!g("bnp-oe").checked;
+  const em = oe ? "" : g("bnp-end").value;
+  const goalRaw = (g("bnp-goal").value || "").replace(/[,，円\s]/g, "");
+  if (!code) return show("店舗を選んでください。");
+  if (!title) return show("販促名（標題）を入れてください。");
+  if (!sm) return show("開始月を入れてください。");
+  if (!oe && !em) return show("終了月を入れるか、常設にチェックしてください。");
+  if (!oe && em < sm) return show("終了月は開始月より後にしてください。");
+  let goal = null;
+  if (goalRaw !== "") { const n = parseInt(goalRaw, 10); if (isNaN(n) || n < 0) return show("目標は0以上の数値で入れてください。"); goal = n; }
+  const payload = {
+    id: "", store_code: code, title, kind: "osusume", bucket: "",
+    start: `${sm}-01`, end: oe ? `${sm}-01` : `${em}-${String(lastDayOfMonth(em)).padStart(2, "0")}`,
+    open_ended: oe, owner: ME.name || "", goal: null, note: "", source_id: "",
+  };
+  const btn = g("bnp-save"); if (btn) { btn.disabled = true; btn.textContent = "保存中…"; }
+  try {
+    const res = await fetch("/api/plans", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+    if (res.status === 401) return show("保存にはログインが必要です。");
+    if (!res.ok) { const d = await res.json().catch(() => ({})); return show(d.detail || "保存に失敗しました。"); }
+    const data = await res.json();
+    let plan = null;
+    if (data && data.plan) {
+      plan = data.plan;
+      const i = PLANS.findIndex(p => p.id === plan.id);
+      if (i >= 0) PLANS[i] = plan; else PLANS.push(plan);
+      applyPlans();
+    }
+    if (plan && goal != null) {
+      const key = campKey(planToCamp(plan));
+      try {
+        const r2 = await fetch("/api/targets", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: key, target: goal }) });
+        if (r2.ok) {
+          const cell = { value: goal, by: "自分", at: new Date().toISOString() };
+          SERVER_TARGETS[key] = cell;
+          SERVER_TARGETS_M[key] = SERVER_TARGETS_M[key] || {};
+          SERVER_TARGETS_M[key].sales = cell;
+        }
+      } catch (e) { /* 目標保存の失敗は起票自体を止めない */ }
+    }
+    const ov = document.getElementById("bulknew"); if (ov) ov.remove();
+    render();
+  } catch (e) {
+    show("保存に失敗しました（通信エラー）。");
+  } finally { if (btn) { btn.disabled = false; btn.textContent = "起票する"; } }
 }
 
 function renderSchedule() {
