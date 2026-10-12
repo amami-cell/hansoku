@@ -759,3 +759,25 @@ def test_dept_merge_containsで食べ放題飲み放題を1区分に束ねる():
         assert classify_category(n, rules, group=n) == "食べ飲み放題"
     assert classify_category("05573:【ラルゴ】デザート", rules, group="05573:【ラルゴ】デザート") == "デザート"
     assert classify_category("03583:【ﾗﾙｺﾞ】ｱﾙｺｰﾙ", rules, group="03583:【ﾗﾙｺﾞ】ｱﾙｺｰﾙ") == "ｱﾙｺｰﾙ"
+
+
+def test_bucket_mergeで飲み放題と食べ放題を食べ飲み放題バケットに統合する():
+    """門真Largo：部門バケットの食べ放題/飲み放題を『食べ飲み放題』1バケットに統合。
+    売上・点数・原価を合算し、原価率は売上加重で出し直す。アラカルト等は不変。"""
+    from hansoku.web.export import _assemble_departments
+    depts = {
+        "04798:食べ飲み放題plus": {"sales": 881927.0, "qty": 100.0, "rate": 13.9},
+        "04797:食べ飲み放題": {"sales": 46018.0, "qty": 10.0, "rate": 15.7},
+        "04799:食べ放題フード": {"sales": 0.0, "qty": 0.0, "rate": None},
+        "03568:ｵﾑﾗｲｽ": {"sales": 299150.0, "qty": 40.0, "rate": 17.7},
+    }
+    bm = {"食べ放題": "食べ飲み放題", "飲み放題": "食べ飲み放題"}
+    out = _assemble_departments(depts, bucket_merge=bm)
+    by = {b["name"]: b for b in out["buckets"]}
+    assert "食べ放題" not in by and "飲み放題" not in by, "食べ放題/飲み放題バケットは残さない"
+    assert by["食べ飲み放題"]["sales"] == 927945, "売上は合算（881,927+46,018）"
+    assert by["食べ飲み放題"]["cost_rate"] == 14.0, "原価率は売上加重で出し直す"
+    assert by["アラカルト"]["sales"] == 299150, "他バケットは不変"
+    # raw 部門は統合先バケットのタグが付く
+    tags = {r["name"]: r["bucket"] for r in out["raw"]}
+    assert tags["04799:食べ放題フード"] == "食べ飲み放題"

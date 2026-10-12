@@ -709,10 +709,14 @@ def _departments_from_products(
     return agg, unmatched
 
 
-def _assemble_departments(depts: dict[str, dict]) -> dict:
+def _assemble_departments(depts: dict[str, dict], bucket_merge: dict | None = None) -> dict:
     """1店・1ヶ月ぶんの生部門（{部門名:{sales,qty,rate}}）を、標準バケット構成
     （コース/ランチ/アラカルト/飲み放題/食べ放題）＋生部門 raw に組み立てる。
-    店舗詳細・施策詳細・月次シリーズで共用する。"""
+    店舗詳細・施策詳細・月次シリーズで共用する。
+
+    bucket_merge: バケットの統合（例 門真Largo {飲み放題: 食べ飲み放題, 食べ放題: 食べ飲み放題}）。
+    売上・点数・原価は統合先に合算し、原価率は売上加重で出し直す。"""
+    bucket_merge = bucket_merge or {}
     total = sum(d["sales"] for d in depts.values()) or 1.0
     buckets: dict[str, dict] = {}
     alacarte_split = {"フード": 0.0, "ドリンク": 0.0}
@@ -725,7 +729,8 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
     takeout_qty = 0.0
     raw_list = []
     for name, d in depts.items():
-        bucket = dept_bucket(name)
+        orig_bucket = dept_bucket(name)
+        bucket = bucket_merge.get(orig_bucket, orig_bucket)
         b = buckets.setdefault(
             bucket, {"sales": 0.0, "qty": 0.0, "cost": 0.0, "rated_sales": 0.0}
         )
@@ -736,7 +741,7 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
         if d["rate"] is not None:
             b["cost"] += d["sales"] * (d["rate"] / 100.0)
             b["rated_sales"] += d["sales"]
-        if bucket == "アラカルト":
+        if orig_bucket == "アラカルト":
             key = "ドリンク" if is_drink_dept(name) else "フード"
             alacarte_split[key] += d["sales"]
             alacarte_qty[key] += d["qty"]
@@ -753,8 +758,14 @@ def _assemble_departments(depts: dict[str, dict]) -> dict:
                 "cost_rate": round(d["rate"], 1) if d["rate"] is not None else None,
             }
         )
+    # 表示順：DEPT_BUCKETS を統合後の名前に写した順（統合先は最初の出現位置にまとめる）。
+    order: list[str] = []
+    for bn in DEPT_BUCKETS:
+        mb = bucket_merge.get(bn, bn)
+        if mb not in order:
+            order.append(mb)
     bucket_list = []
-    for name in DEPT_BUCKETS:
+    for name in order:
         if name not in buckets:
             continue
         b = buckets[name]
@@ -883,8 +894,9 @@ def _build_abc_by_month(
             store[row["product_name"]]["qty"] += row["value"]
     departments_monthly: dict[str, dict[str, dict]] = {}
     for code, months in dept_raw.items():
+        _bm = (store_categories.get(code) or {}).get("bucket_merge") or {}
         for m, depts in months.items():
-            departments_monthly.setdefault(code, {})[m] = _assemble_departments(depts)
+            departments_monthly.setdefault(code, {})[m] = _assemble_departments(depts, bucket_merge=_bm)
     # 商品売上（店×月×商品）
     prod_tmp: dict[str, dict[str, list]] = {}
     for row in warehouse.aggregate(
@@ -998,7 +1010,8 @@ def _build_abc_by_month(
             if want_synth:
                 synth, _unm = _departments_from_products(items, product_depts[code])
                 if synth:
-                    departments_monthly.setdefault(code, {})[m] = _assemble_departments(synth)
+                    departments_monthly.setdefault(code, {})[m] = _assemble_departments(
+                        synth, bucket_merge=(rules.get("bucket_merge") or {}))
             # 部門方式の店の「区分→商品」ドリル用に、各商品へ所属部門(区分)のタグを載せる。
             # 区分は部門グリッド（例「ピザメニュー」「ウィスキー」等・細かい）由来だが、FWの
             # メニュー見出し(group)は粗い別軸（フード/ドリンク/コース/おすすめ…）で区分に一致
