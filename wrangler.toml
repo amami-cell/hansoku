@@ -35,5 +35,5 @@ bucket_name = "hansoku-creatives"
 #   （合言葉＝Worker秘密 APP_PASSWORD。deploy.yml が HANSOKU_APP_PASSWORD から設定）
 # OWNER_NAME = アカウント管理（権限変更）ができるオーナーの表示名。
 [vars]
-OPEN_ACCESS = "0"
+OPEN_ACCESS = "1"
 OWNER_NAME = "天見 真悟"
