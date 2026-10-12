@@ -3400,9 +3400,10 @@ function catCostRate(code, m, cat) {
   }
   return rated > 0 ? Math.round(cost / rated * 1000) / 10 : null;
 }
-// 店の月次「理論原価率」の材料（原価金額・売上・率）。無ければ null。
-//  1) 店長会シートの理論原価（フード/ドリンク。取れている側だけで加重）。
-//  2) 無ければ FW部門別原価率の売上加重平均（FD比のある店でも理論原価が未取込の月を拾う）。
+// 店の月次「原価率」の材料（原価金額・売上・率・出所）。無ければ null。
+//  1) 店長会シートの理論原価（フード/ドリンク。取れている側だけで加重）。src=theory
+//  2) 無ければ ABC実原価（区分別の実原価の合計。消費フード込みで低く出ない）。src=abc
+//  3) それも無ければ FW部門別原価率の売上加重平均。src=dept
 function storeCostRate(code, m) {
   const mm = ((DATA.monthly || {})[code] || {})[m] || {};
   const fc = mm.food_theory_cost, dc = mm.drink_theory_cost;
@@ -3417,6 +3418,16 @@ function storeCostRate(code, m) {
       dr: (typeof dc === "number" && ds > 0) ? Math.round(dc / ds * 100) : null,
     };
   }
+  // ② ABC実原価（区分別に取れている実原価の合計）。FW部門別原価率は食べ放題の消費
+  //    フード（売上0・原価だけ）を取りこぼして低く出るので、理論原価が無い月は
+  //    こちらを優先する（門真Largo 9月など）。
+  const cm = ((DATA.categories_monthly || {})[code] || {})[m] || [];
+  let ac = 0, as = 0;
+  for (const c of cm) { if (typeof c.cost === "number" && c.cost_sales > 0) { ac += c.cost; as += c.cost_sales; } }
+  if (as > 0) {
+    return { rate: Math.round(ac / as * 100), num: Math.round(ac), den: Math.round(as), src: "abc", fr: null, dr: null };
+  }
+  // ③ FW部門別原価率の売上加重平均（ABCの実原価も無い月のフォールバック）。
   const dm = ((DATA.departments_monthly || {})[code] || {})[m];
   if (dm) {
     let c = 0, r = 0;
@@ -5904,6 +5915,13 @@ function storeYearMatrix(code, year) {
       const promo = monthHits[r.i].cats.has(n);   // その月に販促がある区分 → 色付け
       if (costMode) {
         // 原価モード：原価金額（大）＋原価率（小）。原価率が取れない区分は「―」。
+        // ABC実原価（食べ放題の消費フードまで入った実際の原価金額）が取れていれば優先。
+        // 無ければ FW部門別原価率から 売上×率 で概算する。
+        if (typeof c.cost === "number" && c.cost_sales > 0) {
+          const rate = Math.round(c.cost / c.cost_sales * 1000) / 10;
+          const tip = `${n}｜原価率 ${rate}%｜原価 ${man(c.cost)}円｜売上 ${man(c.cost_sales)}円（税抜・ABC実原価）`;
+          return `<td class="${cellCls(r.i)} ymxcompo-c${promo ? " promo" : ""}" data-tip="${esc(tip)}">${man(c.cost)}<span class="ccr">${rate}%</span></td>`;
+        }
         const rate = catCostRate(code, r.m, n);
         if (rate == null) return `<td class="${cellCls(r.i)} ymxcompo-c${promo ? " promo" : ""}" data-tip="${esc(`${n}｜原価率が取れていません（売上 ${man(c.sales)}円）`)}">―</td>`;
         const cost = Math.round(c.sales * rate / 100);
@@ -5917,9 +5935,15 @@ function storeYearMatrix(code, year) {
     }).join("");
     let ysumCell;
     if (costMode) {
-      // 年計：確定分の 区分売上×原価率 を合計 ÷ 原価率の取れた売上 ＝ 年間の原価率。
+      // 年計：確定分の 原価金額 を合計 ÷ 原価率の取れた売上 ＝ 年間の原価率。
+      // 月ごとに ABC実原価があればそれを、無ければ FW部門別原価率×売上 を使う。
       let yCost = 0, yRated = 0;
-      for (const r of conf) { const c = r.cats.find(x => x.name === n); const rate = catCostRate(code, r.m, n); if (c && c.sales && rate != null) { yCost += c.sales * rate / 100; yRated += c.sales; } }
+      for (const r of conf) {
+        const c = r.cats.find(x => x.name === n);
+        if (!c) continue;
+        if (typeof c.cost === "number" && c.cost_sales > 0) { yCost += c.cost; yRated += c.cost_sales; }
+        else { const rate = catCostRate(code, r.m, n); if (c.sales && rate != null) { yCost += c.sales * rate / 100; yRated += c.sales; } }
+      }
       const yRate = yRated > 0 ? Math.round(yCost / yRated * 100) : null;
       ysumCell = yRate != null
         ? `<td class="ymxsum" data-tip="${esc(`${n}｜年間 原価率 ${yRate}%｜原価 ${man(Math.round(yCost))}円`)}">${man(Math.round(yCost))}<span class="ccr">${yRate}%</span></td>`
@@ -5954,7 +5978,9 @@ function storeYearMatrix(code, year) {
     if (!cr) return `<td class="${cellCls(r.i)}">―</td>`;
     const tail = cr.src === "theory"
       ? `（フード ${cr.fr == null ? "―" : cr.fr + "%"} / ドリンク ${cr.dr == null ? "―" : cr.dr + "%"}）税抜・理論原価`
-      : `（FW部門別原価率の加重平均）税抜`;
+      : cr.src === "abc"
+        ? `（ABC実原価の合計・消費フード込み）税抜`
+        : `（FW部門別原価率の加重平均）税抜`;
     return `<td class="${cellCls(r.i)}" data-tip="${esc(`${+r.m.slice(5, 7)}月 原価率 ${cr.rate}% ${tail}`)}">${cr.rate}%</td>`;
   };
   let cNum = 0, cDen = 0;

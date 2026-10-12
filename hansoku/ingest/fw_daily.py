@@ -2628,7 +2628,11 @@ def ingest_abc_store(
                 ints = prod["ints"]
                 sales = _sales_of(prod)
                 qty = _qty_of(prod)
-                if sales <= 0 and qty <= 0:
+                _cost = ints[_ABC_COST] if len(ints) > _ABC_COST else 0
+                # 売上も点数も原価も無い行だけ捨てる。食べ放題の消費フードのように
+                # 売上0・点数0でも原価だけが計上される商品（例「食べ放題フード」）は、
+                # 原価があるかぎり残す（原価率の分子を取りこぼさないため）。
+                if sales <= 0 and qty <= 0 and _cost == 0:
                     continue
                 if sales > 0:
                     collected.append(
@@ -2661,27 +2665,29 @@ def ingest_abc_store(
                             ingested_at=ingested_at,
                         )
                     )
-                # 原価金額・粗利金額（売上のある商品のみ。0円内訳は原価も無いので採らない）。
-                if sales > 0:
-                    for _m, _i in (
-                        (METRIC_PRODUCT_COST, _ABC_COST),
-                        (METRIC_PRODUCT_GROSS, _ABC_GROSS),
-                    ):
-                        if len(ints) > _i:
-                            collected.append(
-                                ActualRow(
-                                    store_code=code,
-                                    date=rep_date,
-                                    grain=GRAIN_MONTH,
-                                    metric=_m,
-                                    value=float(ints[_i]),
-                                    product_name=prod["name"][:80],
-                                    product_category=prod["rank"],
-                                    kind=KIND_FINAL,
-                                    source=source,
-                                    ingested_at=ingested_at,
-                                )
+                # 原価金額・粗利金額。売上0でも原価が計上される商品（食べ放題の消費
+                # フードは「食べ放題フード」の売上0行に原価だけが付く）を取りこぼさない
+                # よう、売上の有無ではなく各指標の値で採る。全商品グリッドは1商品1行で
+                # 内訳（0円の選択商品）を含まないため、これで二重計上にはならない。
+                for _m, _i in (
+                    (METRIC_PRODUCT_COST, _ABC_COST),
+                    (METRIC_PRODUCT_GROSS, _ABC_GROSS),
+                ):
+                    if len(ints) > _i and ints[_i] != 0:
+                        collected.append(
+                            ActualRow(
+                                store_code=code,
+                                date=rep_date,
+                                grain=GRAIN_MONTH,
+                                metric=_m,
+                                value=float(ints[_i]),
+                                product_name=prod["name"][:80],
+                                product_category=prod["rank"],
+                                kind=KIND_FINAL,
+                                source=source,
+                                ingested_at=ingested_at,
                             )
+                        )
                 n_prod += 1
             top = products[0]["name"][:16] if products else "-"
 
