@@ -133,6 +133,11 @@ jobs:
           URL: ${{ inputs.url }}
         run: |
           set -o pipefail
+          # 配信JSONは Cloudflare 越しなので curl で取る（python urllib だと 403）。
+          if [ -n "${URL:-}" ]; then
+            curl -sS "${URL%/}/data/dashboard.json" -o /tmp/dash.json || echo "curl失敗"
+            echo "dash.json bytes=$(wc -c < /tmp/dash.json 2>/dev/null || echo 0)"
+          fi
           python - <<'PY'
           import os, datetime as dt
           from hansoku.settings import load_settings
@@ -197,12 +202,11 @@ jobs:
           # FW生部門が無い店は商品→部門の再構成で departments を作る。配信中の
           # dashboard.json に コース バケットが売上つきで出ているかを店×月で確認する。
           recon_stores = ["1069", "1111", "1137", "1151", "1168"]
-          url = (os.environ.get("URL") or "").rstrip("/")
-          if url:
-              import json, urllib.request
+          if os.path.exists("/tmp/dash.json"):
+              import json
               try:
-                  with urllib.request.urlopen(url + "/data/dashboard.json", timeout=90) as resp:
-                      dash = json.load(resp)
+                  with open("/tmp/dash.json", encoding="utf-8") as _f:
+                      dash = json.load(_f)
                   dm = dash.get("departments_monthly", {})
                   for c in recon_stores:
                       per = dm.get(c, {}) or {}
