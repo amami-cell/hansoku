@@ -1737,15 +1737,40 @@ def probe_abc_cost(artifacts: Path, *, store: str, d_from: str, d_to: str) -> in
         )
 
         now_ingest = top_cost + menu_cost  # 現状の取込が焼いている原価（全商品top40＋内訳）
+
+        # --- 曖昧な行の洗い出し（食べ放題/飲み放題 の二重計上候補と、区分不明の内訳）---
+        _KW = ("食べ放題", "飲み放題", "食べ飲み放題")
+
+        def _haskw(*ss):
+            return any(k in (s or "") for s in ss for k in _KW)
+
+        # 全商品側の 食べ放題/飲み放題 行（＝パッケージの名目原価。内訳と二重になり得る）。
+        zh_tabe = [p for p in products if _haskw(p["name"])]
+        zh_tabe_cost = sum(_cost(p) for p in zh_tabe)
+        zh_tabe_lines = " / ".join(f"{p['name'][:20]}:売{_sales(p)}原{_cost(p)}" for p in
+                                   sorted(zh_tabe, key=_cost, reverse=True)[:15])
+        # 内訳を「食べ放題/飲み放題と分かるもの」と「区分の手掛かりが無い＝不明」に分ける。
+        menu_tabe = [r for r in menu_extra if _haskw(r["name"], r.get("group"))]
+        menu_other = [r for r in menu_extra if not _haskw(r["name"], r.get("group"))]
+        menu_tabe_cost = sum(_cost(r) for r in menu_tabe)
+        menu_other_cost = sum(_cost(r) for r in menu_other)
+        # 不明な内訳は原価の大きい順に（どの区分に入れるべきか本部に確認するため）。
+        other_lines = " / ".join(
+            f"{(r.get('group') or '見出し無')[:10]}|{r['name'][:16]}:原{_cost(r)}"
+            for r in sorted(menu_other, key=_cost, reverse=True)[:18]
+        )
+
         print(f"[原価診断] 全商品 {n_all}品 Σ原価={all_cost} top{_ABC_TOP_N}={top_cost} "
               f"top外={beyond_cost} 売上0の原価={zero_sales_cost}")
         print(f"[原価診断] メニュー内訳(全商品以外) {len(menu_extra)}件 Σ原価={menu_cost}")
-        print(f"[原価診断] 現状取込(全商品top40+内訳)={now_ingest}")
-        print(f"::notice title=全商品::{n_all}品 Σ原価{all_cost} / top{_ABC_TOP_N}={top_cost} / top外={beyond_cost} / 売上0原価={zero_sales_cost}")
-        print(f"::notice title=メニュー内訳::{len(menu_extra)}件 Σ原価{menu_cost}")
+        print(f"[原価診断] 全商品の食べ放題/飲み放題 {len(zh_tabe)}件 Σ原価={zh_tabe_cost}")
+        print(f"[原価診断] 内訳 食べ放題系 {len(menu_tabe)}件 Σ原価={menu_tabe_cost} / "
+              f"区分不明 {len(menu_other)}件 Σ原価={menu_other_cost}")
+        print(f"::notice title=全商品::{n_all}品 Σ原価{all_cost} / top{_ABC_TOP_N}={top_cost} / top外={beyond_cost}")
+        print(f"::notice title=メニュー内訳::{len(menu_extra)}件 Σ原価{menu_cost}（食べ放題系{len(menu_tabe)}件{menu_tabe_cost} / 区分不明{len(menu_other)}件{menu_other_cost}）")
         print(f"::notice title=現状取込::全商品top40({top_cost})+内訳({menu_cost})={now_ingest}")
-        print(f"::notice title=全商品原価上位::{top_lines}")
-        print(f"::notice title=内訳原価上位::{menu_lines or '（なし）'}")
+        print(f"::notice title=全商品の食べ放題飲み放題行(二重計上候補)::{len(zh_tabe)}件 Σ{zh_tabe_cost} :: {zh_tabe_lines or '（なし）'}")
+        print(f"::notice title=区分不明の内訳(確認対象)::{other_lines or '（なし）'}")
     return 0
 
 
