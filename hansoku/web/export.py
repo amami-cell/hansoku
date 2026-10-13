@@ -1065,6 +1065,21 @@ def _build_abc_by_month(
                         if c["name"] in has_cost:
                             c["cost"] = round(acost[c["name"]])
                             c["cost_sales"] = round(asales.get(c["name"], 0.0))
+                    # どの表示区分にも割り当たらなかったABC原価を「その他」にまとめる
+                    # （門真Largo など abc_other_catchall 指定店）。合計原価に必ず反映し、
+                    # 各区分への割り振りは運用で後日おこなう前提の“受け皿”。
+                    if rules.get("abc_other_catchall"):
+                        shown = {c["name"] for c in cats}
+                        ex_cost = sum(v for k, v in acost.items() if k not in shown)
+                        ex_sales = sum(asales.get(k, 0.0) for k in acost if k not in shown)
+                        if round(ex_cost):
+                            other = rules.get("other", "その他")
+                            oc = next((c for c in cats if c["name"] == other), None)
+                            if oc is None:
+                                oc = {"name": other, "sales": 0, "qty": 0, "count": 0, "share": 0.0}
+                                cats.append(oc)
+                            oc["cost"] = round((oc.get("cost") or 0) + ex_cost)
+                            oc["cost_sales"] = round((oc.get("cost_sales") or 0) + ex_sales)
                     categories_monthly.setdefault(code, {})[m] = cats
             # 売れ筋 top-N に加え、区分→商品ドリル／内訳の表示に要る商品を残す。
             #  - 内訳を畳んだ親(subs 持ち) … 常に（Largo等の入れ子表示に必要）

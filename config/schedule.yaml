@@ -88,7 +88,9 @@ campaigns:
 
   # ── ARATA（1097）──────────────────────────────────
   - { id: r1097-osusume, stores: ["1097"], title: 秋おすすめ, kind: osusume, start: "2026-09-01", end: "2026-11-30" }
-  - { id: r1097-bounenkai, stores: ["1097"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘新年会コース"] }
+  # 対象を「コース（宴会）カテゴリ」全体に拡大（items を外すと bounenkai→コース 部門が対象）。
+  # 商品名「忘新年会コース」だけだと前年が宴会全体の1割弱しか拾えず低く出たため（本部確認済み）。
+  - { id: r1097-bounenkai, stores: ["1097"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31", note: "対象=コース(宴会)カテゴリ（旧items: 忘新年会コース）" }
   - { id: r1097-gm, stores: ["1097"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
 
   # ── ひよこ飯店（1069）──────────────────────────────

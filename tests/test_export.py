@@ -680,6 +680,48 @@ def test_原価粗利未取込なら商品にcostキーが無い(loaded, master)
     assert got and "cost" not in got[0] and "gross" not in got[0]
 
 
+def test_abc_other_catchallでどの区分にも乗らない原価をその他へ寄せる():
+    """abc_other_catchall 指定店（門真Largo）は、表示区分に割り当たらないABC原価を
+    『その他』区分にまとめて計上する（合計原価に必ず反映。割り振りは運用で後日）。"""
+    d09 = date(2026, 9, 15)
+    rows = {
+        _ex.METRIC_DEPT_SALES: [
+            {"store_code": "1713", "date": d09, "product_name": "04798:食べ飲み放題plus",
+             "product_category": "13.9", "value": 881927.0},
+        ],
+        _ex.METRIC_PRODUCT_SALES: [
+            {"store_code": "1713", "date": d09, "product_name": "04798:【ﾗﾙｺﾞ】食べ飲み放題plus",
+             "product_category": "A", "value": 881927.0},
+        ],
+        _ex.METRIC_PRODUCT_COST: [
+            {"store_code": "1713", "date": d09, "product_name": "04798:【ﾗﾙｺﾞ】食べ飲み放題plus",
+             "value": 110000.0},
+            # 売上0・原価だけの喫茶内訳。区分「コーヒー」は部門に無い→その他へ寄せる。
+            {"store_code": "1713", "date": d09, "product_name": "03618:【ﾗﾙｺﾞ】アイスコーヒー",
+             "value": 55000.0},
+        ],
+    }
+
+    class FakeWH:
+        def aggregate(self, q):
+            return list(rows.get(q.metrics[0], []))
+
+    class FakeMaster:
+        active_codes = ["1713"]
+
+    cats = {"1713": {"name": "門真Largo", "other": "その他", "classify_by": "department",
+                     "dept_as_category": True, "dept_other": [], "abc_other_catchall": True,
+                     "dept_merge_contains": [["食べ放題", "食べ飲み放題"], ["飲み放題", "食べ飲み放題"]]}}
+    _dm, _pm, cm = _ex._build_abc_by_month(
+        FakeWH(), FakeMaster(), date(2026, 1, 1), date(2026, 12, 31), cats, {}
+    )
+    by = {c["name"]: c for c in cm["1713"]["2026-09"]}
+    assert "その他" in by, by.keys()
+    # コーヒー(55,000税込→税抜)がその他へ。食べ飲み放題はそのまま。
+    assert by["その他"]["cost"] == round(55000 / 1.10)
+    assert by["食べ飲み放題"]["cost"] == round(110000 / 1.10)
+
+
 def test_abc_costに店月のABC実原価合計と原価率が出る(loaded, master):
     """build は abc_cost に 店×月の 商品原価合計／商品売上合計／原価率（税抜）を出す。
     品目区分に依存しないので、理論原価の無い月の原価率行に確実に使える。"""

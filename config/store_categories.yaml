@@ -155,7 +155,8 @@ stores:
   #   売上0で原価だけ乗る食べ放題系部門も、この区分の内訳に入る。
   "1713": { <<: *fwdept, name: 門真Largo,
             dept_merge_contains: [["食べ放題", "食べ飲み放題"], ["飲み放題", "食べ飲み放題"]],
-            bucket_merge: { 食べ放題: 食べ飲み放題, 飲み放題: 食べ飲み放題 } }
+            bucket_merge: { 食べ放題: 食べ飲み放題, 飲み放題: 食べ飲み放題 },
+            abc_other_catchall: true }
   "1729": { <<: *fwdept, name: フレンチ酒場GOLDお初 }
   "1739": { <<: *fwdept, name: "ぎふや 天満橋店" }
   "2004": { <<: *fwdept, name: んだんだ }
