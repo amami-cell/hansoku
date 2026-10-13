@@ -1136,7 +1136,7 @@ def build_parser() -> argparse.ArgumentParser:
                  "hourly", "hourly-dry", "abc", "abc-dry", "abc-store-probe",
                  "lunch-analyze", "hourly-store-probe", "abc-totals-probe",
                  "menu-hourly-probe", "abc-store-ingest", "abc-coverage",
-                 "abc-dom-probe", "uriage-probe", "monthly-coverage",
+                 "abc-dom-probe", "abc-cost-probe", "uriage-probe", "monthly-coverage",
                  "abc-detail", "data-audit", "source-audit", "abc-campaign", "dept-survey",
                  "gelato-switch", "analysis-code-probe",
                  "analysis-code-audit", "analysis-code-ingest",
