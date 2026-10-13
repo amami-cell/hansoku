@@ -130,6 +130,7 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           DF: ${{ inputs.date_from }}
           DT: ${{ inputs.date_to }}
+          URL: ${{ inputs.url }}
         run: |
           set -o pipefail
           python - <<'PY'
@@ -191,4 +192,30 @@ jobs:
                   buf += b + " / "
               if buf:
                   i += 1; print(f"::notice title=欠けのある店{i}::{buf}")
+
+          # --- 部門グリッドが無い店の「宴会(コース)再構成」裏取り（配信JSON）---
+          # FW生部門が無い店は商品→部門の再構成で departments を作る。配信中の
+          # dashboard.json に コース バケットが売上つきで出ているかを店×月で確認する。
+          recon_stores = ["1069", "1111", "1137", "1151", "1168"]
+          url = (os.environ.get("URL") or "").rstrip("/")
+          if url:
+              import json, urllib.request
+              try:
+                  with urllib.request.urlopen(url + "/data/dashboard.json", timeout=90) as resp:
+                      dash = json.load(resp)
+                  dm = dash.get("departments_monthly", {})
+                  for c in recon_stores:
+                      per = dm.get(c, {}) or {}
+                      cells = []
+                      for w in want:
+                          bks = (per.get(w, {}) or {}).get("buckets", []) or []
+                          course = next((b for b in bks if b.get("name") == "コース"), None)
+                          if course and (course.get("sales") or 0) > 0:
+                              cells.append(f"{w}:コース{int(course['sales']):,}")
+                          else:
+                              anyb = "有" if bks else "無"
+                              cells.append(f"{w}:コース無(部門{anyb})")
+                      print(f"::notice title=宴会再構成 {c}{name.get(c,'')}::{' / '.join(cells)}")
+              except Exception as e:
+                  print(f"::warning title=再構成確認失敗::{e}")
           PY
