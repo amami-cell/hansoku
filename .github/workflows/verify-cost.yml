@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "warehouse（倉庫を集計）/ dashboard（配信JSONを見る）"
+        description: "warehouse / dashboard / coverage / storedump（1店の前年商品実績）"
         type: choice
-        options: [warehouse, dashboard]
+        options: [warehouse, dashboard, coverage, storedump]
         default: warehouse
       store:
         description: "店コード"
@@ -55,12 +55,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        if: ${{ inputs.mode == 'warehouse' }}
+        if: ${{ inputs.mode == 'warehouse' || inputs.mode == 'coverage' || inputs.mode == 'storedump' }}
         with:
           python-version: "3.12"
           cache: pip
       - name: 依存パッケージをインストール
-        if: ${{ inputs.mode == 'warehouse' }}
+        if: ${{ inputs.mode == 'warehouse' || inputs.mode == 'coverage' || inputs.mode == 'storedump' }}
         run: pip install -r requirements.txt
 
       - name: 倉庫の合計を出して注釈にする
@@ -119,3 +119,219 @@ jobs:
             echo "::error title=dashboard 不合格::abc_cost[${STORE}][${MONTH}] が配信JSONに無い"
             exit 1
           fi
+
+      - name: 前年ABC（宴会・内訳）の全店カバレッジ
+        if: ${{ inputs.mode == 'coverage' }}
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          DF: ${{ inputs.date_from }}
+          DT: ${{ inputs.date_to }}
+          URL: ${{ inputs.url }}
+        run: |
+          set -o pipefail
+          # 配信JSONは Cloudflare 越しなので curl で取る（python urllib だと 403）。
+          if [ -n "${URL:-}" ]; then
+            curl -sS "${URL%/}/data/dashboard.json" -o /tmp/dash.json || echo "curl失敗"
+            echo "dash.json bytes=$(wc -c < /tmp/dash.json 2>/dev/null || echo 0)"
+          fi
+          python - <<'PY'
+          import os, datetime as dt
+          from hansoku.settings import load_settings
+          from hansoku.stores import StoreMaster
+          from hansoku.db import get_warehouse, AggregateQuery
+          from hansoku.model import GRAIN_MONTH, METRIC_PRODUCT_SALES, METRIC_DEPT_SALES
+
+          def _d(s, default):
+              try:
+                  y, m, d = (int(x) for x in s.split("-"))
+                  return dt.date(y, m, d)
+              except Exception:
+                  return default
+
+          df = _d(os.environ.get("DF", ""), dt.date(2025, 10, 1))
+          dtt = _d(os.environ.get("DT", ""), dt.date(2026, 1, 31))
+          # 対象月（df〜dtt の各月）。
+          want = []
+          y, m = df.year, df.month
+          while (y, m) <= (dtt.year, dtt.month):
+              want.append(f"{y:04d}-{m:02d}")
+              m += 1
+              if m > 12:
+                  y += 1; m = 1
+
+          settings = load_settings()
+          master = StoreMaster.load(None)
+          fw = [s.store_code for s in master.active if (getattr(s, "pos", None) or "fw") == "fw"]
+          name = {s.store_code: s.store_name for s in master.active}
+
+          def present(metric):
+              seen = {}
+              with get_warehouse(settings) as wh:
+                  for row in wh.aggregate(AggregateQuery(
+                          date_from=df, date_to=dtt, grain=GRAIN_MONTH, metrics=[metric],
+                          store_codes=fw, group_by=("store_code", "date"))):
+                      if row["value"] and row["value"] > 0:
+                          seen.setdefault(row["store_code"], set()).add(row["date"].strftime("%Y-%m"))
+              return seen
+
+          ps = present(METRIC_PRODUCT_SALES)
+          ds = present(METRIC_DEPT_SALES)
+          bad = []
+          for c in fw:
+              miss_ps = [w for w in want if w not in ps.get(c, set())]
+              miss_ds = [w for w in want if w not in ds.get(c, set())]
+              if miss_ps or miss_ds:
+                  bad.append(f"{c}{name.get(c,'')}:商品欠[{','.join(miss_ps) or '-'}]/部門欠[{','.join(miss_ds) or '-'}]")
+          print(f"::notice title=前年ABCカバレッジ {want[0]}〜{want[-1]}::対象FW{len(fw)}店 / 完備{len(fw)-len(bad)}店 / 欠け{len(bad)}店")
+          if not bad:
+              print("::notice title=カバレッジ::全店そろっています")
+          else:
+              buf = ""; i = 0
+              for b in bad:
+                  if len(buf) + len(b) > 900:
+                      i += 1; print(f"::notice title=欠けのある店{i}::{buf}"); buf = ""
+                  buf += b + " / "
+              if buf:
+                  i += 1; print(f"::notice title=欠けのある店{i}::{buf}")
+
+          # --- 部門グリッドが無い店の「宴会(コース)再構成」裏取り（配信JSON）---
+          # FW生部門が無い店は商品→部門の再構成で departments を作る。配信中の
+          # dashboard.json に コース バケットが売上つきで出ているかを店×月で確認する。
+          recon_stores = ["1069", "1111", "1137", "1151", "1168"]
+          if os.path.exists("/tmp/dash.json"):
+              import json
+              try:
+                  with open("/tmp/dash.json", encoding="utf-8") as _f:
+                      dash = json.load(_f)
+                  dm = dash.get("departments_monthly", {})
+                  for c in recon_stores:
+                      per = dm.get(c, {}) or {}
+                      cells = []
+                      for w in want:
+                          bks = (per.get(w, {}) or {}).get("buckets", []) or []
+                          course = next((b for b in bks if b.get("name") == "コース"), None)
+                          if course and (course.get("sales") or 0) > 0:
+                              cells.append(f"{w}:コース{int(course['sales']):,}")
+                          else:
+                              anyb = "有" if bks else "無"
+                              cells.append(f"{w}:コース無(部門{anyb})")
+                      print(f"::notice title=宴会再構成 {c}{name.get(c,'')}::{' / '.join(cells)}")
+              except Exception as e:
+                  print(f"::warning title=再構成確認失敗::{e}")
+          PY
+
+      - name: 1店の前年商品実績（コース・食べ放題を抽出）
+        if: ${{ inputs.mode == 'storedump' }}
+        env:
+          HANSOKU_ENV: cloud
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          STORE: ${{ inputs.store }}
+          DF: ${{ inputs.date_from }}
+          DT: ${{ inputs.date_to }}
+        run: |
+          set -o pipefail
+          python - <<'PY'
+          import os, datetime as dt, csv
+          from hansoku.settings import load_settings
+          from hansoku.db import get_warehouse, AggregateQuery
+          from hansoku.model import (GRAIN_MONTH, METRIC_PRODUCT_SALES,
+                                     METRIC_PRODUCT_QTY, METRIC_PRODUCT_COST)
+
+          def _d(s, default):
+              try:
+                  y, m, d = (int(x) for x in s.split("-")); return dt.date(y, m, d)
+              except Exception:
+                  return default
+
+          df = _d(os.environ.get("DF", ""), dt.date(2025, 10, 1))
+          dtt = _d(os.environ.get("DT", ""), dt.date(2026, 1, 31))
+          store = os.environ.get("STORE", "1151")
+          settings = load_settings()
+
+          def by(metric, keys=("product_name",)):
+              agg = {}
+              with get_warehouse(settings) as wh:
+                  for row in wh.aggregate(AggregateQuery(
+                          date_from=df, date_to=dtt, grain=GRAIN_MONTH, metrics=[metric],
+                          store_codes=[store], group_by=keys)):
+                      k = row["product_name"]
+                      agg[k] = agg.get(k, 0) + (row["value"] or 0)
+              return agg
+
+          # 月別も取る（コース・食べ放題の前年・月別が忘年会目標に効く）。
+          def by_month(metric):
+              agg = {}
+              with get_warehouse(settings) as wh:
+                  for row in wh.aggregate(AggregateQuery(
+                          date_from=df, date_to=dtt, grain=GRAIN_MONTH, metrics=[metric],
+                          store_codes=[store], group_by=("product_name", "date"))):
+                      m = row["date"].strftime("%Y-%m")
+                      agg.setdefault(row["product_name"], {})[m] = agg.get(row["product_name"], {}).get(m, 0) + (row["value"] or 0)
+              return agg
+
+          sales = by(METRIC_PRODUCT_SALES)
+          qty = by(METRIC_PRODUCT_QTY)
+          cost = by(METRIC_PRODUCT_COST)
+          salesM = by_month(METRIC_PRODUCT_SALES)
+          names = set(sales) | set(qty) | set(cost)
+          rows = sorted(((n, round(sales.get(n, 0)), round(qty.get(n, 0)), round(cost.get(n, 0)))
+                         for n in names), key=lambda r: -r[1])
+          want = []
+          y, m = df.year, df.month
+          while (y, m) <= (dtt.year, dtt.month):
+              want.append(f"{y:04d}-{m:02d}"); m += 1
+              if m > 12: y += 1; m = 1
+
+          def kw(n, *ks): return any(k in n for k in ks)
+          course = [r for r in rows if kw(r[0], "コース", "宴会")]
+          tabe = [r for r in rows if kw(r[0], "放題")]
+          tot_s = sum(r[1] for r in rows); tot_c = sum(r[3] for r in rows)
+          print(f"::notice title={store} 前年商品実績 {want[0]}〜{want[-1]}::全{len(rows)}品 Σ売上{tot_s:,}(税込) / Σ原価{tot_c:,}")
+
+          def emit(title, grp):
+              gs = sum(r[1] for r in grp)
+              # 月別内訳つきで上位を出す。
+              lines = []
+              for r in grp[:25]:
+                  mm = salesM.get(r[0], {})
+                  per = " ".join(f"{w[5:]}月{round(mm.get(w,0)):,}" for w in want if mm.get(w))
+                  lines.append(f"{r[0]}:計{r[1]:,}({per})")
+              print(f"::notice title={title}::{len(grp)}品 Σ売上{gs:,} :: " + " / ".join(lines) if grp
+                    else f"::notice title={title}::該当なし（商品名に該当語なし）")
+
+          emit(f"{store} コース系(コース/宴会)", course)
+          emit(f"{store} 食べ放題系(放題)", tabe)
+
+          os.makedirs("out", exist_ok=True)
+          with open(f"out/{store}_前年商品実績.csv", "w", encoding="utf-8-sig", newline="") as f:
+              w = csv.writer(f)
+              w.writerow(["商品名", "売上計(税込)", "出数計", "原価計(税込)"] + [f"{x}売上" for x in want])
+              for n, s, q, c in rows:
+                  mm = salesM.get(n, {})
+                  w.writerow([n, s, q, c] + [round(mm.get(x, 0)) for x in want])
+          # 全商品を注釈にも分割出力（手元でCSV化できるように）。
+          buf, part = "", 0
+          for n, s, q, c in rows:
+              line = f"{n}:{s:,}"
+              if len(buf) + len(line) + 3 > 6000:
+                  part += 1; print(f"::notice title={store}全商品{part:02d}::{buf}"); buf = ""
+              buf += line + " / "
+          if buf:
+              part += 1; print(f"::notice title={store}全商品{part:02d}::{buf}")
+          PY
+
+      - name: CSVをアップロード
+        if: ${{ inputs.mode == 'storedump' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: storedump-${{ inputs.store }}
+          path: out/
+          retention-days: 7
+          if-no-files-found: ignore
