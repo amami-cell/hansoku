@@ -1754,11 +1754,19 @@ def probe_abc_cost(artifacts: Path, *, store: str, d_from: str, d_to: str) -> in
         menu_other = [r for r in menu_extra if not _haskw(r["name"], r.get("group"))]
         menu_tabe_cost = sum(_cost(r) for r in menu_tabe)
         menu_other_cost = sum(_cost(r) for r in menu_other)
-        # 不明な内訳は原価の大きい順に（どの区分に入れるべきか本部に確認するため）。
-        other_lines = " / ".join(
-            f"{(r.get('group') or '見出し無')[:10]}|{r['name'][:16]}:原{_cost(r)}"
-            for r in sorted(menu_other, key=_cost, reverse=True)[:18]
-        )
+        # 不明な内訳は原価の大きい順（本部が「食べ放題で出す分か」を判断するため）。
+        menu_other_sorted = sorted(menu_other, key=_cost, reverse=True)
+        # CSVにも書き出して artifact で丸ごと落とせるようにする（全件・切り詰め無し）。
+        try:
+            import csv as _csv
+            artifacts.mkdir(parents=True, exist_ok=True)
+            with open(artifacts / "kubun_fumei_naiwake.csv", "w", encoding="utf-8-sig", newline="") as _f:
+                w = _csv.writer(_f)
+                w.writerow(["見出し(group)", "商品名", "売上", "原価"])
+                for r in menu_other_sorted:
+                    w.writerow([r.get("group") or "", r["name"], _sales(r), _cost(r)])
+        except Exception as e:  # noqa: BLE001
+            print(f"[原価診断] CSV書き出し失敗（無害）: {e}")
 
         print(f"[原価診断] 全商品 {n_all}品 Σ原価={all_cost} top{_ABC_TOP_N}={top_cost} "
               f"top外={beyond_cost} 売上0の原価={zero_sales_cost}")
@@ -1770,7 +1778,19 @@ def probe_abc_cost(artifacts: Path, *, store: str, d_from: str, d_to: str) -> in
         print(f"::notice title=メニュー内訳::{len(menu_extra)}件 Σ原価{menu_cost}（食べ放題系{len(menu_tabe)}件{menu_tabe_cost} / 区分不明{len(menu_other)}件{menu_other_cost}）")
         print(f"::notice title=現状取込::全商品top40({top_cost})+内訳({menu_cost})={now_ingest}")
         print(f"::notice title=全商品の食べ放題飲み放題行(二重計上候補)::{len(zh_tabe)}件 Σ{zh_tabe_cost} :: {zh_tabe_lines or '（なし）'}")
-        print(f"::notice title=区分不明の内訳(確認対象)::{other_lines or '（なし）'}")
+        # 区分不明の内訳を全件、注釈に分割で出す（手元で拾ってCSV化できるように）。
+        print(f"::notice title=区分不明の内訳 全{len(menu_other_sorted)}件 Σ原価{menu_other_cost}::以下に全件を分割出力。形式＝見出し|商品名:原価")
+        buf, part = "", 0
+        for r in menu_other_sorted:
+            line = f"{r.get('group') or '見出無'}|{r['name']}:原{_cost(r)}"
+            if len(buf) + len(line) + 3 > 1400:
+                part += 1
+                print(f"::notice title=区分不明内訳{part:02d}::{buf}")
+                buf = ""
+            buf += line + " / "
+        if buf:
+            part += 1
+            print(f"::notice title=区分不明内訳{part:02d}::{buf}")
     return 0
 
 
