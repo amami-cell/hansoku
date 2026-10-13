@@ -1783,7 +1783,9 @@ def probe_abc_cost(artifacts: Path, *, store: str, d_from: str, d_to: str) -> in
         buf, part = "", 0
         for r in menu_other_sorted:
             line = f"{r.get('group') or '見出無'}|{r['name']}:原{_cost(r)}"
-            if len(buf) + len(line) + 3 > 1400:
+            # 注釈は1runあたり十数件までに制限される。全件を落とさないよう、1注釈に
+            # たくさん詰める（GitHubの注釈messageは十分長く持てる）。
+            if len(buf) + len(line) + 3 > 6000:
                 part += 1
                 print(f"::notice title=区分不明内訳{part:02d}::{buf}")
                 buf = ""
