@@ -1741,8 +1741,8 @@ def probe_abc_cost(artifacts: Path, *, store: str, d_from: str, d_to: str) -> in
         # --- 曖昧な行の洗い出し（食べ放題/飲み放題 の二重計上候補と、区分不明の内訳）---
         _KW = ("食べ放題", "飲み放題", "食べ飲み放題")
 
-        def _haskw(*ss):
-            return any(k in (s or "") for s in ss for k in _KW)
+        def _haskw(a, b=""):
+            return any((k in (a or "")) or (k in (b or "")) for k in _KW)
 
         # 全商品側の 食べ放題/飲み放題 行（＝パッケージの名目原価。内訳と二重になり得る）。
         zh_tabe = [p for p in products if _haskw(p["name"])]
