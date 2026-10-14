@@ -622,8 +622,21 @@ function makeGoalRows(container, getCtx, forceEl) {
       const kind = subKind(sel.value), isSub = !!kind, isHour = kind === "band";
       bandSel.hidden = !isSub;
       const ref = goalRef(c, effKey());
-      const base = ref.base;
-      const f = mt.higher ? 1.02 : 0.98;
+      let base = ref.base;
+      let f = mt.higher ? 1.02 : 0.98;
+      // 目標数値期間が設定され、対象が「販促の売上(sales)」のときは、その期間の
+      // 前年同期実績×110% を目安にする（打ち出し期間とは別に測る忘年会など）。
+      let periodInfo = null;
+      if (sel.value === "sales") {
+        const per = targetPeriodOf(c);
+        if (per && per.from) {
+          const pf = shiftYear(per.from, -1), pt = shiftYear(per.to || per.from, -1);
+          let tr = null;
+          try { tr = campTargeted(c, null, { from: pf, to: pt }); } catch (e) { tr = null; }
+          const pbase = (tr && tr.cur > 0) ? tr.cur : null;
+          if (pbase != null) { base = pbase; f = 1.10; periodInfo = { per, pf, pt }; }
+        }
+      }
       const suggest = base == null ? null : ((mt.unit === "%" || mt.decimal) ? Math.round(base * f * 10) / 10 : Math.round(base * f));
       inp.dataset.suggest = suggest == null ? "" : suggest;
       inp.placeholder = suggest == null ? "―（データなし）" : fmtVal(mt, suggest);
@@ -650,7 +663,9 @@ function makeGoalRows(container, getCtx, forceEl) {
               : isSub
                 ? `この${subWhat}（${bandSel.value || "―"}）の直近実績がありません。狙う値を入力してください。`
                 : "この指標の直近実績がありません。狙う値を入力してください。")
-        : `直近${subName}${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）${avTail}${coverTail}`;
+        : periodInfo
+          ? `目標数値期間 ${periodInfo.per.from}〜${periodInfo.per.to} の前年同期(${periodInfo.pf}〜${periodInfo.pt})実績 ${fmtVal(mt, base)}　→　薄字＝前年×110%`
+          : `直近${subName}${mt.daily ? "1日平均(A/V)" : "実績"} ${fmtVal(mt, base)}${ratio}　→　薄字＝目安（${mt.higher ? "直近+2%" : "直近−2%（↓が良い）"}）${avTail}${coverTail}`;
     };
     row._refresh = refresh;
     sel.addEventListener("change", () => { if (SUB_METRICS.has(sel.value)) bandSel.innerHTML = subOptsHtml(sel.value, null); refresh(); });
@@ -685,6 +700,7 @@ function makeGoalRows(container, getCtx, forceEl) {
 }
 function openGoalGrid(c) {
   const gkey = campKey(c);
+  const per0 = targetPeriodOf(c) || { from: "", to: "" };
   // 既存の保存済み目標→初期行（時間帯バンド hour_sales#dinner 等も含めて全キーから）。
   const savedMap = SERVER_TARGETS_M[gkey] || SERVER_TARGETS_M[c.id] || {};
   const saved = [];
@@ -704,6 +720,14 @@ function openGoalGrid(c) {
       <div class="planform">
         <div class="gg-h"><b>${esc(c.title)}</b><span class="sub">${esc(campRange(c))}${(c.stores || [])[0] ? "・" + esc(storeName(c.stores[0])) : ""}</span></div>
         <div class="pf-tg-head">カテゴリを選んで目標を打ち込む。薄字＝直近実績＋2%の目安（原価率は−2%）。「＋目標を追加」で複数入れられます。</div>
+        <div class="gg-tperiod" id="gg-tperiod">
+          <span class="gg-tplabel">目標数値期間（任意・打ち出し期間とは別）</span>
+          <input class="pf-in gg-tpmo" type="month" id="gg-tpfrom" value="${esc(per0.from)}" aria-label="目標開始月">
+          <span class="gg-tpdash">〜</span>
+          <input class="pf-in gg-tpmo" type="month" id="gg-tpto" value="${esc(per0.to)}" aria-label="目標終了月">
+          <span class="gg-tphint" id="gg-tphint"></span>
+        </div>
+        <div class="gr-help gg-tpnote">入れると「販促の売上」の薄字が、その期間の前年同期実績×110% になります（空欄＝打ち出し期間で測る）。</div>
         <div class="gg-rows" id="gg-rows"></div>
         <label class="gg-force"><input type="checkbox" id="gg-force"> 営業時間外の時間帯（深夜・早朝など）も選べるようにする</label>
         <button type="button" class="gg-add" id="gg-add">＋ 目標を追加</button>
@@ -751,6 +775,17 @@ function openGoalGrid(c) {
   initRows.forEach(r => rows.addRow(r.key, r.val));
   rows.renumber();
   ov.querySelector("#gg-add").addEventListener("click", () => { rows.addRow(null, ""); rows.renumber(); });
+  // 目標数値期間：入れたら保存＋全行の薄字を即時に再計算（売上は前年同期×110%に）。
+  const tpFrom = ov.querySelector("#gg-tpfrom"), tpTo = ov.querySelector("#gg-tpto"), tpHint = ov.querySelector("#gg-tphint");
+  const onTp = async () => {
+    const r = await saveTargetPeriod(gkey, tpFrom ? tpFrom.value : "", tpTo ? tpTo.value : "");
+    rows.refreshAll();
+    if (tpHint) tpHint.textContent = r.ok
+      ? ((tpFrom && tpFrom.value) || (tpTo && tpTo.value) ? "✓ 薄字＝前年同期×110%" : "✓ 期間を解除")
+      : (r.err || "保存失敗");
+  };
+  if (tpFrom) tpFrom.addEventListener("change", onTp);
+  if (tpTo) tpTo.addEventListener("change", onTp);
   ov.addEventListener("click", e => { if (e.target.hasAttribute("data-goalclose")) ov.remove(); });
   ov.querySelector("#gg-save").addEventListener("click", async () => {
     const { map, err } = rows.collect();
@@ -2165,27 +2200,35 @@ async function saveBulkPeriod(cid) {
 }
 
 // 目標数値期間を保存（打ち出し期間とは別）。入れた瞬間に薄字＝前年同期×110% へ即反映。
-async function saveBulkTargetPeriod(key) {
-  const esckey = (window.CSS && CSS.escape) ? CSS.escape(key) : key;
-  const box = document.querySelector(`.bt-tperiod[data-bulktpkey="${esckey}"]`);
-  if (!box) return;
-  const from = ((box.querySelector("[data-bulktpfrom]") || {}).value || "").slice(0, 7);
-  const to = ((box.querySelector("[data-bulktpto]") || {}).value || "").slice(0, 7);
-  if (from && to && to < from) { flashBtOk("tperiod:" + key, "終了は開始より後に", true); return; }
-  // まずローカルに即時反映（薄字の再計算に効かせる＝即時反映）。
+// 目標数値期間の保存の共通処理（まとめ入力・目標ダイアログ 両方から呼ぶ）。
+// まずローカルの SERVER_TARGET_PERIODS を即更新（薄字の即時再計算に効かせる）→ サーバ保存。
+async function saveTargetPeriod(key, from, to) {
+  from = (from || "").slice(0, 7); to = (to || "").slice(0, 7);
+  if (from && to && to < from) return { ok: false, err: "終了は開始より後に" };
   if (!from && !to) delete SERVER_TARGET_PERIODS[key];
   else SERVER_TARGET_PERIODS[key] = { from, to: to || from };
-  refreshBulkSuggestFor(key);
-  if (!API_OK) { flashBtOk("tperiod:" + key, "表示のみ（保存先なし）", true); return; }
+  if (!API_OK) return { ok: true, local: true };
   try {
     const res = await fetch("/api/targets", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ id: key, period_from: from, period_to: to }),
     });
-    if (res.status === 401) { flashBtOk("tperiod:" + key, "要ログイン", true); return; }
-    if (!res.ok) { flashBtOk("tperiod:" + key, "保存失敗", true); return; }
-    flashBtOk("tperiod:" + key, (from || to) ? "保存 ✓ 薄字＝前年同期×110%" : "期間を解除 ✓");
-  } catch (e) { flashBtOk("tperiod:" + key, "通信エラー", true); }
+    if (res.status === 401) return { ok: false, err: "要ログイン" };
+    if (!res.ok) return { ok: false, err: "保存失敗" };
+    return { ok: true };
+  } catch (e) { return { ok: false, err: "通信エラー" }; }
+}
+
+async function saveBulkTargetPeriod(key) {
+  const esckey = (window.CSS && CSS.escape) ? CSS.escape(key) : key;
+  const box = document.querySelector(`.bt-tperiod[data-bulktpkey="${esckey}"]`);
+  if (!box) return;
+  const from = (box.querySelector("[data-bulktpfrom]") || {}).value || "";
+  const to = (box.querySelector("[data-bulktpto]") || {}).value || "";
+  const r = await saveTargetPeriod(key, from, to);
+  refreshBulkSuggestFor(key);   // 即時反映
+  const has = (from || to);
+  flashBtOk("tperiod:" + key, r.ok ? (has ? "保存 ✓ 薄字＝前年同期×110%" : "期間を解除 ✓") : r.err, !r.ok);
 }
 
 // その施策行の売上目標の薄字（目安）を、いまの目標数値期間で計算し直して差し替える。
