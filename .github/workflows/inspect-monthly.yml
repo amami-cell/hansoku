@@ -1,7 +1,10 @@
 name: inspect-monthly
 
-# 本番が配信している dashboard.json の monthly[店] を月ごとに表示する。
-# FD比が空欄などの「画面に出ているデータ」の調査用（読み取りのみ）。
+# 本番が配信している dashboard.json を読む調査用（読み取りのみ）。
+# ここでは「前年の冬のオススメ」を拾う：products_monthly[店][月] の各商品が持つ
+# FW メニュー見出し group（例「おすすめ」）で束ね、出数・売上・構成比を全店ぶん集計し、
+# データ用ブランチ(claude/winter-osusume-data)の winter/ に JSON/MD/CSV を push する。
+# 速報は ::notice:: にも出す。
 
 on:
   workflow_dispatch:
@@ -11,46 +14,198 @@ on:
         required: false
         default: "https://hansoku-app.amami-c1e.workers.dev/"
       stores:
-        description: "店コード（カンマ区切り）"
+        description: "店コード（カンマ区切り / all）"
         required: false
-        default: "1713,1160"
+        default: "all"
 
 permissions:
-  contents: read
+  contents: write
+
+env:
+  TZ: Asia/Tokyo
 
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
-      - name: dashboard.json の monthly を見る
+      - uses: actions/checkout@v4
+      - name: 前年冬オススメを dashboard.json から抽出
         env:
-          URL: ${{ github.event.inputs.url }}
-          STORES: ${{ github.event.inputs.stores }}
+          U: ${{ inputs.url }}
+          WM: "2025-12,2026-01,2026-02"
+          CM: "2025-11,2026-09,2026-10"
+          STORES: ${{ inputs.stores }}
         run: |
-          set -uo pipefail
-          U="${URL%/}"
-          curl -sS "$U/data/dashboard.json" -o d.json
+          set -o pipefail
+          URL="${U%/}"
+          curl -sS "$URL/data/dashboard.json" -o d.json
           echo "dashboard.json bytes=$(wc -c < d.json | tr -d ' ')"
-          IFS=',' read -ra SS <<< "$STORES"
-          for s in "${SS[@]}"; do
-            s="$(echo "$s" | tr -d ' ')"
-            [ -z "$s" ] && continue
-            echo
-            echo "===== 店 $s ：月 → 売上 / フード / ドリンク / (FD比%) ====="
-            jq -r --arg s "$s" '
-              (.monthly[$s] // {}) | to_entries | sort_by(.key)[] |
-              .key as $m | .value as $v |
-              ( ($v.food_sales // null) ) as $f | ( ($v.drink_sales // null) ) as $d |
-              "\($m)  売上=\(($v.sales // "―"))  F=\($f // "―")  D=\($d // "―")  FD=\(
-                if ($f != null and $d != null and ($f + $d) > 0) then (($f/($f+$d)*100)|floor|tostring + "/" + ((100-($f/($f+$d)*100))|floor|tostring)) else "空欄(―)" end)"
-            ' d.json
-            echo "--- この店の monthly にある指標キー（先頭月）---"
-            jq -r --arg s "$s" '(.monthly[$s] // {}) | to_entries | sort_by(.key) | (.[0].value // {}) | keys | join(", ")' d.json
-            # 直近の departments_monthly（バケット＋生部門）を、売上と原価率つきで見る。
-            lm=$(jq -r --arg s "$s" '(.departments_monthly[$s] // {}) | keys | sort | last // empty' d.json)
-            echo "--- departments_monthly 直近月=$lm：バケット（区分） 名 / 売上 / 原価率 / cost_coverage ---"
-            jq -r --arg s "$s" --arg m "$lm" '(.departments_monthly[$s][$m].buckets // [])[] | "  [\(.name)] 売上=\(.sales)  原価率=\(.cost_rate // "―")  cov=\(.cost_coverage // "―")"' d.json
-            echo "--- 生部門 raw（売上0でも原価率があるものを含む）---"
-            jq -r --arg s "$s" --arg m "$lm" '(.departments_monthly[$s][$m].raw // [])[] | "  \(.name)  売上=\(.sales)  原価率=\(.cost_rate // "―")"' d.json
+          python3 - <<'PY'
+          import os, json, re, csv
+
+          d = json.load(open("d.json", encoding="utf-8"))
+          winter  = [x.strip() for x in os.environ.get("WM","").split(",") if x.strip()]
+          compare = [x.strip() for x in os.environ.get("CM","").split(",") if x.strip()]
+          all_months = winter + compare
+          want_stores = os.environ.get("STORES","all").strip()
+          want_set = None if want_stores in ("","all") else {x.strip() for x in want_stores.split(",")}
+
+          stores = d.get("stores", []) or []
+          name_of  = {s["code"]: s.get("name","") for s in stores}
+          brand_of = {s["code"]: (s.get("brand_name") or s.get("brand") or "") for s in stores}
+          order = [s["code"] for s in stores]
+          pm = d.get("products_monthly", {}) or {}
+
+          def glabel(g):
+              if not g: return ""
+              return re.sub(r"^\s*\d+\s*[:：]\s*", "", str(g)).strip()
+
+          OSUSUME_KW = ("おすすめ","オススメ","お勧め","お薦め","季節","旬","冬","フェア","限定","新")
+          def is_osusume(label): return any(k in label for k in OSUSUME_KW)
+
+          result = {}
+          for code, months in pm.items():
+              if want_set is not None and code not in want_set:
+                  continue
+              entry = {"name": name_of.get(code, code), "brand": brand_of.get(code,""), "months": {}}
+              for m in all_months:
+                  items = months.get(m)
+                  if not items: continue
+                  store_sales = sum((p.get("sales") or 0) for p in items)
+                  groups = {}
+                  for p in items:
+                      lab = glabel(p.get("group")) or "（見出しなし）"
+                      g = groups.setdefault(lab, {"sales":0.0,"qty":0,"count":0,"items":[]})
+                      g["sales"] += (p.get("sales") or 0)
+                      g["qty"]   += (p.get("qty") or 0)
+                      g["count"] += 1
+                      g["items"].append({"name":p.get("name",""),
+                                         "sales":round(p.get("sales") or 0),
+                                         "qty":round(p.get("qty") or 0)})
+                  for g in groups.values():
+                      g["sales"] = round(g["sales"])
+                      g["items"].sort(key=lambda x:(-x["sales"], -x["qty"]))
+                  entry["months"][m] = {"store_sales": round(store_sales), "groups": groups}
+              if entry["months"]:
+                  result[code] = entry
+
+          os.makedirs("winter", exist_ok=True)
+          with open("winter/last_winter_osusume.json","w",encoding="utf-8") as f:
+              json.dump({"winter_months":winter,"compare_months":compare,"stores":result},
+                        f, ensure_ascii=False, indent=1)
+
+          md = []
+          md.append(f"# 前年 冬のオススメ（{winter[0]}〜{winter[-1]}）店別抽出\n")
+          md.append("FW メニュー見出し(group)が「おすすめ/季節/旬/フェア/限定/新/冬」等を含む区分を"
+                    "『オススメ系』として束ねました。売上は税抜、構成比は各店の全商品売上に対する比。\n")
+          csv_rows = [["店コード","店名","業態","見出し","商品名","冬売上(税抜)","冬出数","月別売上"]]
+          def kv_months(dct): return " ".join(f"{m[5:]}月{dct.get(m,0):,}" for m in winter if dct.get(m))
+
+          for code in order:
+              e = result.get(code)
+              if not e: continue
+              agg = {}; store_sales_w = 0
+              present = [m for m in winter if m in e["months"]]
+              for m in present:
+                  mm = e["months"][m]; store_sales_w += mm["store_sales"]
+                  for lab, g in mm["groups"].items():
+                      a = agg.setdefault(lab, {"sales":0,"qty":0,"items":{}})
+                      a["sales"] += g["sales"]; a["qty"] += g["qty"]
+                      for it in g["items"]:
+                          ai = a["items"].setdefault(it["name"], {"sales":0,"qty":0,"months":{}})
+                          ai["sales"] += it["sales"]; ai["qty"] += it["qty"]
+                          ai["months"][m] = ai["months"].get(m,0) + it["sales"]
+              osu = {lab:a for lab,a in agg.items() if is_osusume(lab)}
+              md.append(f"\n## {code} {e['name']}（{e['brand']}）")
+              if not present:
+                  md.append(f"- 冬の月データなし"); continue
+              md.append(f"- 冬の対象月: {', '.join(present)} / 店の全商品売上合計(税抜) {store_sales_w:,}")
+              inv = sorted(agg.items(), key=lambda kv:-kv[1]["sales"])
+              md.append("- 見出し一覧（売上順）: " + " / ".join(f"{lab}:{a['sales']:,}" for lab,a in inv[:16]))
+              if not osu:
+                  md.append("- **オススメ系の見出しは検出されず**"); continue
+              for lab, a in sorted(osu.items(), key=lambda kv:-kv[1]["sales"]):
+                  share = (a["sales"]/store_sales_w*100) if store_sales_w else 0
+                  md.append(f"- **見出し「{lab}」** 冬合計 売上 {a['sales']:,} / 出数 {a['qty']:,}"
+                            f"（店内構成比 {share:.1f}%・{len(a['items'])}品）")
+                  for nm, ai in sorted(a["items"].items(), key=lambda kv:-kv[1]["sales"]):
+                      gi = (ai["sales"]/a["sales"]*100) if a["sales"] else 0
+                      md.append(f"    - {nm} … 売上 {ai['sales']:,} / 出数 {ai['qty']:,}"
+                                f"（見出し内 {gi:.0f}%）[{kv_months(ai['months'])}]")
+                      csv_rows.append([code, e["name"], e["brand"], lab, nm, ai["sales"], ai["qty"], kv_months(ai["months"])])
+
+          with open("winter/last_winter_osusume.md","w",encoding="utf-8") as f:
+              f.write("\n".join(md)+"\n")
+          with open("winter/last_winter_osusume.csv","w",encoding="utf-8",newline="") as f:
+              csv.writer(f).writerows(csv_rows)
+
+          # 速報 notices
+          cov=[]
+          for code in order:
+              e=result.get(code)
+              if not e: continue
+              present=[m for m in winter if m in e["months"]]
+              has=any(is_osusume(l) for m in present for l in e["months"][m]["groups"])
+              cov.append(f"{code}{e['name']}:{'/'.join(x[5:] for x in present) or 'なし'}{'★' if has else ''}")
+          print("::notice title=冬データ網羅(★=おすすめ見出し有):: " + " ".join(cov))
+
+          def emit(title, lines, cap=5500):
+              buf=""; part=0
+              for ln in lines:
+                  if len(buf)+len(ln)+3>cap:
+                      part+=1; print(f"::notice title={title}{part:02d}::{buf}"); buf=""
+                  buf += ln + " ／ "
+              if buf:
+                  part+=1; print(f"::notice title={title}{part:02d}::{buf}")
+
+          inv_lines=[]
+          for code in order:
+              e=result.get(code)
+              if not e: continue
+              present=[m for m in winter if m in e["months"]]
+              if not present: continue
+              agg={}
+              for m in present:
+                  for lab,g in e["months"][m]["groups"].items():
+                      agg[lab]=agg.get(lab,0)+g["sales"]
+              inv=sorted(agg.items(),key=lambda kv:-kv[1])[:10]
+              inv_lines.append(f"[{code}{e['name']}] " + " ".join(f"{l}:{v:,}" for l,v in inv))
+          emit("冬の見出し一覧", inv_lines)
+
+          osu_lines=[]
+          for code in order:
+              e=result.get(code)
+              if not e: continue
+              present=[m for m in winter if m in e["months"]]
+              if not present: continue
+              agg={}
+              for m in present:
+                  for lab,g in e["months"][m]["groups"].items():
+                      if not is_osusume(lab): continue
+                      a=agg.setdefault(lab,{"sales":0,"qty":0,"items":{}})
+                      a["sales"]+=g["sales"]; a["qty"]+=g["qty"]
+                      for it in g["items"]:
+                          ai=a["items"].setdefault(it["name"],{"sales":0,"qty":0})
+                          ai["sales"]+=it["sales"]; ai["qty"]+=it["qty"]
+              if not agg: continue
+              for lab,a in agg.items():
+                  top=sorted(a["items"].items(),key=lambda kv:-kv[1]["sales"])[:8]
+                  osu_lines.append(f"[{code}{e['name']}/{lab} 計{a['sales']:,}/{a['qty']}点] " +
+                                   " ".join(f"{n}:{v['sales']:,}({v['qty']})" for n,v in top))
+          if osu_lines: emit("冬オススメ商品", osu_lines)
+          else: print("::notice title=冬オススメ商品::おすすめ系見出し未検出（名前ベース抽出へ切替要）")
+          PY
+
+      - name: データ用ブランチへ push
+        run: |
+          set -e
+          git config user.name "hansoku-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git checkout -B claude/winter-osusume-data
+          git add -f winter/
+          git commit -m "winter osusume snapshot" || echo "no changes"
+          for i in 1 2 3 4; do
+            git push -f -u origin claude/winter-osusume-data && break
+            echo "push retry $i"; sleep $((2**i))
           done
