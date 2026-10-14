@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "warehouse / dashboard / coverage / storedump（1店の前年商品実績）"
+        description: "warehouse / dashboard / coverage / storedump / tperiod（目標数値期間→前年110%薄字の本番確認）"
         type: choice
-        options: [warehouse, dashboard, coverage, storedump]
+        options: [warehouse, dashboard, coverage, storedump, tperiod]
         default: warehouse
       store:
         description: "店コード"
@@ -41,6 +41,14 @@ on:
         description: "[dashboard] 対象URL"
         required: false
         default: "https://hansoku-app.amami-c1e.workers.dev/"
+      period_from:
+        description: "[tperiod] 目標数値期間 開始 YYYY-MM"
+        required: false
+        default: "2026-12"
+      period_to:
+        description: "[tperiod] 目標数値期間 終了 YYYY-MM"
+        required: false
+        default: "2027-01"
 
 permissions:
   contents: read
@@ -335,3 +343,57 @@ jobs:
           path: out/
           retention-days: 7
           if-no-files-found: ignore
+
+      - name: 目標数値期間→前年110%薄字の本番確認
+        if: ${{ inputs.mode == 'tperiod' }}
+        env:
+          URL: ${{ inputs.url }}
+          STORE: ${{ inputs.store }}
+          PF: ${{ inputs.period_from }}
+          PT: ${{ inputs.period_to }}
+          APP_PASSWORD: ${{ secrets.HANSOKU_APP_PASSWORD }}
+        run: |
+          set -uo pipefail
+          U="${URL%/}"; FAIL=0; J="$(mktemp)"; KEY="zz-tperiod-check@2026"
+          [ -n "${APP_PASSWORD:-}" ] || { echo "::error::APP_PASSWORD未設定"; exit 1; }
+
+          echo "== 1) 合言葉ログイン =="
+          code=$(curl -sS -c "$J" -o /dev/null -w "%{http_code}" \
+            --data-urlencode "name=本部(期間確認)" --data-urlencode "password=$APP_PASSWORD" "$U/login" || echo 000)
+          echo "login HTTP=$code (303=成功)"; [ "$code" = "303" ] || FAIL=1
+
+          echo "== 2) デプロイ確認：配信app.jsに新ロジック(targetPeriodOf/×1.10)があるか =="
+          curl -sS -b "$J" "$U/app.js" -o app.js || echo "app.js取得失敗"
+          if grep -q "targetPeriodOf" app.js && grep -q "1\.10" app.js; then
+            echo "✅ 新ロジックあり（デプロイ反映済み）"
+          else
+            echo "::error title=デプロイ未反映::配信app.jsに targetPeriodOf / ×1.10 が無い"; FAIL=1
+          fi
+
+          echo "== 3) 目標数値期間のAPI往復（保存→読み戻し→後始末）KEY=$KEY =="
+          r1=$(curl -sS -b "$J" -X POST -H 'content-type: application/json' \
+            -d "{\"id\":\"$KEY\",\"period_from\":\"$PF\",\"period_to\":\"$PT\"}" "$U/api/targets" || true)
+          echo "save: $r1"; echo "$r1" | grep -q '"ok":true' || FAIL=1
+          got=$(curl -sS "$U/api/targets" | jq -c --arg k "$KEY" '.target_periods[$k] // null')
+          echo "readback: $got"
+          if echo "$got" | jq -e --arg f "$PF" --arg t "$PT" '.from==$f and .to==$t' >/dev/null 2>&1; then
+            echo "✅ 期間を保存・読み戻せた"
+          else
+            echo "::error title=API不合格::目標数値期間が読み戻せない"; FAIL=1
+          fi
+          curl -sS -b "$J" -X POST -H 'content-type: application/json' \
+            -d "{\"id\":\"$KEY\",\"period_from\":\"\",\"period_to\":\"\"}" "$U/api/targets" >/dev/null && echo "後始末（期間解除）OK"
+
+          echo "== 4) 薄字＝前年同期(目標数値期間)×110% の実数（店 $STORE）=="
+          curl -sS "$U/data/dashboard.json" -o d.json
+          pf_y=${PF%-*}; pf_m=${PF#*-}; pt_y=${PT%-*}; pt_m=${PT#*-}
+          py_from="$((pf_y-1))-$pf_m"; py_to="$((pt_y-1))-$pt_m"
+          echo "目標数値期間 $PF〜$PT → 前年同期 $py_from〜$py_to"
+          sum=$(jq -r --arg s "$STORE" --arg a "$py_from" --arg b "$py_to" '
+            [ (.departments_monthly[$s] // {}) | to_entries[] | select(.key>=$a and .key<=$b)
+              | ((.value.buckets // [])[] | select(.name=="コース") | .sales) ] | add // 0' d.json)
+          hint=$(awk "BEGIN{printf \"%d\", $sum*1.10}")
+          echo "前年同期コース売上合計=$sum / 薄字(前年×110%)=$hint"
+          echo "::notice title=$STORE 目標数値期間 $PF〜$PT::前年同期($py_from〜$py_to)コース売上=$sum → 薄字(前年×110%)=$hint"
+
+          if [ "$FAIL" = "0" ]; then echo "✅ 本番確認OK"; else echo "❌ 失敗あり"; exit 1; fi
