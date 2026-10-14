@@ -93,6 +93,7 @@ let BOARD_OWNER = "all";          // 目標スコアボードの担当者フィ�
 let API_OK = false;              // 目標APIが使えるか（本番=true）
 let SERVER_TARGETS = {};         // id → {value, by, at}（売上のみ・後方互換）
 let SERVER_TARGETS_M = {};       // id → { metric: {value, by, at} }（全指標）
+let SERVER_TARGET_PERIODS = {};  // id → {from, to, by, at}（目標数値期間：打ち出し期間とは別）
 let GOALS = {};                  // id → 円（端末内フォールバック）
 let TG_CUR = {};                 // 目標フォームの直近実績（現状）値。指標key→数値。「直近比」の基準。
 let TG_SUGGEST = {};             // 目標フォームの目安（薄字）値＝直近×102%（原価率は×98%）。「目安を入れる」で使う。
@@ -108,6 +109,7 @@ async function fetchServerTargets() {
     const data = await res.json();
     if (data && data.targets) { SERVER_TARGETS = data.targets; API_OK = true; }
     if (data && data.targets_by_metric) SERVER_TARGETS_M = data.targets_by_metric;
+    if (data && data.target_periods) SERVER_TARGET_PERIODS = data.target_periods;
   } catch (e) { /* API 無し → 端末内保存で動く */ }
 }
 
@@ -399,6 +401,12 @@ const pickByKey = (store, c) => {
   const k = campKey(c);
   return (k in store) ? store[k] : store[c.id];
 };
+// 目標数値期間（打ち出し期間とは別に、目標を測る期間）。施策キー→{from,to}（YYYY-MM）。
+// 設定が無ければ null（＝打ち出し期間で測る従来どおり）。
+function targetPeriodOf(c) {
+  const p = pickByKey(SERVER_TARGET_PERIODS, c);
+  return (p && (p.from || p.to)) ? { from: p.from || "", to: p.to || p.from || "" } : null;
+}
 
 // 有効な目標＝サーバ値（本番）→ 端末内
 function targetOf(c) {
@@ -1721,6 +1729,9 @@ function render() {
     }));
   app.querySelectorAll("[data-bulkperiod]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); saveBulkPeriod(el.dataset.bulkperiod); }));
+  // 目標数値期間：開始/終了月を変えたら即保存＋薄字（前年同期×110%）を即時反映。
+  app.querySelectorAll("[data-bulktpfrom],[data-bulktpto]").forEach(el =>
+    el.addEventListener("change", () => saveBulkTargetPeriod(el.dataset.bulktpfrom || el.dataset.bulktpto)));
   app.querySelectorAll("[data-bulknew]").forEach(el =>
     el.addEventListener("click", e => { e.stopPropagation(); openBulkNewPlan(); }));
   // 販促カルーセルは、開いたとき現在月のカードを中央に寄せる（前後の月が両端にチラ見え）。
@@ -1926,6 +1937,17 @@ function packLanes(list) {
 // この販促の「おすすめ目標」＝直近の同じ長さの実績×102%。基準（部門/商品）が無い
 // 開発系プランなどは実績の物差しが無いので null（＝薄字の目安なし）。
 function bulkSuggest(c) {
+  // 目標数値期間が設定されていれば、その期間の「前年同期」実績×110% を目安にする。
+  // （忘年会など：打ち出し10/1〜1/31でも目標は12/1〜1/31 のように、測る期間を別に持つ）
+  const per = targetPeriodOf(c);
+  if (per && per.from) {
+    const pf = shiftYear(per.from, -1);
+    const pt = shiftYear(per.to || per.from, -1);
+    let tr = null;
+    try { tr = campTargeted(c, null, { from: pf, to: pt }); } catch (e) { tr = null; }
+    const base = (tr && tr.cur > 0) ? tr.cur : null;
+    return base ? Math.round(base * 1.10) : null;
+  }
   const latest = addMonth(CURRENT_MONTH, -1);
   const len = goalIsMonthly(c) ? 1 : Math.max(1, monthsBetween(c.start.slice(0, 7), campEndM(c)).length);
   const rng = { from: addMonth(latest, -(len - 1)), to: latest };
@@ -1994,6 +2016,22 @@ function renderBulkTargets() {
         + (plan ? "" : `<span class="bt-note">（台帳）</span>`);
     }
 
+    // 目標数値期間（打ち出し期間とは別に、目標を測る期間）。全施策で設定可（ログイン時）。
+    // 入れると薄字＝その期間の前年同期実績×110% に即時で切り替わる。
+    const per = targetPeriodOf(c) || { from: "", to: "" };
+    let tgtPeriodCell;
+    if (WRITE_OK) {
+      tgtPeriodCell = `<div class="bt-tperiod" data-bulktpkey="${esc(key)}">
+        <span class="bt-tplabel">目標数値期間</span>
+        <input class="bt-in bt-mo" type="month" value="${esc(per.from)}" data-bulktpfrom="${esc(key)}" aria-label="目標開始月">
+        <span class="bt-dash">〜</span>
+        <input class="bt-in bt-mo" type="month" value="${esc(per.to)}" data-bulktpto="${esc(key)}" aria-label="目標終了月">
+        <span class="bt-ok" data-btok="tperiod:${esc(key)}"></span>
+      </div>`;
+    } else {
+      tgtPeriodCell = per.from ? `<span class="bt-ro bt-tpro">目標期間 ${esc(per.from)}〜${esc(per.to)}</span>` : "";
+    }
+
     // 目標セル。既定は「販促の売上」。▽で目標項目を選べる（売上/原価率/客数…）。
     // ログイン時のみ入力欄。開放時は売上目標（あれば）を表示。
     const cur = targetOf(c);
@@ -2021,7 +2059,7 @@ function renderBulkTargets() {
         <b>${esc(c.title)}</b>
         <span class="bt-store">${esc(store)}</span>
       </td>
-      <td class="bt-c-period">${periodCell}</td>
+      <td class="bt-c-period">${periodCell}${tgtPeriodCell}</td>
       <td class="bt-c-goal">${goalCell}</td>
     </tr>`;
   }).join("");
@@ -2124,6 +2162,43 @@ async function saveBulkPeriod(cid) {
     // 期間が変わると対象行の判定（実施中/予定）も変わりうるので、少し置いて描き直す。
     setTimeout(render, 700);
   } catch (e) { flashBtOk("period:" + cid, "通信エラー", true); }
+}
+
+// 目標数値期間を保存（打ち出し期間とは別）。入れた瞬間に薄字＝前年同期×110% へ即反映。
+async function saveBulkTargetPeriod(key) {
+  const esckey = (window.CSS && CSS.escape) ? CSS.escape(key) : key;
+  const box = document.querySelector(`.bt-tperiod[data-bulktpkey="${esckey}"]`);
+  if (!box) return;
+  const from = ((box.querySelector("[data-bulktpfrom]") || {}).value || "").slice(0, 7);
+  const to = ((box.querySelector("[data-bulktpto]") || {}).value || "").slice(0, 7);
+  if (from && to && to < from) { flashBtOk("tperiod:" + key, "終了は開始より後に", true); return; }
+  // まずローカルに即時反映（薄字の再計算に効かせる＝即時反映）。
+  if (!from && !to) delete SERVER_TARGET_PERIODS[key];
+  else SERVER_TARGET_PERIODS[key] = { from, to: to || from };
+  refreshBulkSuggestFor(key);
+  if (!API_OK) { flashBtOk("tperiod:" + key, "表示のみ（保存先なし）", true); return; }
+  try {
+    const res = await fetch("/api/targets", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: key, period_from: from, period_to: to }),
+    });
+    if (res.status === 401) { flashBtOk("tperiod:" + key, "要ログイン", true); return; }
+    if (!res.ok) { flashBtOk("tperiod:" + key, "保存失敗", true); return; }
+    flashBtOk("tperiod:" + key, (from || to) ? "保存 ✓ 薄字＝前年同期×110%" : "期間を解除 ✓");
+  } catch (e) { flashBtOk("tperiod:" + key, "通信エラー", true); }
+}
+
+// その施策行の売上目標の薄字（目安）を、いまの目標数値期間で計算し直して差し替える。
+function refreshBulkSuggestFor(key) {
+  const c = (DATA.campaigns || []).find(x => campKey(x) === key || x.id === key);
+  if (!c) return;
+  const esckey = (window.CSS && CSS.escape) ? CSS.escape(key) : key;
+  const inp = document.querySelector(`[data-bulkgoal="${esckey}"]`);
+  if (!inp || (inp.dataset.metric || "sales") !== "sales") return;
+  const suggest = bulkSuggest(c);
+  const ph = suggest != null ? `目安 ${Math.round(suggest).toLocaleString("ja-JP")}` : "目標値";
+  inp.dataset.salesph = ph;
+  if (!inp.value) inp.placeholder = ph;
 }
 
 // 行ごとの保存結果を小さく表示（data-btok="goal:KEY" / "period:CID"）。

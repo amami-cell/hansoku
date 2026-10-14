@@ -45,7 +45,7 @@
 campaigns:
   # ── すさび湯 梅田（1006）────────────────────────────
   - { id: r1006-osusume, stores: ["1006"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
-  - { id: r1006-bounenkai, stores: ["1006"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘年会", "新年会"] }
+  - { id: r1006-bounenkai, stores: ["1006"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31", note: "対象=コース(宴会)カテゴリに拡大" }
   - { id: r1006-gm, stores: ["1006"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
 
   # ── すさび湯 三宮（1169）────────────────────────────
@@ -62,7 +62,7 @@ campaigns:
   - { id: r1728-osusume, stores: ["1728"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
   - { id: r1728-lunch, stores: ["1728"], title: ランチ変更②, kind: lunch, start: "2026-09-01", end: "2026-09-30", note: ①7/15-8/31は既存ベース }
   # 計画表には行が無かったが、実施ありと確認（天さん）。前年2025-12は『忘年会コース(刺身)』¥94,500。
-  - { id: r1728-bounenkai, stores: ["1728"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31", items: ["忘年会コース"] }
+  - { id: r1728-bounenkai, stores: ["1728"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31", note: "対象=コース(宴会)カテゴリに拡大" }
   - { id: r1728-gm, stores: ["1728"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
 
   # ── すさび湯 歌舞伎町（1015）────────────────────────
@@ -75,7 +75,7 @@ campaigns:
 
   # ── GOLD 東通り（1163）─────────────────────────────
   - { id: r1163-osusume, stores: ["1163"], title: 秋おすすめ（新規開発）, kind: osusume, start: "2026-09-01", end: "2026-11-30" }
-  - { id: r1163-bounenkai, stores: ["1163"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘新年会"] }
+  - { id: r1163-bounenkai, stores: ["1163"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31", note: "対象=コース(宴会)カテゴリに拡大" }
   - { id: r1163-gm, stores: ["1163"], title: GM改定, kind: gm, start: "2026-11-15", note: 11月中（概算）}
 
   # ── GOLD お初（1729）───────────────────────────────
@@ -95,7 +95,7 @@ campaigns:
 
   # ── ひよこ飯店（1069）──────────────────────────────
   - { id: r1069-osusume, stores: ["1069"], title: 秋おすすめ（点心フェア）, kind: osusume, start: "2026-10-01", end: "2026-11-30" }
-  - { id: r1069-bounenkai, stores: ["1069"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘年会"] }
+  - { id: r1069-bounenkai, stores: ["1069"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31", note: "対象=コース(宴会)カテゴリに拡大" }
 
   # ── ちゃーちゃん（1111）────────────────────────────
   - { id: r1111-osusume, stores: ["1111"], title: 秋おすすめ（おでん）, kind: osusume, start: "2026-10-01", end: "2026-11-30" }
@@ -183,7 +183,7 @@ campaigns:
 
   # ── 味のたぬきや（1162）────────────────────────────
   - { id: r1162-osusume, stores: ["1162"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
-  - { id: r1162-bounenkai, stores: ["1162"], title: 忘年会（コース一部変更）, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘年会コース"] }
+  - { id: r1162-bounenkai, stores: ["1162"], title: 忘年会（コース一部変更）, kind: bounenkai, start: "2026-10-01", end: "2027-01-31", note: "対象=コース(宴会)カテゴリに拡大" }
 
   # ── ぎふや パナンテ天満橋（1739）───────────────────
   - { id: r1739-osusume, stores: ["1739"], title: 秋おすすめ（小皿系4〜6品）, kind: osusume, start: "2026-09-20", end: "2026-11-30" }
@@ -192,7 +192,7 @@ campaigns:
 
   # ── すさび湯 河原町三条店（1742）───────────────────
   - { id: r1742-osusume, stores: ["1742"], title: 秋おすすめ, kind: osusume, start: "2026-09-15", end: "2026-11-30" }
-  - { id: r1742-bounenkai, stores: ["1742"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31" , items: ["忘年会コース"] }
+  - { id: r1742-bounenkai, stores: ["1742"], title: 忘年会, kind: bounenkai, start: "2026-10-01", end: "2027-01-31", note: "対象=コース(宴会)カテゴリに拡大" }
   - { id: r1742-gm, stores: ["1742"], title: GM改定, kind: gm, start: "2026-10-01", note: 開始月のみ（概算）}
 
   # ── すさび湯 新宿東口店（1743）─────────────────────
