@@ -416,59 +416,68 @@ jobs:
         run: |
           set -o pipefail
           xvfb-run -a python - <<'PY'
-          import os, sys
+          import os, sys, traceback
           from playwright.sync_api import sync_playwright
           U = os.environ["URL"].rstrip("/")
           PWD = os.environ["APP_PASSWORD"]
           CAMP = os.environ.get("CAMP", "r1097-bounenkai")
           PF = os.environ.get("PF", "2026-12"); PT = os.environ.get("PT", "2027-01")
-          fail = 0
-          with sync_playwright() as p:
-              b = p.chromium.launch()
-              ctx = b.new_context()
-              # 合言葉ログイン（APIRequestContext でクッキーを取得。303は追わない）
-              r = ctx.request.post(U + "/login", form={"name": "本部(ダイアログ確認)", "password": PWD}, max_redirects=0)
-              print("login status", r.status)
-              page = ctx.new_page()
-              page.goto(U + "/", wait_until="networkidle")
-              page.wait_for_function("window.DATA && DATA.campaigns && DATA.campaigns.length>0", timeout=40000)
-              opened = page.evaluate(
-                  "(camp) => { const c = DATA.campaigns.find(x => x.id===camp || (typeof campKey==='function' && campKey(x)===camp+'@2026'));"
-                  " if(!c) return {err:'campaign not found: '+camp};"
-                  " try { openGoalGrid(c); } catch(e){ return {err:'open failed: '+e.message}; }"
-                  " const sel=document.querySelector('#gg-rows .gr .gr-cat'); if(sel){ sel.value='sales'; sel.dispatchEvent(new Event('change',{bubbles:true})); }"
-                  " return {ok:true, key: campKey(c)}; }", CAMP)
-              print("open:", opened)
-              if not opened or opened.get("err"):
-                  print("::error title=dialog::" + str(opened)); b.close(); sys.exit(1)
-              setr = page.evaluate(
-                  "(a) => { const f=document.getElementById('gg-tpfrom'), t=document.getElementById('gg-tpto');"
-                  " if(!f||!t) return {err:'no period inputs in dialog'};"
-                  " f.value=a.pf; t.value=a.pt; t.dispatchEvent(new Event('change',{bubbles:true})); return {ok:true}; }",
-                  {"pf": PF, "pt": PT})
-              print("set:", setr)
-              if not setr or setr.get("err"):
-                  print("::error title=dialog::" + str(setr)); b.close(); sys.exit(1)
-              page.wait_for_timeout(2500)
-              read = page.evaluate(
-                  "(a) => { const row=document.querySelector('#gg-rows .gr'); const inp=row&&row.querySelector('.gr-val'); const help=row&&row.querySelector('.gr-help');"
-                  " const c = DATA.campaigns.find(x => x.id===a.camp || campKey(x)===a.camp+'@2026');"
-                  " let expected=null; try { const tr=campTargeted(c,null,{from:shiftYear(a.pf,-1),to:shiftYear(a.pt,-1)}); expected = tr&&tr.cur>0 ? Math.round(tr.cur*1.10) : null; } catch(e){}"
-                  " return { suggest: inp&&inp.dataset.suggest, placeholder: inp&&inp.placeholder, help: help&&help.textContent, cat: row&&row.querySelector('.gr-cat').value, expected: expected }; }",
-                  {"camp": CAMP, "pf": PF, "pt": PT})
-              print("read:", read)
-              # 後始末：期間を空へ
-              page.evaluate("() => { const f=document.getElementById('gg-tpfrom'),t=document.getElementById('gg-tpto'); if(f)f.value=''; if(t){t.value=''; t.dispatchEvent(new Event('change',{bubbles:true})); } }")
-              page.wait_for_timeout(1500)
-              b.close()
-              sug = read.get("suggest"); exp = read.get("expected")
-              print(f"::notice title={CAMP} ダイアログ薄字::区分={read.get('cat')} 薄字={sug} / 期待(前年同期×110%)={exp} / {read.get('help')}")
-              try:
-                  if sug is not None and exp is not None and int(float(sug)) == int(exp):
-                      print("✅ ダイアログで目標数値期間→薄字＝前年同期×110% が一致")
-                  else:
-                      print(f"::error title=dialog不一致::薄字={sug} 期待={exp}"); fail = 1
-              except Exception as e:
-                  print(f"::error title=dialog判定失敗::{e}"); fail = 1
+
+          def note(t, m): print(f"::notice title={t}::{str(m)[:800]}")
+          def err(t, m): print(f"::error title={t}::{str(m)[:800]}")
+
+          fail = 1
+          try:
+              with sync_playwright() as p:
+                  b = p.chromium.launch()
+                  ctx = b.new_context()
+                  r = ctx.request.post(U + "/login", form={"name": "本部(ダイアログ確認)", "password": PWD}, max_redirects=0)
+                  note("login", f"status={r.status}")
+                  page = ctx.new_page()
+                  page.goto(U + "/", wait_until="domcontentloaded")
+                  note("goto", f"url={page.url} title={page.title()!r}")
+                  has = False
+                  try:
+                      page.wait_for_function("window.DATA && DATA.campaigns && DATA.campaigns.length>0", timeout=40000)
+                      has = True
+                  except Exception as e:
+                      body = ""
+                      try: body = page.evaluate("() => document.body ? document.body.innerText.slice(0,200) : ''")
+                      except Exception: pass
+                      note("DATA待ち失敗", f"url={page.url} body={body!r}")
+                  if has:
+                      opened = page.evaluate(
+                          "(camp) => { const c = DATA.campaigns.find(x => x.id===camp || (typeof campKey==='function' && campKey(x)===camp+'@2026'));"
+                          " if(!c) return {err:'campaign not found'};"
+                          " try { WRITE_OK=true; openGoalGrid(c); } catch(e){ return {err:'open:'+e.message}; }"
+                          " const sel=document.querySelector('#gg-rows .gr .gr-cat'); if(sel){ sel.value='sales'; sel.dispatchEvent(new Event('change',{bubbles:true})); }"
+                          " const hasInputs = !!document.getElementById('gg-tpfrom');"
+                          " return {ok:true, key: campKey(c), hasInputs}; }", CAMP)
+                      note("open", opened)
+                      if opened and opened.get("ok") and opened.get("hasInputs"):
+                          page.evaluate(
+                              "(a) => { const f=document.getElementById('gg-tpfrom'), t=document.getElementById('gg-tpto');"
+                              " f.value=a.pf; t.value=a.pt; t.dispatchEvent(new Event('change',{bubbles:true})); }",
+                              {"pf": PF, "pt": PT})
+                          page.wait_for_timeout(2500)
+                          read = page.evaluate(
+                              "(a) => { const row=document.querySelector('#gg-rows .gr'); const inp=row&&row.querySelector('.gr-val'); const help=row&&row.querySelector('.gr-help');"
+                              " const c = DATA.campaigns.find(x => x.id===a.camp || campKey(x)===a.camp+'@2026');"
+                              " let expected=null; try { const tr=campTargeted(c,null,{from:shiftYear(a.pf,-1),to:shiftYear(a.pt,-1)}); expected = tr&&tr.cur>0 ? Math.round(tr.cur*1.10) : null; } catch(e){}"
+                              " return { suggest: inp&&inp.dataset.suggest, cat: row&&row.querySelector('.gr-cat').value, help: help&&help.textContent, expected }; }",
+                              {"camp": CAMP, "pf": PF, "pt": PT})
+                          note(f"{CAMP} ダイアログ薄字", f"区分={read.get('cat')} 薄字={read.get('suggest')} 期待(前年×110%)={read.get('expected')} / {read.get('help')}")
+                          page.evaluate("() => { const f=document.getElementById('gg-tpfrom'),t=document.getElementById('gg-tpto'); if(f)f.value=''; if(t){t.value=''; t.dispatchEvent(new Event('change',{bubbles:true})); } }")
+                          page.wait_for_timeout(1200)
+                          sug, exp = read.get("suggest"), read.get("expected")
+                          if sug is not None and exp is not None and int(float(sug)) == int(exp):
+                              print("✅ ダイアログで目標数値期間→薄字＝前年同期×110% 一致"); fail = 0
+                          else:
+                              err("dialog不一致", f"薄字={sug} 期待={exp}")
+                      else:
+                          err("dialog", f"ダイアログ/期間入力が出ない: {opened}")
+                  b.close()
+          except Exception as e:
+              err("dialog例外", traceback.format_exc())
           sys.exit(fail)
           PY
