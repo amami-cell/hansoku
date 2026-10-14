@@ -427,6 +427,34 @@ await test("新規起票：店舗・販促名・開始月が無いと保存し�
   assert.equal(CAP.plans.length, 0, "必須が欠けたら /api/plans を叩かない");
 });
 
+await test("まとめ入力：目標数値期間を入れると薄字＝前年同期(その期間)×110%", () => {
+  const d = { ...base,
+    departments_monthly: { "1160": {
+      "2025-12": { buckets: [{ name: "コース", sales: 1000000, share: 1, qty: 10, count: 1, cost_rate: 30 }], raw: [] },
+      "2026-01": { buckets: [{ name: "コース", sales: 500000, share: 1, qty: 5, count: 1, cost_rate: 30 }], raw: [] },
+    } },
+    campaigns: [{ id: "r1160-bnk", stores: ["1160"], title: "忘年会", kind: "bounenkai",
+                 start: "2026-10-01", end: "2027-01-31", open_ended: false }],
+  };
+  const { call } = loadForm(d);
+  // 目標数値期間＝今年の12月〜翌1月。前年同期＝2025-12〜2026-01（実績 100万+50万=150万）。
+  call(`SERVER_TARGET_PERIODS = { "r1160-bnk@2026": { from: "2026-12", to: "2027-01" } };`);
+  const s = call(`bulkSuggest(DATA.campaigns[0])`);
+  assert.equal(s, Math.round(1500000 * 1.10), "前年同期(150万)×110%=165万");
+  // 期間を外すと前年×110%は使わない（直近ベース＝このデータでは実績なしで null）。
+  call(`SERVER_TARGET_PERIODS = {};`);
+  const s0 = call(`bulkSuggest(DATA.campaigns[0])`);
+  assert.equal(s0, null, "期間未設定なら前年×110%は出さない");
+});
+
+await test("目標数値期間：targetPeriodOf は施策キーで引ける", () => {
+  const { call } = loadForm({ ...base,
+    campaigns: [{ id: "r1160-bnk", stores: ["1160"], title: "忘年会", kind: "bounenkai", start: "2026-10-01", end: "2027-01-31" }] });
+  call(`SERVER_TARGET_PERIODS = { "r1160-bnk@2026": { from: "2026-12", to: "2027-01" } };`);
+  const p = JSON.parse(call(`JSON.stringify(targetPeriodOf(DATA.campaigns[0]))`));
+  assert.deepEqual(p, { from: "2026-12", to: "2027-01" });
+});
+
   console.log(failed ? `\n${failed} 件失敗` : "\nすべて通過");
   process.exit(failed ? 1 : 0);
 }

@@ -536,6 +536,14 @@ async function handleCreative(url, env) {
 async function handleTargets(request, env, who) {
   if (!env.DATABASE_URL) return json({ error: "no-db" }, 503);
   const sql = neon(env.DATABASE_URL);
+  // 目標数値期間（打ち出し期間とは別に、目標を測る期間を施策ごとに持つ）。
+  // 例: 打ち出し 10/1〜1/31 でも、目標は 12/1〜1/31。店舗ごとに可変。冪等DDLで担保。
+  await sql`CREATE TABLE IF NOT EXISTS promo_target_periods (
+    campaign_id TEXT PRIMARY KEY,
+    period_from TEXT NOT NULL DEFAULT '',
+    period_to TEXT NOT NULL DEFAULT '',
+    set_by TEXT NOT NULL DEFAULT '',
+    set_at TIMESTAMPTZ NOT NULL DEFAULT now())`;
 
   if (request.method === "GET") {
     const rows = await sql`SELECT campaign_id, metric, target_value, set_by, set_at FROM promo_targets`;
@@ -547,7 +555,14 @@ async function handleTargets(request, env, who) {
       (byMetric[r.campaign_id] = byMetric[r.campaign_id] || {})[metric] = cell;
       if (metric === "sales") targets[r.campaign_id] = cell;
     }
-    return json({ targets, targets_by_metric: byMetric });
+    // 目標数値期間 campaign_id → {from, to, by, at}
+    const periods = {};
+    for (const r of await sql`SELECT campaign_id, period_from, period_to, set_by, set_at FROM promo_target_periods`) {
+      if (r.period_from || r.period_to) {
+        periods[r.campaign_id] = { from: r.period_from || "", to: r.period_to || "", by: r.set_by, at: r.set_at };
+      }
+    }
+    return json({ targets, targets_by_metric: byMetric, target_periods: periods });
   }
 
   if (request.method === "POST") {
@@ -562,6 +577,28 @@ async function handleTargets(request, env, who) {
     }
     const id = typeof body.id === "string" ? body.id.slice(0, 128) : "";
     if (!id) return json({ error: "no-id" }, 400);
+
+    // 目標数値期間の設定（period_from/period_to のどちらかがあれば期間操作）。
+    // YYYY-MM 形式のみ許可。両方空なら期間を削除（打ち出し期間に戻す）。
+    if ("period_from" in body || "period_to" in body) {
+      const ym = (v) => (typeof v === "string" && /^\d{4}-\d{2}$/.test(v)) ? v : "";
+      const pf = ym(body.period_from), pt = ym(body.period_to);
+      if (!pf && !pt) {
+        await sql`DELETE FROM promo_target_periods WHERE campaign_id = ${id}`;
+        await logAudit(env, who || "", "target_period.clear", id, "");
+        return json({ ok: true, id, period_from: null, period_to: null });
+      }
+      if (pf && pt && pf > pt) return json({ error: "bad-period" }, 400);
+      await sql`
+        INSERT INTO promo_target_periods (campaign_id, period_from, period_to, set_by, set_at)
+        VALUES (${id}, ${pf}, ${pt}, ${who || ""}, now())
+        ON CONFLICT (campaign_id) DO UPDATE
+          SET period_from = EXCLUDED.period_from, period_to = EXCLUDED.period_to,
+              set_by = EXCLUDED.set_by, set_at = now()`;
+      await logAudit(env, who || "", "target_period.set", id, `${pf}..${pt}`);
+      return json({ ok: true, id, period_from: pf, period_to: pt });
+    }
+
     // 指標。未指定は sales（後方互換）。英数・小文字と _ のみ許可。
     const metric = (typeof body.metric === "string" && /^[a-z0-9_]{1,32}$/.test(body.metric))
       ? body.metric : "sales";
