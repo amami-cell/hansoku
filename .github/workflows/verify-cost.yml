@@ -438,7 +438,7 @@ jobs:
                   note("goto", f"url={page.url} title={page.title()!r}")
                   has = False
                   try:
-                      page.wait_for_function("window.DATA && DATA.campaigns && DATA.campaigns.length>0", timeout=40000)
+                      page.wait_for_function("typeof DATA!=='undefined' && DATA && DATA.campaigns && DATA.campaigns.length>0", timeout=40000)
                       has = True
                   except Exception as e:
                       body = ""
