@@ -1,7 +1,8 @@
 name: inspect-monthly
 
-# 本番が配信している dashboard.json の monthly[店] を月ごとに表示する。
-# FD比が空欄などの「画面に出ているデータ」の調査用（読み取りのみ）。
+# 調査用（読み取りのみ）。忘年会コースの前年実績を dashboard.json から拾う：
+#  departments_monthly[店][月] の コース バケット（宴会）売上と、products_monthly の
+#  コース見出し商品内訳を、忘年会16店ぶん 2025-10〜2026-01 で集計し、データ用ブランチへ push。
 
 on:
   workflow_dispatch:
@@ -11,46 +12,107 @@ on:
         required: false
         default: "https://hansoku-app.amami-c1e.workers.dev/"
       stores:
-        description: "店コード（カンマ区切り）"
+        description: "店コード（カンマ区切り / all）"
         required: false
-        default: "1713,1160"
+        default: "1006,1169,1712,1728,1015,2004,1163,1097,1069,1115,1131,1151,1154,1162,1742,1743"
 
 permissions:
-  contents: read
+  contents: write
+
+env:
+  TZ: Asia/Tokyo
 
 jobs:
   inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
-      - name: dashboard.json の monthly を見る
+      - uses: actions/checkout@v4
+      - name: 忘年会コース 前年実績を dashboard.json から抽出
         env:
-          URL: ${{ github.event.inputs.url }}
-          STORES: ${{ github.event.inputs.stores }}
+          U: ${{ inputs.url }}
+          STORES: ${{ inputs.stores }}
+          MONTHS: "2025-10,2025-11,2025-12,2026-01"
         run: |
-          set -uo pipefail
-          U="${URL%/}"
-          curl -sS "$U/data/dashboard.json" -o d.json
+          set -o pipefail
+          URL="${U%/}"
+          curl -sS "$URL/data/dashboard.json" -o d.json
           echo "dashboard.json bytes=$(wc -c < d.json | tr -d ' ')"
-          IFS=',' read -ra SS <<< "$STORES"
-          for s in "${SS[@]}"; do
-            s="$(echo "$s" | tr -d ' ')"
-            [ -z "$s" ] && continue
-            echo
-            echo "===== 店 $s ：月 → 売上 / フード / ドリンク / (FD比%) ====="
-            jq -r --arg s "$s" '
-              (.monthly[$s] // {}) | to_entries | sort_by(.key)[] |
-              .key as $m | .value as $v |
-              ( ($v.food_sales // null) ) as $f | ( ($v.drink_sales // null) ) as $d |
-              "\($m)  売上=\(($v.sales // "―"))  F=\($f // "―")  D=\($d // "―")  FD=\(
-                if ($f != null and $d != null and ($f + $d) > 0) then (($f/($f+$d)*100)|floor|tostring + "/" + ((100-($f/($f+$d)*100))|floor|tostring)) else "空欄(―)" end)"
-            ' d.json
-            echo "--- この店の monthly にある指標キー（先頭月）---"
-            jq -r --arg s "$s" '(.monthly[$s] // {}) | to_entries | sort_by(.key) | (.[0].value // {}) | keys | join(", ")' d.json
-            # 直近の departments_monthly（バケット＋生部門）を、売上と原価率つきで見る。
-            lm=$(jq -r --arg s "$s" '(.departments_monthly[$s] // {}) | keys | sort | last // empty' d.json)
-            echo "--- departments_monthly 直近月=$lm：バケット（区分） 名 / 売上 / 原価率 / cost_coverage ---"
-            jq -r --arg s "$s" --arg m "$lm" '(.departments_monthly[$s][$m].buckets // [])[] | "  [\(.name)] 売上=\(.sales)  原価率=\(.cost_rate // "―")  cov=\(.cost_coverage // "―")"' d.json
-            echo "--- 生部門 raw（売上0でも原価率があるものを含む）---"
-            jq -r --arg s "$s" --arg m "$lm" '(.departments_monthly[$s][$m].raw // [])[] | "  \(.name)  売上=\(.sales)  原価率=\(.cost_rate // "―")"' d.json
+          python3 - <<'PY'
+          import os, json
+          d = json.load(open("d.json", encoding="utf-8"))
+          months = [x.strip() for x in os.environ["MONTHS"].split(",") if x.strip()]
+          want = [x.strip() for x in os.environ["STORES"].split(",") if x.strip()]
+          stores = d.get("stores", []) or []
+          name_of = {s["code"]: s.get("name","") for s in stores}
+          brand_of= {s["code"]: (s.get("brand_name") or s.get("brand") or "") for s in stores}
+          dm = d.get("departments_monthly", {}) or {}
+          pm = d.get("products_monthly", {}) or {}
+
+          def course_bucket(code, m):
+              node = (dm.get(code) or {}).get(m) or {}
+              for b in (node.get("buckets") or []):
+                  if "コース" in str(b.get("name","")):
+                      return round(b.get("sales") or 0), round(b.get("qty") or 0)
+              return 0, 0
+
+          def course_items(code, m):
+              out = []
+              for p in ((pm.get(code) or {}).get(m) or []):
+                  g = str(p.get("group") or "")
+                  n = str(p.get("name") or "")
+                  if "コース" in g or "コース" in n or "宴会" in n or "忘年" in n or "宴" in g:
+                      out.append((n, round(p.get("sales") or 0), round(p.get("qty") or 0), g))
+              out.sort(key=lambda x:-x[1])
+              return out
+
+          res = {}
+          md = [f"# 忘年会コース 前年実績（{months[0]}〜{months[-1]}・コース(宴会)バケット・税抜/税込はFW依存）\n"]
+          for code in want:
+              e_name = name_of.get(code, code)
+              per = {}
+              tot = 0; totq = 0
+              for m in months:
+                  s,q = course_bucket(code, m)
+                  per[m] = {"sales": s, "qty": q}
+                  tot += s; totq += q
+              # 内訳（12月+1月の忘年会コア2か月のコース見出し商品を束ねる）
+              items = {}
+              for m in ["2025-12","2026-01"]:
+                  for n,s,q,g in course_items(code, m):
+                      a = items.setdefault(n, {"sales":0,"qty":0,"group":g})
+                      a["sales"] += s; a["qty"] += q
+              itop = sorted(items.items(), key=lambda kv:-kv[1]["sales"])
+              res[code] = {"name":e_name,"brand":brand_of.get(code,""),
+                           "months":per,"course_total":tot,"course_qty":totq,
+                           "items":[{"name":n,**v} for n,v in itop]}
+              md.append(f"\n## {code} {e_name}（{brand_of.get(code,'')}）")
+              mper = " / ".join(f"{m[5:]}月{per[m]['sales']:,}" for m in months)
+              md.append(f"- コース(宴会) {months[0]}〜{months[-1]} 計 **{tot:,}**（{mper}）")
+              md.append(f"- 12月+1月コア計 {per.get('2025-12',{}).get('sales',0)+per.get('2026-01',{}).get('sales',0):,}")
+              if itop:
+                  md.append("- コース見出し商品 内訳（12月+1月・売上順）:")
+                  for n,v in itop[:15]:
+                      md.append(f"    - {n} … 売上{v['sales']:,} / 出数{v['qty']} [{v['group']}]")
+              else:
+                  md.append("- コース見出し商品の明細は配信データに無し（上位外 or 新店）")
+              print(f"::notice title={code} 忘年会コース前年:: 計{tot:,}（{mper}）")
+
+          os.makedirs("bounenkai", exist_ok=True)
+          json.dump({"months":months,"stores":res}, open("bounenkai/last_year_course.json","w",encoding="utf-8"),
+                    ensure_ascii=False, indent=1)
+          open("bounenkai/last_year_course.md","w",encoding="utf-8").write("\n".join(md)+"\n")
+          PY
+      - name: データ用ブランチへ push
+        run: |
+          set -e
+          git config user.name "hansoku-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git fetch origin claude/winter-osusume-data || true
+          git checkout -B claude/winter-osusume-data
+          git add -f bounenkai/
+          git commit -m "bounenkai last-year course snapshot" || echo "no changes"
+          for i in 1 2 3 4; do
+            git push -f -u origin claude/winter-osusume-data && break
+            echo "push retry $i"; sleep $((2**i))
           done
