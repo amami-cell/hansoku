@@ -55,7 +55,7 @@ on:
         default: "r1097-bounenkai"
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   TZ: Asia/Tokyo
@@ -239,7 +239,7 @@ jobs:
                   print(f"::warning title=再構成確認失敗::{e}")
           PY
 
-      - name: 1店の前年商品実績（コース・食べ放題を抽出）
+      - name: 冬データ再抽出（dashboard=タグ付 / 倉庫=未タグ復元）→ data branch
         if: ${{ inputs.mode == 'storedump' }}
         env:
           HANSOKU_ENV: cloud
@@ -247,109 +247,86 @@ jobs:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          STORE: ${{ inputs.store }}
-          DF: ${{ inputs.date_from }}
-          DT: ${{ inputs.date_to }}
+          URL: ${{ inputs.url }}
         run: |
           set -o pipefail
+          U="${URL:-https://hansoku-app.amami-c1e.workers.dev/}"; U="${U%/}"
+          curl -sS "$U/data/dashboard.json" -o d.json
+          echo "dashboard bytes=$(wc -c < d.json)"
           python - <<'PY'
-          import os, datetime as dt, csv
+          import os, json, re, datetime as dt
           from hansoku.settings import load_settings
           from hansoku.db import get_warehouse, AggregateQuery
-          from hansoku.model import (GRAIN_MONTH, METRIC_PRODUCT_SALES,
-                                     METRIC_PRODUCT_QTY, METRIC_PRODUCT_COST)
-
-          def _d(s, default):
-              try:
-                  y, m, d = (int(x) for x in s.split("-")); return dt.date(y, m, d)
-              except Exception:
-                  return default
-
-          df = _d(os.environ.get("DF", ""), dt.date(2025, 10, 1))
-          dtt = _d(os.environ.get("DT", ""), dt.date(2026, 1, 31))
-          store = os.environ.get("STORE", "1151")
-          settings = load_settings()
-
-          def by(metric, keys=("product_name",)):
-              agg = {}
+          from hansoku.model import GRAIN_MONTH, METRIC_PRODUCT_SALES, METRIC_PRODUCT_QTY, METRIC_PRODUCT_COST
+          NET=1.10
+          d=json.load(open("d.json",encoding="utf-8"))
+          WINTER=["2025-12","2026-01","2026-02"]; COMPARE=["2025-11","2026-09","2026-10"]
+          allm=WINTER+COMPARE
+          stores=d.get("stores",[]) or []
+          name_of={s["code"]:s.get("name","") for s in stores}
+          brand_of={s["code"]:(s.get("brand_name") or s.get("brand") or "") for s in stores}
+          pm=d.get("products_monthly",{}) or {}
+          def glab(g):
+              if not g: return ""
+              return re.sub(r"^\s*\d+\s*[:：]\s*","",str(g)).strip()
+          res={}
+          for code,months in pm.items():
+              e={"name":name_of.get(code,code),"brand":brand_of.get(code,""),"months":{}}
+              for m in allm:
+                  items=months.get(m)
+                  if not items: continue
+                  ss=sum((p.get("sales") or 0) for p in items)
+                  groups={}
+                  for p in items:
+                      lab=glab(p.get("group")) or "（見出しなし）"
+                      g=groups.setdefault(lab,{"sales":0.0,"qty":0,"count":0,"items":[]})
+                      g["sales"]+=(p.get("sales") or 0); g["qty"]+=(p.get("qty") or 0); g["count"]+=1
+                      g["items"].append({"name":p.get("name",""),"sales":round(p.get("sales") or 0),"qty":round(p.get("qty") or 0)})
+                  for g in groups.values():
+                      g["sales"]=round(g["sales"]); g["items"].sort(key=lambda x:(-x["sales"],-x["qty"]))
+                  e["months"][m]={"store_sales":round(ss),"groups":groups}
+              if e["months"]: res[code]=e
+          os.makedirs("winter/untagged",exist_ok=True)
+          json.dump({"winter_months":WINTER,"compare_months":COMPARE,"stores":res},
+                    open("winter/last_winter_osusume.json","w",encoding="utf-8"),ensure_ascii=False,indent=1)
+          print(f"::notice title=last_winter:: {len(res)}店")
+          UNT=["1015","1742","1729","1131","1137","1162","1151","1160","2004","1111","1168"]
+          df=dt.date(2025,12,1); dtt=dt.date(2026,2,28); want=WINTER
+          WIN=["白子","雲子","ふぐ","河豚","てっさ","てっちり","牡蠣","カキ","かき","牡蛎","寒","ブリ","ぶり","鰤","蟹","かに","カニ","ずわい","ズワイ","松葉","鍋","うなぎ","鰻","鴨","すき焼","ポルチーニ","旬","冬","フェア","おすすめ","オススメ","タラ","鱈","白菜","大根","おでん","クリーム","グラタン","チーズフリット","ジビエ","牛","きりたんぽ","石狩"]
+          isw=lambda n: any(k in n for k in WIN)
+          settings=load_settings()
+          def pull(store):
+              sales={}; qty={}; cost={}; salesM={}; cat={}
               with get_warehouse(settings) as wh:
-                  for row in wh.aggregate(AggregateQuery(
-                          date_from=df, date_to=dtt, grain=GRAIN_MONTH, metrics=[metric],
-                          store_codes=[store], group_by=keys)):
-                      k = row["product_name"]
-                      agg[k] = agg.get(k, 0) + (row["value"] or 0)
-              return agg
-
-          # 月別も取る（コース・食べ放題の前年・月別が忘年会目標に効く）。
-          def by_month(metric):
-              agg = {}
-              with get_warehouse(settings) as wh:
-                  for row in wh.aggregate(AggregateQuery(
-                          date_from=df, date_to=dtt, grain=GRAIN_MONTH, metrics=[metric],
-                          store_codes=[store], group_by=("product_name", "date"))):
-                      m = row["date"].strftime("%Y-%m")
-                      agg.setdefault(row["product_name"], {})[m] = agg.get(row["product_name"], {}).get(m, 0) + (row["value"] or 0)
-              return agg
-
-          sales = by(METRIC_PRODUCT_SALES)
-          qty = by(METRIC_PRODUCT_QTY)
-          cost = by(METRIC_PRODUCT_COST)
-          salesM = by_month(METRIC_PRODUCT_SALES)
-          names = set(sales) | set(qty) | set(cost)
-          rows = sorted(((n, round(sales.get(n, 0)), round(qty.get(n, 0)), round(cost.get(n, 0)))
-                         for n in names), key=lambda r: -r[1])
-          want = []
-          y, m = df.year, df.month
-          while (y, m) <= (dtt.year, dtt.month):
-              want.append(f"{y:04d}-{m:02d}"); m += 1
-              if m > 12: y += 1; m = 1
-
-          def kw(n, *ks): return any(k in n for k in ks)
-          course = [r for r in rows if kw(r[0], "コース", "宴会")]
-          tabe = [r for r in rows if kw(r[0], "放題")]
-          tot_s = sum(r[1] for r in rows); tot_c = sum(r[3] for r in rows)
-          print(f"::notice title={store} 前年商品実績 {want[0]}〜{want[-1]}::全{len(rows)}品 Σ売上{tot_s:,}(税込) / Σ原価{tot_c:,}")
-
-          def emit(title, grp):
-              gs = sum(r[1] for r in grp)
-              # 月別内訳つきで上位を出す。
-              lines = []
-              for r in grp[:25]:
-                  mm = salesM.get(r[0], {})
-                  per = " ".join(f"{w[5:]}月{round(mm.get(w,0)):,}" for w in want if mm.get(w))
-                  lines.append(f"{r[0]}:計{r[1]:,}({per})")
-              print(f"::notice title={title}::{len(grp)}品 Σ売上{gs:,} :: " + " / ".join(lines) if grp
-                    else f"::notice title={title}::該当なし（商品名に該当語なし）")
-
-          emit(f"{store} コース系(コース/宴会)", course)
-          emit(f"{store} 食べ放題系(放題)", tabe)
-
-          os.makedirs("out", exist_ok=True)
-          with open(f"out/{store}_前年商品実績.csv", "w", encoding="utf-8-sig", newline="") as f:
-              w = csv.writer(f)
-              w.writerow(["商品名", "売上計(税込)", "出数計", "原価計(税込)"] + [f"{x}売上" for x in want])
-              for n, s, q, c in rows:
-                  mm = salesM.get(n, {})
-                  w.writerow([n, s, q, c] + [round(mm.get(x, 0)) for x in want])
-          # 全商品を注釈にも分割出力（手元でCSV化できるように）。
-          buf, part = "", 0
-          for n, s, q, c in rows:
-              line = f"{n}:{s:,}"
-              if len(buf) + len(line) + 3 > 6000:
-                  part += 1; print(f"::notice title={store}全商品{part:02d}::{buf}"); buf = ""
-              buf += line + " / "
-          if buf:
-              part += 1; print(f"::notice title={store}全商品{part:02d}::{buf}")
+                  for row in wh.aggregate(AggregateQuery(date_from=df,date_to=dtt,grain=GRAIN_MONTH,metrics=[METRIC_PRODUCT_SALES],store_codes=[store],group_by=("product_name","date","product_category"))):
+                      n=row["product_name"]; v=(row["value"] or 0)/NET; sales[n]=sales.get(n,0)+v
+                      mm=row["date"].strftime("%Y-%m"); salesM.setdefault(n,{})[mm]=salesM.get(n,{}).get(mm,0)+v
+                      c=row.get("product_category")
+                      if c: cat[n]=c
+                  for metric,acc,nn in ((METRIC_PRODUCT_QTY,qty,False),(METRIC_PRODUCT_COST,cost,True)):
+                      for row in wh.aggregate(AggregateQuery(date_from=df,date_to=dtt,grain=GRAIN_MONTH,metrics=[metric],store_codes=[store],group_by=("product_name",))):
+                          n=row["product_name"]; v=(row["value"] or 0); acc[n]=acc.get(n,0)+(v/NET if nn else v)
+              names=set(sales)|set(qty)|set(cost); rows=[]
+              for n in names:
+                  rows.append({"name":n,"sales":round(sales.get(n,0)),"qty":round(qty.get(n,0)),"cost":round(cost.get(n,0)),"group":cat.get(n,""),"months":{w:round(salesM.get(n,{}).get(w,0)) for w in want if salesM.get(n,{}).get(w)},"win":isw(n)})
+              rows.sort(key=lambda r:-r["sales"]); return rows
+          out={"window":want,"note":"倉庫(Neon)全商品・税抜","stores":{}}
+          for store in UNT:
+              rows=pull(store); tot=sum(r["sales"] for r in rows); wt=sum(r["sales"] for r in rows if r["win"])
+              out["stores"][store]={"total":tot,"win_total":wt,"rows":rows}
+              print(f"::notice title={store} recov:: 全{len(rows)} Σ{tot:,} 冬候補Σ{wt:,}")
+          json.dump(out,open("winter/untagged/recovery.json","w",encoding="utf-8"),ensure_ascii=False,indent=1)
           PY
-
-      - name: CSVをアップロード
+      - name: data branch へ push（既存を保持）
         if: ${{ inputs.mode == 'storedump' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: storedump-${{ inputs.store }}
-          path: out/
-          retention-days: 7
-          if-no-files-found: ignore
+        run: |
+          set -e
+          git config user.name "hansoku-bot"; git config user.email "bot@users.noreply.github.com"
+          git fetch origin claude/winter-osusume-data
+          git checkout -B databr origin/claude/winter-osusume-data
+          git add -f winter/
+          git commit -m "re-extract winter tagged+untagged (保持push)" || echo "no changes"
+          for i in 1 2 3 4; do git push -f origin databr:claude/winter-osusume-data && break; sleep $((2**i)); done
 
       - name: 目標数値期間→前年110%薄字の本番確認
         if: ${{ inputs.mode == 'tperiod' }}
